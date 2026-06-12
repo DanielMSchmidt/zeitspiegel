@@ -4,7 +4,7 @@
 
 bind = ":80"                      # web UI on plain http://zeitspiegel.local (NFR-6, LAN-only)
 source = "camera"                 # real capture; "synth" only for development
-device = "/dev/video0"            # Razer Kiyo
+device = "auto"                   # first node that streams (the Kiyo also exposes a metadata-only node)
 clip_dir = "/run/zeitspiegel"     # tmpfs (RuntimeDirectory) — clips never touch the read-only root (NFR-9)
 profile = "720p60"                # 1280x720 @ 60 fps (E-2; switch to "1080p30" for long buffers)
 buffer_max_s = 120.0              # ring buffer length in seconds

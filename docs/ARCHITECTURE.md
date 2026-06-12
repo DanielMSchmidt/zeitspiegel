@@ -117,6 +117,11 @@ Stdlib for HTTP (`net/http` + `httptest`), logging (`slog`), metrics
 (`expvar`), embedding (`embed`). ffmpeg/ffprobe as subprocesses.
 cgo note: go4vl and go-sdl2 are cgo → Pi binary is built on-device or via
 zig-cc/Docker arm64; core tests never need cgo.
+Dev fallback source: without the v4l2 tag, `--source camera` captures via an
+ffmpeg subprocess (internal/ffcam — avfoundation on macOS, v4l2 demuxer on
+Linux; pure Go). Camera controls (FR-9) apply only on the go4vl path; the
+appliance always builds with the tags. `device = "auto"` (default) picks the
+first node that actually streams (the Kiyo also enumerates a metadata node).
 
 ## 6. Latency floor
 

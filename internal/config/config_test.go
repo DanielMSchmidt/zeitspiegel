@@ -36,6 +36,9 @@ func TestDefaults(t *testing.T) {
 	if c.BufferMaxS <= 0 || c.BufferMaxBytes <= 0 {
 		t.Errorf("buffer budgets must default > 0, got %v s / %v B", c.BufferMaxS, c.BufferMaxBytes)
 	}
+	if c.Device != "auto" { // first working capture device, not a fixed node
+		t.Errorf("device default = %q, want auto", c.Device)
+	}
 }
 
 // UT-10: full + partial parse; absent keys keep defaults (FR-9).

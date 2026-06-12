@@ -3,6 +3,7 @@ package capture_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -54,7 +55,9 @@ func TestReconnectWithBackoff(t *testing.T) {
 		{seq: &seq, left: 5},       // 5 good frames, then error
 		{seq: &seq, left: 1 << 30}, // healthy after reconnect: emits until canceled
 	}
+	var reported []string
 	sup = capture.New(capture.Options{
+		OnError: func(err error) { reported = append(reported, err.Error()) },
 		Open: func(ctx context.Context) (capture.Source, error) {
 			opens++
 			switch opens {
@@ -105,6 +108,14 @@ func TestReconnectWithBackoff(t *testing.T) {
 	}
 	if pushed.Load() < 50 {
 		t.Errorf("pushed = %d, want ≥ 50", pushed.Load())
+	}
+	// outage causes must surface for diagnosis (OnError → slog in cmd)
+	if len(reported) < 2 {
+		t.Fatalf("OnError reported %v, want the read error and the open error", reported)
+	}
+	if !strings.Contains(strings.Join(reported, " "), "usb device gone") ||
+		!strings.Contains(strings.Join(reported, " "), "device busy") {
+		t.Errorf("OnError missing causes: %v", reported)
 	}
 }
 

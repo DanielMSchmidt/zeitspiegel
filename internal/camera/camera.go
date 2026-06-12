@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/vladimirvivien/go4vl/device"
@@ -26,10 +28,34 @@ type Camera struct {
 }
 
 // Open configures and starts the device per the boot config (FR-9: pinned
-// focus / exposure to prevent hunting during movement).
+// focus / exposure to prevent hunting during movement). Device "auto" (or
+// empty) tries /dev/video* in order and takes the first node that opens,
+// configures and streams — UVC cameras like the Kiyo also enumerate a
+// metadata-only node that fails here and is skipped.
 func Open(ctx context.Context, cfg config.Config) (*Camera, error) {
+	if cfg.Device != "" && cfg.Device != "auto" {
+		return openDevice(ctx, cfg, cfg.Device)
+	}
+	nodes, err := filepath.Glob("/dev/video*")
+	if err != nil || len(nodes) == 0 {
+		return nil, fmt.Errorf("camera: no /dev/video* devices found")
+	}
+	sort.Strings(nodes)
+	var errs []error
+	for _, node := range nodes {
+		cam, err := openDevice(ctx, cfg, node)
+		if err == nil {
+			return cam, nil
+		}
+		errs = append(errs, err)
+	}
+	return nil, fmt.Errorf("camera: no usable device among %v: %w", nodes, errors.Join(errs...))
+}
+
+// openDevice configures and starts one specific node.
+func openDevice(ctx context.Context, cfg config.Config, path string) (*Camera, error) {
 	w, h := cfg.Resolution()
-	dev, err := device.Open(cfg.Device,
+	dev, err := device.Open(path,
 		device.WithPixFormat(v4l2.PixFormat{
 			PixelFormat: v4l2.PixelFmtMJPEG,
 			Width:       uint32(w),
@@ -39,7 +65,7 @@ func Open(ctx context.Context, cfg config.Config) (*Camera, error) {
 		device.WithBufferSize(4),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("camera: open %s: %w", cfg.Device, err)
+		return nil, fmt.Errorf("camera: open %s: %w", path, err)
 	}
 	if err := applyControls(dev, cfg); err != nil {
 		dev.Close()

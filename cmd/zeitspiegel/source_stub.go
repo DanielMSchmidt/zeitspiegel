@@ -4,14 +4,35 @@ package main
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"path/filepath"
+	"runtime"
 
 	"github.com/danielmschmidt/zeitspiegel/internal/capture"
 	"github.com/danielmschmidt/zeitspiegel/internal/config"
+	"github.com/danielmschmidt/zeitspiegel/internal/ffcam"
 )
 
-// openCamera without the v4l2 build tag: camera hardware is not compiled in
-// (hard rule 2 — cgo only behind tags). Use --source synth.
-func openCamera(_ context.Context, _ config.Config) (capture.Source, error) {
-	return nil, errors.New("camera support not compiled in (build with -tags v4l2); use --source synth")
+// openCamera without the v4l2 build tag: dev camera via an ffmpeg
+// subprocess (avfoundation on macOS, v4l2 demuxer on Linux). Camera controls
+// (focus/exposure pinning, FR-9) are NOT applied on this path — the
+// production appliance builds with -tags v4l2 and uses go4vl.
+func openCamera(ctx context.Context, cfg config.Config) (capture.Source, error) {
+	device := cfg.Device
+	if runtime.GOOS == "darwin" {
+		if device == "" || device == "auto" {
+			device = "default" // avfoundation's default camera
+		}
+	} else {
+		nodes, _ := filepath.Glob("/dev/video*")
+		var err error
+		if device, err = resolveDevice(device, nodes); err != nil {
+			return nil, fmt.Errorf("camera: %w", err)
+		}
+	}
+	input, err := ffcamInput(runtime.GOOS, cfg, device)
+	if err != nil {
+		return nil, err
+	}
+	return ffcam.Open(ctx, ffcam.Options{InputArgs: input, OutputFPS: cfg.FPS()})
 }

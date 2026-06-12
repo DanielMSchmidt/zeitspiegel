@@ -17,6 +17,29 @@ browser. The synthetic source stands in for the camera; the *delayed mirror*
 preview (`/api/v1/preview?view=delayed`) stands in for the HDMI display —
 it shows exactly the frame the display renderer would show.
 
+## Using your real webcam (dev machines)
+
+```
+SOURCE=camera ./scripts/manual-test.sh
+```
+
+Without the `v4l2` build tag the binary captures through an **ffmpeg
+subprocess** (`internal/ffcam`): avfoundation on macOS, the v4l2 demuxer on
+Linux. `device = "auto"` (the default) picks the default/first camera; set
+`device` in a config file to choose another (macOS accepts an avfoundation
+index like `"0"` or a name like `"FaceTime HD Camera"`).
+
+- **macOS camera permission:** the first run triggers a system prompt for
+  the terminal app running the script (ffmpeg inherits its permission). If
+  the prompt never appeared and the buffer stays empty — capture errors in
+  the log, `filled_s` stuck at 0 — grant access manually: System Settings →
+  Privacy & Security → Camera → enable your terminal, then rerun.
+- Input is captured at 30 fps (lowest common denominator) and resampled to
+  the profile's nominal rate so clip timing stays correct.
+- Camera *controls* (focus/exposure pinning, FR-9) only apply on the
+  `-tags v4l2` go4vl path — the appliance build. The ffmpeg path is for
+  development.
+
 ## Checklist
 
 | ID | Steps | Expect | Verifies |

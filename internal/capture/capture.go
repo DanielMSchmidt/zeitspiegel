@@ -42,6 +42,9 @@ type Options struct {
 	// Backoff maps the consecutive failure count to a pause; nil =
 	// DefaultBackoff.
 	Backoff func(attempt int) time.Duration
+	// OnError observes every open/read failure before the reconnect pause
+	// (cmd wires it to slog — this package stays logging-free). May be nil.
+	OnError func(error)
 	// QueueLen is the read→push channel depth; 0 = 4 (ARCHITECTURE §4).
 	QueueLen int
 }
@@ -62,6 +65,12 @@ func New(o Options) *Supervisor {
 		o.QueueLen = 4
 	}
 	return &Supervisor{o: o}
+}
+
+func (s *Supervisor) report(err error) {
+	if s.o.OnError != nil {
+		s.o.OnError(err)
+	}
 }
 
 // Degraded reports whether the source is currently down (status endpoint).
@@ -90,6 +99,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		}
 		src, err := s.o.Open(ctx)
 		if err != nil {
+			s.report(err)
 			s.degraded.Store(true)
 			if err := s.o.Sleep(ctx, s.o.Backoff(attempt)); err != nil {
 				return nil
@@ -106,6 +116,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 				if ctx.Err() != nil {
 					return nil
 				}
+				s.report(err)
 				s.degraded.Store(true)
 				if err := s.o.Sleep(ctx, s.o.Backoff(attempt)); err != nil {
 					return nil

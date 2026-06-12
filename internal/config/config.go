@@ -32,7 +32,7 @@ func Default() Config {
 	return Config{
 		Bind:           ":8080",
 		Source:         "camera",
-		Device:         "/dev/video0",
+		Device:         "auto", // first device that actually streams (the Kiyo also enumerates a metadata-only node)
 		Profile:        "720p60",
 		BufferMaxS:     120,
 		BufferMaxBytes: 1536 << 20, // 1.5 GiB

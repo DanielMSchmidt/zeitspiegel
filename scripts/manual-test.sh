@@ -2,8 +2,10 @@
 # Manual end-to-end test harness: build, boot in synth mode, pre-set a 2 s
 # delay, open the web UI. Walk docs/MANUAL_TESTING.md from there.
 #
-#   ./scripts/manual-test.sh            # build + run + open browser
-#   PORT=9090 ./scripts/manual-test.sh  # different port
+#   ./scripts/manual-test.sh               # build + run + open browser
+#   SOURCE=camera ./scripts/manual-test.sh # your real webcam (macOS: grant
+#                                          # camera permission on first run)
+#   PORT=9090 ./scripts/manual-test.sh     # different port
 #   NO_BROWSER=1 ./scripts/manual-test.sh
 #
 # Ctrl-C stops the binary (clean SIGINT shutdown path).
@@ -11,6 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PORT="${PORT:-8080}"
+SOURCE="${SOURCE:-synth}"
 ADDR="127.0.0.1:${PORT}"
 URL="http://${ADDR}"
 
@@ -22,10 +25,13 @@ fi
 echo "==> building"
 make --silent build
 
-echo "==> starting zeitspiegel (synth source) on ${URL}"
-./bin/zeitspiegel --source synth --bind "${ADDR}" &
+echo "==> starting zeitspiegel (${SOURCE} source) on ${URL}"
+./bin/zeitspiegel --source "${SOURCE}" --bind "${ADDR}" &
 PID=$!
 trap 'echo; echo "==> stopping"; kill "${PID}" 2>/dev/null; wait "${PID}" 2>/dev/null || true' EXIT INT TERM
+
+[ "${SOURCE}" = "camera" ] && [ "$(uname)" = "Darwin" ] && \
+  echo "    (macOS: if the buffer stays empty, grant your terminal Camera access in System Settings → Privacy)"
 
 for _ in $(seq 1 50); do
   curl -sf "${URL}/healthz" >/dev/null 2>&1 && break

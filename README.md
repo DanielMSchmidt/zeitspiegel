@@ -53,6 +53,8 @@ internal/config/     TOML config
 
 internal/synth/      synthetic source, fake clock/display (test infra + demo mode)
 
+internal/ffcam/      dev camera via ffmpeg subprocess (avfoundation/v4l2, pure Go)
+
 internal/camera/     V4L2 source via go4vl        [build tag: v4l2]
 
 internal/screen/     SDL2/KMSDRM display          [build tag: sdl]

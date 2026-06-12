@@ -100,8 +100,9 @@ func run() error {
 			}
 			return &restartable{Source: src, restart: restart}, nil
 		},
-		Push:  buf.Push,
-		Sleep: ctxSleep,
+		Push:    buf.Push,
+		Sleep:   ctxSleep,
+		OnError: func(err error) { logger.Error("capture source", "err", err) },
 	})
 
 	status := &sysStatus{start: start, cfg: cfg, store: store, buf: buf, eng: eng, sup: sup}
