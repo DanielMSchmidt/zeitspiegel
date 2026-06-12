@@ -81,6 +81,26 @@ func (b *Buffer) At(t time.Time) (frame.Frame, error) {
 	return b.frames[i-1], nil
 }
 
+// Range returns all frames with from ≤ CaptureTS ≤ to, in capture order.
+// The returned slice is the caller's; the JPEG payloads are shared (this is
+// how a running export pins its frames, ARCHITECTURE §3).
+func (b *Buffer) Range(from, to time.Time) []frame.Frame {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	lo := sort.Search(len(b.frames), func(i int) bool {
+		return !b.frames[i].CaptureTS.Before(from)
+	})
+	hi := sort.Search(len(b.frames), func(i int) bool {
+		return b.frames[i].CaptureTS.After(to)
+	})
+	if lo >= hi {
+		return nil
+	}
+	out := make([]frame.Frame, hi-lo)
+	copy(out, b.frames[lo:hi])
+	return out
+}
+
 // Oldest returns the oldest buffered frame.
 func (b *Buffer) Oldest() (frame.Frame, error) {
 	b.mu.RLock()
