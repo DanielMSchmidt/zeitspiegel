@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-hw build build-pi run-synth vet clean
+.PHONY: test test-integration test-hw build build-pi run-synth manual-test vet clean
 
 test: vet
 	$(GO) test -race ./...
@@ -28,6 +28,10 @@ build-pi:
 
 run-synth: build
 	./$(BIN) --source synth
+
+# Build + boot synth mode + open the web UI; see docs/MANUAL_TESTING.md.
+manual-test:
+	./scripts/manual-test.sh
 
 clean:
 	rm -rf bin

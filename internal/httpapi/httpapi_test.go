@@ -316,6 +316,53 @@ type fakeFrames struct{ f frame.Frame }
 
 func (f *fakeFrames) Newest() (frame.Frame, error) { return f.f, nil }
 
+// The preview supports view=live (default) and view=delayed so the delayed
+// mirror is manually testable without the SDL display (REQUIREMENTS §3).
+func TestPreviewDelayedView(t *testing.T) {
+	tick := make(chan time.Time, 1)
+	live := []byte("\xff\xd8LIVE\xff\xd9")
+	delayed := []byte("\xff\xd8DELAYED\xff\xd9")
+	srv := newServer(t, func(d *httpapi.Deps) {
+		d.Frames = &fakeFrames{f: frame.Frame{Seq: 1, JPEG: live}}
+		d.DelayedFrames = &fakeFrames{f: frame.Frame{Seq: 2, JPEG: delayed}}
+		d.Ticker = func(time.Duration) (<-chan time.Time, func()) { return tick, func() {} }
+	})
+
+	readPart := func(path string) string {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+path, nil)
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s: status %d", path, resp.StatusCode)
+		}
+		tick <- time.Time{}
+		buf := make([]byte, 256)
+		n, err := io.ReadAtLeast(resp.Body, buf, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(buf[:n])
+	}
+
+	if part := readPart("/api/v1/preview"); !strings.Contains(part, "LIVE") {
+		t.Errorf("default view did not stream the live frame: %q", part)
+	}
+	if part := readPart("/api/v1/preview?view=delayed"); !strings.Contains(part, "DELAYED") {
+		t.Errorf("view=delayed did not stream the delayed frame: %q", part)
+	}
+
+	resp := do(t, srv, "GET", "/api/v1/preview?view=bogus", "")
+	if resp.StatusCode != 422 {
+		t.Errorf("view=bogus: status %d, want 422", resp.StatusCode)
+	}
+}
+
 func TestPreviewStreamsMultipart(t *testing.T) {
 	tick := make(chan time.Time)
 	jpg := []byte{0xff, 0xd8, 0xff, 0xd9}

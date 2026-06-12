@@ -84,6 +84,9 @@ type Deps struct {
 	Clip   ClipExporter
 	Config ConfigStore
 	Frames FrameProvider
+	// DelayedFrames serves the ?view=delayed preview: the frame at
+	// now − delay (manual delay testing without the SDL display).
+	DelayedFrames FrameProvider
 	// Ticker paces the preview stream (injected so httpapi stays
 	// wall-clock-free; cmd passes a real time.Ticker).
 	Ticker  func(time.Duration) (<-chan time.Time, func())
@@ -246,6 +249,21 @@ func (s *server) healthz(w http.ResponseWriter, _ *http.Request) {
 const previewBoundary = "zeitspiegelframe"
 
 func (s *server) getPreview(w http.ResponseWriter, r *http.Request) {
+	frames := s.d.Frames
+	switch view := r.URL.Query().Get("view"); view {
+	case "", "live":
+	case "delayed":
+		if s.d.DelayedFrames == nil {
+			s.problem(w, http.StatusUnprocessableEntity, "delayed view unavailable",
+				"this deployment serves only the live view", nil)
+			return
+		}
+		frames = s.d.DelayedFrames
+	default:
+		s.problem(w, http.StatusUnprocessableEntity, "invalid preview view",
+			fmt.Sprintf("view %q must be live or delayed", view), nil)
+		return
+	}
 	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary="+previewBoundary)
 	w.WriteHeader(http.StatusOK)
 	flush, _ := w.(http.Flusher)
@@ -263,7 +281,7 @@ func (s *server) getPreview(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-tick:
 		}
-		f, err := s.d.Frames.Newest()
+		f, err := frames.Newest()
 		if err != nil || (sent && f.Seq == lastSeq) {
 			continue
 		}

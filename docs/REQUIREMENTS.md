@@ -43,7 +43,7 @@ semantics; capture/display read atomic snapshots.
 | `PUT /api/v1/delay` | body `{"seconds": 4.0}`, valid 0…capacity_s | 200 · 422 (limits in body) |
 | `GET /api/v1/clip?seconds=n&format=mp4|mjpeg` | last n seconds; clamped if under-buffered, actual length in `X-Clip-Duration` | 200 video/mp4 + Content-Disposition · 422 (n≤0 or >capacity) · 503 + Retry-After (empty buffer / export slots busy) |
 | `GET/PATCH /api/v1/config` | `mirror_flip, profile(720p60|1080p30), buffer_max_s, focus_auto, focus_absolute, exposure_*`; profile change ⇒ pipeline restart + buffer cleared (signalled) | 200 · 422 |
-| `GET /api/v1/preview` | MJPEG preview, throttled ~10 fps | 200 multipart/x-mixed-replace |
+| `GET /api/v1/preview?view=live|delayed` | MJPEG preview, throttled ~10 fps; `live` (default) = newest frame, `delayed` = the frame the mirror shows (now − delay, warm-up shows oldest) | 200 multipart/x-mixed-replace · 422 (unknown view) |
 | `GET /healthz` | liveness | 200/503 |
 | `GET /` | web UI | 200 |
 

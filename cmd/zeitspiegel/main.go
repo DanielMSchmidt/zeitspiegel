@@ -112,12 +112,13 @@ func run() error {
 	}))
 
 	handler := httpapi.New(httpapi.Deps{
-		Logger: logger,
-		Status: status,
-		Delay:  eng,
-		Clip:   clipper,
-		Config: store,
-		Frames: buf,
+		Logger:        logger,
+		Status:        status,
+		Delay:         eng,
+		Clip:          clipper,
+		Config:        store,
+		Frames:        buf,
+		DelayedFrames: &delayedFrames{buf: buf, eng: eng},
 		Ticker: func(d time.Duration) (<-chan time.Time, func()) {
 			t := time.NewTicker(d)
 			return t.C, t.Stop
@@ -228,6 +229,23 @@ func (r *restartable) ReadFrame(ctx context.Context) (frame.Frame, error) {
 		return frame.Frame{}, errors.New("config changed: pipeline restart")
 	}
 	return r.Source.ReadFrame(ctx)
+}
+
+// delayedFrames serves /api/v1/preview?view=delayed: the frame the mirror
+// shows right now (now − delay), with the same warm-up fallback as the
+// display (FR-10). Read-only on the buffer; the engine's tick state is not
+// touched.
+type delayedFrames struct {
+	buf *ringbuf.Buffer
+	eng *engine.Engine
+}
+
+func (d *delayedFrames) Newest() (frame.Frame, error) {
+	f, err := d.buf.At(time.Now().Add(-d.eng.Delay()))
+	if errors.Is(err, ringbuf.ErrTooEarly) {
+		return d.buf.Oldest()
+	}
+	return f, err
 }
 
 // meteredClipper records export wall time in expvar (NFR-8).

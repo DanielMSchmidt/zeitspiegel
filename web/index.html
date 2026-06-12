@@ -294,6 +294,10 @@
   <section>
     <h2>Preview</h2>
     <button type="button" id="preview-toggle" aria-pressed="false">Start preview</button>
+    <select id="preview-view" aria-label="Preview view">
+      <option value="live" selected>live camera</option>
+      <option value="delayed">delayed mirror</option>
+    </select>
     <img id="preview" alt="Live preview">
   </section>
 
@@ -458,16 +462,23 @@
 
   // ---------- preview ----------
   var previewOn = false;
+  var prevView = $("preview-view");
+  function previewSrc() {
+    return "/api/v1/preview?view=" + prevView.value;
+  }
   prevToggle.addEventListener("click", function () {
     previewOn = !previewOn;
     if (previewOn) {
-      preview.src = "/api/v1/preview";
+      preview.src = previewSrc();
       prevToggle.textContent = "Stop preview";
     } else {
       preview.removeAttribute("src");
       prevToggle.textContent = "Start preview";
     }
     prevToggle.setAttribute("aria-pressed", String(previewOn));
+  });
+  prevView.addEventListener("change", function () {
+    if (previewOn) preview.src = previewSrc(); // swap the running stream
   });
   preview.addEventListener("error", function () {
     if (previewOn) showToast("Preview stream unavailable");

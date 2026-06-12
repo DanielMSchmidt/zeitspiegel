@@ -8,6 +8,7 @@ package main_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -196,6 +197,36 @@ func TestBinaryAPIContract(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		if !strings.Contains(strings.ToLower(string(b)), "zeitspiegel") {
 			t.Error("UI page does not mention zeitspiegel")
+		}
+	})
+
+	t.Run("delayed preview view (manual-test path)", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, "GET", base+"/api/v1/preview?view=delayed", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("preview delayed: %d", resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "multipart/x-mixed-replace") {
+			t.Errorf("content-type = %q", ct)
+		}
+		buf := make([]byte, 128)
+		if _, err := io.ReadAtLeast(resp.Body, buf, 30); err != nil {
+			t.Fatalf("no frame within 3s: %v", err)
+		}
+
+		r2, err := http.Get(base + "/api/v1/preview?view=bogus")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r2.Body.Close()
+		if r2.StatusCode != 422 {
+			t.Errorf("view=bogus: %d, want 422", r2.StatusCode)
 		}
 	})
 

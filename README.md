@@ -72,4 +72,5 @@ docs/                ARCHITECTURE.md, REQUIREMENTS.md, TESTPLAN.md, DEPLOYMENT.m
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions D1–D7, components, concurrency model |
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | FR/NFR list, API contract |
 | [docs/TESTPLAN.md](docs/TESTPLAN.md) | Test tiers UT/IT/ST, TDD build order, milestones |
+| [docs/MANUAL_TESTING.md](docs/MANUAL_TESTING.md) | Hands-on E2E checklist (MT-x); `make manual-test` to get started |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Appliance model, provisioning, network |
