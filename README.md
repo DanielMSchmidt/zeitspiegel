@@ -43,6 +43,8 @@ internal/engine/     delay scheduler, frame selection          (pure Go)
 
 internal/window/     export windowing [t−n, t]                 (pure Go)
 
+internal/capture/    capture worker + reconnect supervisor     (pure Go)
+
 internal/export/     ffmpeg invocation, temp files
 
 internal/httpapi/    REST handlers, validation, MJPEG preview
