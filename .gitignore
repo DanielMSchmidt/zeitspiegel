@@ -1,0 +1,5 @@
+/bin/
+*.test
+*.out
+/clips/
+.DS_Store

@@ -90,7 +90,7 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   S-1). Fallbacks: decode in worker goroutine (+1 tick latency, irrelevant
   for a mirror) or a 30 fps profile.
 - **Exporter** (`internal/window` + `internal/export`): window [t−n, t] →
-  ffmpeg stdin → tmpfs file → `http.ServeFile` → cleanup. Max 2 concurrent
+  ffmpeg stdin → tmpfs file → `http.ServeFile` → cleanup. Max 3 concurrent
   exports (semaphore), then 503 + Retry-After.
 - **HTTP layer** (`internal/httpapi`): stdlib ServeMux patterns; handlers
   depend on small interfaces (StatusProvider, DelaySetter, ClipExporter).
