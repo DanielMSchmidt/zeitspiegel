@@ -5,6 +5,9 @@
 #   ./scripts/manual-test.sh               # build + run + open browser
 #   SOURCE=camera ./scripts/manual-test.sh # your real webcam (macOS: grant
 #                                          # camera permission on first run)
+#   TV=1 ./scripts/manual-test.sh          # ALSO open the real display path
+#                                          # (SDL) in a desktop window — what
+#                                          # the connected TV would show
 #   PORT=9090 ./scripts/manual-test.sh     # different port
 #   NO_BROWSER=1 ./scripts/manual-test.sh
 #
@@ -22,11 +25,20 @@ if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
   echo "warning: ffmpeg/ffprobe not found — clip download (MT-3..MT-5) will fail" >&2
 fi
 
-echo "==> building"
-make --silent build
+BIN=./bin/zeitspiegel
+ARGS=()
+if [ -n "${TV:-}" ]; then
+  echo "==> building TV view (sdl tag; needs SDL2 + SDL2_image + pkg-config)"
+  make --silent build-tv
+  BIN=./bin/zeitspiegel-tv
+  ARGS+=(--windowed)
+else
+  echo "==> building"
+  make --silent build
+fi
 
 echo "==> starting zeitspiegel (${SOURCE} source) on ${URL}"
-./bin/zeitspiegel --source "${SOURCE}" --bind "${ADDR}" &
+"${BIN}" --source "${SOURCE}" --bind "${ADDR}" ${ARGS[@]+"${ARGS[@]}"} &
 PID=$!
 trap 'echo; echo "==> stopping"; kill "${PID}" 2>/dev/null; wait "${PID}" 2>/dev/null || true' EXIT INT TERM
 

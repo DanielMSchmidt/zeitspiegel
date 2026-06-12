@@ -23,9 +23,19 @@ type Screen struct {
 	mirror atomic.Bool
 }
 
-// Open initializes SDL video and a borderless full-screen renderer with
-// vsync. mirror enables horizontal flip (FR-2, default on).
-func Open(mirror bool) (*Screen, error) {
+// Options configures the display.
+type Options struct {
+	Mirror bool // horizontal flip (FR-2, default on in config)
+	// Windowed renders into a desktop window instead of taking the whole
+	// display — the dev "what would the TV show" mode. The appliance runs
+	// fullscreen (KMSDRM has nothing else to show anyway).
+	Windowed      bool
+	Width, Height int // window size when Windowed; 0 = 1280×720
+}
+
+// Open initializes SDL video and a renderer with vsync; on the appliance a
+// borderless full-screen one.
+func Open(o Options) (*Screen, error) {
 	if err := sdl.Init(sdl.INIT_VIDEO); err != nil {
 		return nil, fmt.Errorf("screen: sdl init: %w", err)
 	}
@@ -33,10 +43,17 @@ func Open(mirror bool) (*Screen, error) {
 		sdl.Quit()
 		return nil, fmt.Errorf("screen: sdl_image init: %w", err)
 	}
-	sdl.ShowCursor(sdl.DISABLE)
+	w, h, flags := int32(0), int32(0), uint32(sdl.WINDOW_FULLSCREEN_DESKTOP|sdl.WINDOW_SHOWN)
+	if o.Windowed {
+		w, h, flags = 1280, 720, sdl.WINDOW_SHOWN
+		if o.Width > 0 && o.Height > 0 {
+			w, h = int32(o.Width), int32(o.Height)
+		}
+	} else {
+		sdl.ShowCursor(sdl.DISABLE)
+	}
 	win, err := sdl.CreateWindow("zeitspiegel",
-		sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, 0, 0,
-		sdl.WINDOW_FULLSCREEN_DESKTOP|sdl.WINDOW_SHOWN)
+		sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, w, h, flags)
 	if err != nil {
 		img.Quit()
 		sdl.Quit()
@@ -44,14 +61,34 @@ func Open(mirror bool) (*Screen, error) {
 	}
 	ren, err := sdl.CreateRenderer(win, -1, sdl.RENDERER_ACCELERATED|sdl.RENDERER_PRESENTVSYNC)
 	if err != nil {
+		// headless/dummy drivers and odd GPUs: software rendering still
+		// exercises the identical decode/flip/present path
+		ren, err = sdl.CreateRenderer(win, -1, sdl.RENDERER_SOFTWARE)
+	}
+	if err != nil {
 		win.Destroy()
 		img.Quit()
 		sdl.Quit()
 		return nil, fmt.Errorf("screen: create renderer: %w", err)
 	}
 	s := &Screen{win: win, ren: ren}
-	s.mirror.Store(mirror)
+	s.mirror.Store(o.Mirror)
 	return s, nil
+}
+
+// ProcessEvents drains pending SDL window events; it reports true when the
+// user asked to close the window (dev mode). Must run on the render thread.
+// On KMSDRM there is no window manager, so this is a cheap no-op.
+func (s *Screen) ProcessEvents() bool {
+	for {
+		switch ev := sdl.PollEvent(); e := ev.(type) {
+		case nil:
+			return false
+		case *sdl.QuitEvent:
+			_ = e
+			return true
+		}
+	}
 }
 
 // SetMirror toggles horizontal flip at runtime (PATCH /config).

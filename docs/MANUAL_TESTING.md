@@ -40,6 +40,28 @@ index like `"0"` or a name like `"FaceTime HD Camera"`).
   `-tags v4l2` go4vl path — the appliance build. The ffmpeg path is for
   development.
 
+## Seeing what the TV would show
+
+```
+TV=1 ./scripts/manual-test.sh              # synth source + display window
+TV=1 SOURCE=camera ./scripts/manual-test.sh
+```
+
+`TV=1` builds with the `sdl` tag and opens the **real display path** —
+`internal/screen`, the same JPEG-decode → mirror-flip → vsync-present code
+that drives the HDMI output on the Pi — in a desktop window (`--windowed`).
+This is the closest possible answer to "what would the connected TV show",
+including FR-2 mirror flip (toggle it in the web UI and watch the window)
+and the warm-up / hard-cut behavior at native frame rate. Closing the
+window shuts the binary down cleanly.
+
+One-off without the script: `make run-tv`.
+
+Prerequisites: macOS `brew install sdl2 sdl2_image pkgconf`; Linux
+`apt install libsdl2-dev libsdl2-image-dev`. Only pixel timing differs from
+the appliance (your desktop GPU vs. the Pi's KMSDRM) — measured budgets
+still come from spike S-1 on real hardware.
+
 ## Checklist
 
 | ID | Steps | Expect | Verifies |
@@ -54,8 +76,8 @@ index like `"0"` or a name like `"FaceTime HD Camera"`).
 
 Notes:
 - **Mirror flip (FR-2)** is applied by the SDL display renderer, *not* by the
-  preview stream — the settings toggle works (PATCH /config round-trips) but
-  the flipped image is only observable on real display hardware.
+  preview stream — observe it in the `TV=1` display window (or on the real
+  HDMI output), not in the browser preview.
 - Clean shutdown: Ctrl-C in the script terminal — the binary must exit by
   itself (no kill -9), which the e2e suite also checks.
 

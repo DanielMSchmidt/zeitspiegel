@@ -44,6 +44,7 @@ func run() error {
 	configPath := flag.String("config", "", "path to config.toml (defaults apply when empty)")
 	sourceFlag := flag.String("source", "", "override frame source: camera | synth")
 	bindFlag := flag.String("bind", "", "override listen address")
+	windowed := flag.Bool("windowed", false, "render in a desktop window instead of fullscreen (dev TV view; needs the sdl build tag)")
 	flag.Parse()
 
 	cfg := config.Default()
@@ -81,9 +82,12 @@ func run() error {
 		gauge: exportSeconds,
 	}
 
-	display, closeDisplay, err := openDisplay(cfg)
+	display, closeDisplay, err := openDisplay(cfg, *windowed)
 	if err != nil {
 		return err
+	}
+	if *windowed && display == nil {
+		return errors.New("--windowed needs a display build (go build -tags sdl, see make build-tv)")
 	}
 	if closeDisplay != nil {
 		defer closeDisplay()
@@ -163,7 +167,8 @@ func run() error {
 	// sdl-tagged file locks it in init). Headless builds idle here.
 	var runErr error
 	if display != nil {
-		logger.Info("display loop starting", "fps", cfg.FPS(), "mirror", cfg.MirrorFlip)
+		logger.Info("display loop starting", "fps", cfg.FPS(), "mirror", cfg.MirrorFlip, "windowed", *windowed)
+		pump := displayEvents(display)
 		tick := time.NewTicker(time.Duration(float64(time.Second) / cfg.FPS()))
 		defer tick.Stop()
 	loop:
@@ -176,6 +181,10 @@ func run() error {
 				stop()
 				break loop
 			case <-tick.C:
+				if pump != nil && pump() { // window closed (dev mode)
+					stop()
+					break loop
+				}
 				if sel := eng.Tick(time.Now()); sel.Render {
 					if err := display.Render(sel.Frame); err != nil {
 						logger.Error("render", "seq", sel.Frame.Seq, "err", err)

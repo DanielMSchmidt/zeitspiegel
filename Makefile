@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-hw build build-pi run-synth manual-test vet clean
+.PHONY: test test-integration test-hw build build-pi build-tv run-synth run-tv manual-test vet clean
 
 test: vet
 	$(GO) test -race ./...
@@ -32,6 +32,14 @@ run-synth: build
 # Build + boot synth mode + open the web UI; see docs/MANUAL_TESTING.md.
 manual-test:
 	./scripts/manual-test.sh
+
+# Dev TV view: the real SDL display path in a desktop window.
+# macOS: brew install sdl2 sdl2_image pkgconf. Linux: libsdl2-dev libsdl2-image-dev.
+build-tv:
+	$(GO) build -tags sdl -o $(BIN)-tv ./cmd/zeitspiegel
+
+run-tv: build-tv
+	./$(BIN)-tv --source synth --windowed
 
 clean:
 	rm -rf bin

@@ -15,13 +15,26 @@ func init() {
 	runtime.LockOSThread()
 }
 
-// openDisplay brings up the full-screen KMSDRM renderer.
-func openDisplay(cfg config.Config) (engine.Display, func() error, error) {
-	s, err := screen.Open(cfg.MirrorFlip)
+// openDisplay brings up the renderer: full-screen on the appliance,
+// a desktop window with --windowed (the dev TV view).
+func openDisplay(cfg config.Config, windowed bool) (engine.Display, func() error, error) {
+	w, h := cfg.Resolution()
+	s, err := screen.Open(screen.Options{
+		Mirror: cfg.MirrorFlip, Windowed: windowed, Width: w, Height: h,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
 	return s, s.Close, nil
+}
+
+// displayEvents pumps the SDL event queue each tick; true = user closed the
+// dev window.
+func displayEvents(d engine.Display) func() bool {
+	if s, ok := d.(*screen.Screen); ok {
+		return s.ProcessEvents
+	}
+	return nil
 }
 
 // displayMirrorFunc exposes the runtime mirror toggle (PATCH /config).
