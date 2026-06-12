@@ -103,7 +103,10 @@ func TestBinaryAPIContract(t *testing.T) {
 		if resp.StatusCode != 200 {
 			t.Fatalf("PUT delay: %d", resp.StatusCode)
 		}
-		st, _ := http.Get(base + "/api/v1/status")
+		st, err := http.Get(base + "/api/v1/status")
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer st.Body.Close()
 		var m struct {
 			DelayS float64 `json:"delay_s"`
@@ -116,7 +119,10 @@ func TestBinaryAPIContract(t *testing.T) {
 
 	t.Run("validation (FR-11)", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPut, base+"/api/v1/delay", bytes.NewReader([]byte(`{"seconds": -1}`)))
-		resp, _ := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer resp.Body.Close()
 		if resp.StatusCode != 422 {
 			t.Errorf("negative delay: %d, want 422", resp.StatusCode)

@@ -6,7 +6,8 @@ BIN := bin/zeitspiegel
 test: vet
 	$(GO) test -race ./...
 
-test-integration: vet
+test-integration:
+	$(GO) vet -tags integration ./...
 	$(GO) test -race -tags integration ./...
 
 # Linux only: needs SDL2/SDL2_image headers, V4L2 kernel headers, v4l2loopback for ST-1.

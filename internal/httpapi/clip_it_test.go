@@ -36,16 +36,17 @@ type stampClock struct{ end time.Time }
 
 func (c stampClock) Now() time.Time { return c.end }
 
-func fullServer(t *testing.T, buf *ringbuf.Buffer, clk httpapi.Clock, slots int) *httptest.Server {
+func fullServer(t *testing.T, buf *ringbuf.Buffer, clk httpapi.Clock, slots int) (*httptest.Server, *export.Exporter) {
 	t.Helper()
 	e := engine.New(buf)
+	ex := export.New(t.TempDir(), slots)
 	deps := httpapi.Deps{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Status: &fakeStatus{st: defaultStatus()},
 		Delay:  e,
 		Clip: &httpapi.Clipper{
 			Buffer:   buf,
-			Exporter: export.New(t.TempDir(), slots),
+			Exporter: ex,
 			Clock:    clk,
 			FPS:      itFPS,
 		},
@@ -53,7 +54,7 @@ func fullServer(t *testing.T, buf *ringbuf.Buffer, clk httpapi.Clock, slots int)
 	}
 	srv := httptest.NewServer(httpapi.New(deps))
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, ex
 }
 
 func fill(b *ringbuf.Buffer, seconds int) (last time.Time) {
@@ -107,27 +108,45 @@ func probeDuration(t *testing.T, file string) float64 {
 func TestParallelClipsAndSlotLimit(t *testing.T) {
 	buf := ringbuf.New(time.Hour, 1<<31)
 	last := fill(buf, 12)
-	srv := fullServer(t, buf, stampClock{end: last}, 3)
+	srv, ex := fullServer(t, buf, stampClock{end: last}, 3)
 
 	var wg sync.WaitGroup
+	var inFlight atomic.Int64
 	results := make([]struct {
 		status int
 		file   string
 	}, 3)
 	for i := range results {
 		wg.Add(1)
+		inFlight.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			defer inFlight.Add(-1)
 			results[i].status, results[i].file, _ = fetchClip(t, srv, "/api/v1/clip?seconds=8")
 		}(i)
 	}
 
-	time.Sleep(300 * time.Millisecond) // all three must be mid-export now
-	st, _, hdr := fetchClip(t, srv, "/api/v1/clip?seconds=8")
-	if st != 503 {
-		t.Errorf("4th concurrent clip: status = %d, want 503", st)
-	} else if hdr.Get("Retry-After") == "" {
-		t.Error("503 without Retry-After")
+	// Deterministic 4th-request timing: only fire when the exporter itself
+	// reports every slot taken (Acquire fails), and retry if a slot frees
+	// between that check and the request landing.
+	got503 := false
+	for inFlight.Load() == 3 {
+		if release, err := ex.Acquire(); err == nil {
+			release() // not all slots taken yet; the goroutines are still ramping up
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		st, _, hdr := fetchClip(t, srv, "/api/v1/clip?seconds=8")
+		if st == 503 {
+			if hdr.Get("Retry-After") == "" {
+				t.Error("503 without Retry-After")
+			}
+			got503 = true
+			break
+		}
+	}
+	if !got503 {
+		t.Error("never observed 503 while 3 exports were running")
 	}
 
 	wg.Wait()
@@ -147,7 +166,7 @@ func TestParallelClipsAndSlotLimit(t *testing.T) {
 func TestExportDoesNotBlockCapture(t *testing.T) {
 	buf := ringbuf.New(time.Hour, 1<<31)
 	last := fill(buf, 12)
-	srv := fullServer(t, buf, stampClock{end: last}, 3)
+	srv, _ := fullServer(t, buf, stampClock{end: last}, 3)
 
 	var drops, pushed atomic.Int64
 	stop := make(chan struct{})
