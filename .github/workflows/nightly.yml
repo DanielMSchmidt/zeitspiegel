@@ -1,0 +1,64 @@
+# Nightly system-test scaffolding (TESTPLAN.md Tier 3).
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  # Scaffold for ST-1 (API contract suite vs running process with
+  # v4l2loopback, no real camera). Best-effort until the loopback flow is
+  # stabilized -- failures here do not fail the workflow.
+  st1-loopback:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Install ffmpeg + v4l2loopback + SDL2 headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg v4l2loopback-dkms v4l2-utils \
+            libsdl2-dev libsdl2-image-dev
+      - name: Load v4l2loopback module
+        run: sudo modprobe v4l2loopback video_nr=9 exclusive_caps=1
+      # Compile check with the v4l2 tag only (camera adapter, no display).
+      - name: Build with v4l2 tag
+        run: go build -tags v4l2 ./...
+      # The meat for now: the integration suite under -race.
+      - name: Integration tests
+        run: go test -race -tags "integration" ./...
+      # TODO(ST-1): full system test against the loopback device:
+      #   1. Feed the loopback with a synthetic source, e.g.:
+      #        ffmpeg -re -f lavfi -i testsrc=size=1280x720:rate=30 \
+      #          -f v4l2 -pix_fmt yuyv422 /dev/video9 &
+      #   2. Build and run the binary with the camera source:
+      #        go build -tags v4l2 -o bin/zeitspiegel ./cmd/zeitspiegel
+      #        ./bin/zeitspiegel --source camera --device /dev/video9 \
+      #          --headless &  # no SDL on the runner
+      #   3. curl the API contract endpoints and assert the shapes pinned
+      #      in docs/REQUIREMENTS.md §3:
+      #        curl -fsS localhost:8080/healthz
+      #        curl -fsS -X PUT localhost:8080/delay -d '{"seconds": 2.0}'
+      #        curl -fsS -o clip.mp4 'localhost:8080/clip?seconds=10'
+      #        ffprobe clip.mp4   # duration/frame-count per IT-3
+      #   4. Tear down: kill binary + ffmpeg feeder.
+
+  # Short soak: placeholder for ST-3 (the real 24 h soak with RSS-growth and
+  # drop-rate assertions runs on real hardware, not in CI).
+  soak-short:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Install ffmpeg/ffprobe
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: go test -race -tags integration -count=1 ./...
