@@ -1,0 +1,18 @@
+# deploy/config.toml — production boot config (FR-9; keys match
+# internal/config/config.go). Runtime changes go through the API; this file
+# only sets boot defaults. Lives at /etc/zeitspiegel/config.toml.
+
+bind = ":80"                      # web UI on plain http://zeitspiegel.local (NFR-6, LAN-only)
+source = "camera"                 # real capture; "synth" only for development
+device = "/dev/video0"            # Razer Kiyo
+clip_dir = "/run/zeitspiegel"     # tmpfs (RuntimeDirectory) — clips never touch the read-only root (NFR-9)
+profile = "720p60"                # 1280x720 @ 60 fps (E-2; switch to "1080p30" for long buffers)
+buffer_max_s = 120.0              # ring buffer length in seconds
+buffer_max_bytes = 1610612736     # 1.5 GiB hard cap; 720p60 MJPEG ≈ 5 MB/s ⇒ 120 s ≈ 600 MB
+mirror_flip = true                # horizontal flip — it is a mirror (FR-2)
+
+# Camera controls (FR-9). The Kiyo hunts focus on movement; pin it.
+focus_auto = false                # disable continuous autofocus
+focus_absolute = 0                # TODO: set from spike S-2 measurement on real hardware
+exposure_auto = true              # auto exposure is fine for v1
+exposure_absolute = 0             # only applies when exposure_auto = false

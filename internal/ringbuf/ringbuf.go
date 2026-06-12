@@ -52,6 +52,12 @@ func (b *Buffer) Push(f frame.Frame) {
 	defer b.mu.Unlock()
 	b.frames = append(b.frames, f)
 	b.bytes += f.Bytes()
+	b.evictLocked()
+}
+
+// evictLocked pops from the front until both budgets hold; the newest frame
+// is never evicted. Caller holds mu.
+func (b *Buffer) evictLocked() {
 	for len(b.frames) > 1 {
 		span := b.frames[len(b.frames)-1].CaptureTS.Sub(b.frames[0].CaptureTS)
 		if span <= b.maxDur && b.bytes <= b.maxBytes {
@@ -79,6 +85,32 @@ func (b *Buffer) At(t time.Time) (frame.Frame, error) {
 		return frame.Frame{}, ErrTooEarly
 	}
 	return b.frames[i-1], nil
+}
+
+// Clear drops all frames (profile change semantics, REQUIREMENTS §3). The
+// capture goroutine keeps pushing afterwards.
+func (b *Buffer) Clear() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.frames = nil
+	b.bytes = 0
+}
+
+// SetMaxDuration changes the duration budget at runtime and evicts
+// immediately if it shrank.
+func (b *Buffer) SetMaxDuration(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.maxDur = d
+	for len(b.frames) > 1 {
+		span := b.frames[len(b.frames)-1].CaptureTS.Sub(b.frames[0].CaptureTS)
+		if span <= b.maxDur && b.bytes <= b.maxBytes {
+			break
+		}
+		b.bytes -= b.frames[0].Bytes()
+		b.frames[0] = frame.Frame{}
+		b.frames = b.frames[1:]
+	}
 }
 
 // Range returns all frames with from ≤ CaptureTS ≤ to, in capture order.
