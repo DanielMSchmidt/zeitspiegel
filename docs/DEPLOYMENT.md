@@ -22,8 +22,9 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 | `zeitspiegel.service` | `Restart=always`, `RuntimeDirectory=zeitspiegel` (tmpfs for clips), journal logging; ordered after `network-online.target` but NOT requiring it — the mirror must work with Wi-Fi down; the web UI appears when the network does |
 | `config.toml` | profile=720p60, buffer 120 s / 1.5 GB cap, mirror_flip=true, focus pinning, bind `:80` |
 | `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the Wi-Fi AP (`AP_SSID`/`AP_PASS`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
-| `sd/` | first-boot machinery staged onto the card by `make sd`: `firstrun.sh` (offline basics via the Imager's cmdline hook), `zeitspiegel-firstboot.service` + `firstboot.sh` (full provisioning on the first boot with network, retries each boot until it succeeds, then seals + disables itself) |
-| `PROVISIONING.md` | plug-and-play path: `make sd` (flashes + stages the card on macOS) → boot once with ethernet → done; manual Imager path as fallback |
+| `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg/SDL2 and write the binary, AP keyfile, user and regdomain — produces a finished, network-free image |
+| `sd/seal.sh` + `zeitspiegel-seal.service` | one-time first-boot finisher baked into the image: places the SSH key, enables the read-only overlay, reboots; self-disables (offline) |
+| `PROVISIONING.md` | plug-and-play path: `make sd` (bakes the image + writes the card on macOS) → boot once, no network → done |
 
 ## Network & discovery (E-7: the appliance is its own network)
 
@@ -33,9 +34,9 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
   router, no client-isolation surprises.
 - mDNS via Avahi (preinstalled): `http://zeitspiegel.local`; fallback
   `http://10.42.0.1` always works.
-- Internet is needed exactly once (first-boot apt install) — plug in
-  ethernet for provisioning, unplug afterwards. Clients on the AP get no
-  internet; phones may warn about it ("stay connected" once).
+- The Pi never needs internet: packages are baked into the image at build
+  time (`make image`, on your computer). Clients on the AP get no internet
+  either; phones may warn about it ("stay connected" once).
 - Radio: 2.4 GHz (band bg, channel 6) for maximum device compatibility; the
   regulatory domain must be set (default DE, `WIFI_COUNTRY=`) or the radio
   stays rfkill-blocked.

@@ -1,0 +1,13 @@
+# One-time first-boot finisher (SSH key placement + read-only overlay seal).
+# Baked-in and enabled by deploy/sd/bake.sh; self-disables after it runs.
+[Unit]
+Description=Zeitspiegel first-boot finish & seal
+After=multi-user.target
+ConditionPathExists=!/etc/zeitspiegel/.sealed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zeitspiegel-seal
+
+[Install]
+WantedBy=multi-user.target

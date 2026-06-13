@@ -57,4 +57,4 @@ semantics; capture/display read atomic snapshots.
 | E-4 | Audio out of scope v1 (architecture admits a second ring later) |
 | E-5 | Appliance: Pi OS Lite, KMSDRM, systemd, read-only overlay, tmpfs, Avahi |
 | E-6 | *Superseded by E-7.* (Was: regular member Wi-Fi; no Pi-hosted AP) |
-| E-7 | Appliance hosts its own Wi-Fi AP (NetworkManager hotspot, `ipv4.method shared`): no venue Wi-Fi, no client-isolation issues, mDNS works with no router in between; needs internet only once at provisioning (ethernet). Clients get no internet while connected — acceptable for a control UI. The join-venue-Wi-Fi variant lives on branch `wifi-client` |
+| E-7 | Appliance hosts its own Wi-Fi AP (NetworkManager hotspot, `ipv4.method shared`): no venue Wi-Fi, no client-isolation issues, mDNS works with no router in between; the Pi never needs internet (packages baked into the image at build time, `make image`). Clients get no internet while connected — acceptable for a control UI. The join-venue-Wi-Fi variant lives on branch `wifi-client` |

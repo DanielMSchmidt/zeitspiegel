@@ -15,28 +15,29 @@ make sd                      # auto-detects the card, asks before erasing
 AP_PASS=studiopw make sd     # choose the Wi-Fi passphrase yourself
 ```
 
-This downloads Pi OS Lite (cached under `build/cache/`), cross-builds the
-Pi binary in Docker, flashes the card, and stages everything the Pi needs
-to finish setting itself up: enable SSH (your `~/.ssh/*.pub` is authorized
-automatically), create the `zeitspiegel` admin user, and install the
-first-boot provisioning hook. The Wi-Fi and admin passwords are printed at
-the end **and stored on the card** in the `zeitspiegel/` folder — re-insert
-the card any time to read them.
+This downloads Pi OS Lite (cached under `build/cache/`), cross-builds the Pi
+binary, and **bakes a finished image** — ffmpeg/SDL2 packages, the binary,
+the Wi-Fi access point and the `zeitspiegel` admin user are all installed
+into the image inside a Docker container, so the card needs **no network,
+ever**. Your `~/.ssh/*.pub` is authorized automatically. The Wi-Fi and admin
+passwords are printed at the end and saved to `build/credentials.txt`.
 
-> Not on macOS? Flash Pi OS Lite with the Raspberry Pi Imager (hostname
-> `zeitspiegel`, enable SSH), then copy `deploy/`, `deploy/sd/` and the
-> `make pi-binary` output onto the Pi and run `sudo ./setup.sh --seal`.
+`make image` bakes the image without touching a card (useful to inspect it
+first); `make sd` runs that, then writes the card.
 
-## 2. First boot (once, with ethernet)
+> Not on macOS? `make image` still works (it's all Docker). To write the
+> card: `sudo dd if=build/zeitspiegel-appliance.img of=/dev/sdX bs=4M
+> conv=fsync`. Or flash stock Pi OS Lite with the Imager and run
+> `sudo ./setup.sh --seal` on the Pi (needs internet once).
 
-Put the card in the Pi, connect **ethernet to any router**, attach HDMI +
-Kiyo + the official 5 V/5 A PSU, power on, and wait (~10 minutes: the Pi
-resizes its filesystem, installs packages, creates its access point, seals
-the read-only overlay, and reboots twice — no interaction).
+## 2. First boot (no network needed)
 
-Done when the Wi-Fi `zeitspiegel` appears. Unplug ethernet. If the AP never
-appears, the Pi likely had no internet: check the ethernet link and
-power-cycle — provisioning retries on every boot until it succeeds.
+Put the card in the Pi, attach HDMI + Kiyo + the official 5 V/5 A PSU, power
+on, and wait (~3 minutes: the Pi resizes its filesystem, creates the user,
+brings up its access point, seals the read-only overlay, and reboots a
+couple of times — no interaction, no cable).
+
+Done when the Wi-Fi `zeitspiegel` appears.
 
 ## 3. Use it
 
@@ -70,11 +71,11 @@ re-seal.
 
 ## 6. Troubleshooting
 
-- Logs: `journalctl -u zeitspiegel` (volatile, lost on power-off);
-  provisioning: `journalctl -u zeitspiegel-firstboot`
+- Logs: `journalctl -u zeitspiegel` (volatile, lost on power-off); the
+  one-time seal: `journalctl -u zeitspiegel-seal`
 - Metrics: `GET http://zeitspiegel.local/debug/vars` (expvar)
-- No `zeitspiegel` Wi-Fi → first boot has not finished (or had no
-  internet); plug in ethernet and power-cycle. Radio blocked? The Wi-Fi
-  country must be set (`WIFI_COUNTRY=`, default DE).
+- No `zeitspiegel` Wi-Fi after a few minutes → check the seal log on the
+  HDMI console. The regulatory domain is baked into `cmdline.txt`
+  (`cfg80211.ieee80211_regdom=`, default DE, `WIFI_COUNTRY=` at build time).
 - `zeitspiegel.local` not resolving but Wi-Fi joined → use
   `http://10.42.0.1`.

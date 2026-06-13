@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-hw build build-pi pi-binary sd build-tv run-synth run-tv manual-test vet clean
+.PHONY: test test-integration test-hw build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean
 
 test: vet
 	$(GO) test -race ./...
@@ -35,9 +35,13 @@ pi-binary:
 	  "apt-get update -qq >/dev/null && apt-get install -y -qq libsdl2-dev libsdl2-image-dev >/dev/null \
 	   && go build -tags 'v4l2 sdl' -o bin/zeitspiegel-pi ./cmd/zeitspiegel"
 
-# Flash + stage a self-provisioning SD card (macOS). See scripts/make-sd.sh.
-sd: pi-binary
-	./scripts/make-sd.sh
+# Bake a finished, network-free appliance image (no SD card needed).
+image: pi-binary
+	./scripts/build-image.sh
+
+# Write the baked image to an SD card (macOS). Plug-and-play, no ethernet.
+sd: image
+	./scripts/flash-sd.sh
 
 run-synth: build
 	./$(BIN) --source synth
