@@ -15,7 +15,7 @@
 | FR-9 | Config file for boot defaults incl. camera controls (focus pinning, exposure); runtime changes via API | Restart test; control test vs v4l2loopback/device |
 | FR-10 | Warm-up: `delay > filled_s` ⇒ show oldest frame, status `warming_up` | FakeClock test |
 | FR-11 | Invalid input ⇒ 422 problem+json with limits | Table-driven API tests |
-| FR-12 | Boot to full-screen mirror ≤ 25 s, no login/desktop | Boot timing on target |
+| FR-12 | Boot to full-screen mirror ≤ 25 s, no login/desktop: Pi OS Lite (no desktop), SDL/KMSDRM fullscreen, getty@tty1 masked, quiet boot (`quiet logo.nologo vt.global_cursor_default=0`, `disable_splash`), unit starts without waiting on the network | Boot timing on target (M4) |
 
 ## 2. Non-functional requirements
 

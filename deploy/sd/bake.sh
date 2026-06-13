@@ -126,6 +126,20 @@ echo "==> Wi-Fi regulatory domain (${WIFI_COUNTRY}) via kernel cmdline"
 CMD="$ROOT/boot/firmware/cmdline.txt"
 grep -q ieee80211_regdom "$CMD" || sed -i "1 s|\$| cfg80211.ieee80211_regdom=${WIFI_COUNTRY}|" "$CMD"
 
+echo "==> kiosk: silent boot, no login prompt (FR-12)"
+# No getty login prompt on the HDMI console — the mirror is the only thing shown.
+chroot "$ROOT" systemctl mask getty@tty1.service >/dev/null 2>&1 || true
+chroot "$ROOT" systemctl disable getty@tty1.service >/dev/null 2>&1 || true
+# Quiet the boot text and hide the console cursor (idempotent, single line).
+read -r KLINE < "$CMD"
+for t in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0; do
+    case " $KLINE " in *" $t "*) ;; *) KLINE="$KLINE $t" ;; esac
+done
+printf '%s\n' "$KLINE" > "$CMD"
+# Disable the rainbow splash screen.
+CFG="$ROOT/boot/firmware/config.txt"
+grep -q '^disable_splash=1' "$CFG" 2>/dev/null || echo 'disable_splash=1' >> "$CFG"
+
 echo "==> reclaim space + restore resolv.conf"
 chroot "$ROOT" apt-get clean
 rm -f "$ROOT/etc/resolv.conf"

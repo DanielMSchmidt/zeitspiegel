@@ -55,6 +55,21 @@ systemctl enable --now zeitspiegel.service
 # --- mDNS discovery as zeitspiegel.local via the preinstalled Avahi (NFR-10) ---
 hostnamectl set-hostname zeitspiegel
 
+# --- kiosk: silent boot, no login prompt (FR-12) ---------------------------
+# The mirror must be the only thing on the HDMI output. Remove the console
+# login, quiet the boot text, and disable the splash.
+systemctl mask getty@tty1.service 2>/dev/null || true
+CMD=/boot/firmware/cmdline.txt; [[ -f "$CMD" ]] || CMD=/boot/cmdline.txt
+if [[ -f "$CMD" ]]; then
+    read -r KLINE < "$CMD"
+    for t in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0; do
+        case " $KLINE " in *" $t "*) ;; *) KLINE="$KLINE $t" ;; esac
+    done
+    printf '%s\n' "$KLINE" > "$CMD"
+fi
+CFG=/boot/firmware/config.txt; [[ -f "$CFG" ]] || CFG=/boot/config.txt
+[[ -f "$CFG" ]] && { grep -q '^disable_splash=1' "$CFG" || echo 'disable_splash=1' >> "$CFG"; }
+
 # --- Wi-Fi access point (E-7): the appliance hosts its own network ---------
 # Phones join SSID $AP_SSID directly; NetworkManager's ipv4.method=shared
 # runs DHCP for clients (gateway 10.42.0.1) and mDNS works with no router

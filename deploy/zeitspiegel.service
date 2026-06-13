@@ -4,11 +4,12 @@
 [Unit]
 Description=Zeitspiegel time-delayed video mirror
 Documentation=https://github.com/danielmschmidt/zeitspiegel/tree/main/docs
-# Ordered after the network so the web UI binds cleanly when Wi-Fi is up,
-# but deliberately NOT Requires= — the mirror must start with Wi-Fi down
-# (docs/DEPLOYMENT.md: the web UI appears when the network does).
-After=network-online.target
-Wants=network-online.target
+# Start the mirror as early as possible — it needs no network (FR-12, ≤25 s
+# to fullscreen). The HTTP server binds :80 immediately; clients reach it
+# once they join the appliance's Wi-Fi, no ordering against the network
+# needed. Take ownership of the HDMI console so no getty shares it.
+After=local-fs.target
+Conflicts=getty@tty1.service
 
 [Service]
 ExecStart=/usr/local/bin/zeitspiegel --config /etc/zeitspiegel/config.toml
