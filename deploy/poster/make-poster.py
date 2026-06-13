@@ -5,11 +5,12 @@ Dependency: segno (pure-Python QR generator).
     python3 -m venv .venv && .venv/bin/pip install segno
     .venv/bin/python deploy/poster/make-poster.py
 
+The Wi-Fi is an open network (no password, E-7): the poster shows a second
+QR that joins it on scan.
+
 Options (env):
-    URL        what the QR opens            (default http://zeitspiegel.local)
-    SSID       Wi-Fi network name shown     (default zeitspiegel)
-    WIFI_PASS  if set, the password is printed AND a second "join Wi-Fi" QR is
-               emitted so phones connect by scanning (default: blank fill-in line)
+    URL    what the controls QR opens   (default http://zeitspiegel.local)
+    SSID   Wi-Fi network name shown      (default zeitspiegel)
 
 Writes deploy/poster/zeitspiegel-poster.svg — vector, scales to any paper.
 """
@@ -19,7 +20,6 @@ import segno
 
 URL = os.environ.get("URL", "http://zeitspiegel.local")
 SSID = os.environ.get("SSID", "zeitspiegel")
-WIFI_PASS = os.environ.get("WIFI_PASS", "")
 
 # Palette — print-friendly: dark ink on white, one accent. QR stays pure black.
 INK = "#14161a"
@@ -118,24 +118,17 @@ parts = [
     f'<line x1="64" y1="236" x2="{W-64}" y2="236" stroke="{LINE}" stroke-width="2"/>',
 ]
 
-# Step 1 — Wi-Fi
+# Step 1 — Wi-Fi (open network)
 y = 300
 parts += [badge("1", 100, y + 20), wifi_icon(200, y + 22)]
 parts += [text(250, y, "Connect to the Wi-Fi", size=30, weight=700)]
 parts += [text(250, y + 38, "Network", size=20, fill=MUTE),
           text(360, y + 38, SSID, size=22, weight=700)]
-if WIFI_PASS:
-    parts += [text(250, y + 70, "Password", size=20, fill=MUTE),
-              text(360, y + 70, WIFI_PASS, size=22, weight=700)]
-    # Phones can join by scanning this Wi-Fi QR (WPA). Escape ; , : \ per spec.
-    esc = lambda s: s.translate(str.maketrans({c: "\\" + c for c in r'\;,:"'}))
-    wifi_data = f"WIFI:T:WPA;S:{esc(SSID)};P:{esc(WIFI_PASS)};;"
-    parts += [qr_group(wifi_data, 600, y - 34, 120)]
-    parts += [text(660, y + 104, "scan to join", size=16, fill=MUTE, anchor="middle")]
-else:
-    parts += [text(250, y + 70, "Password", size=20, fill=MUTE),
-              f'<line x1="360" y1="{y+72}" x2="650" y2="{y+72}" '
-              f'stroke="{INK}" stroke-width="1.5"/>']
+parts += [text(250, y + 70, "No password — just connect.", size=20, fill=MUTE)]
+# Open-network join QR: phones connect on scan (no secret in it). Escape per spec.
+esc = SSID.translate(str.maketrans({c: "\\" + c for c in r'\;,:"'}))
+parts += [qr_group(f"WIFI:S:{esc};T:nopass;;", 600, y - 34, 120)]
+parts += [text(660, y + 104, "scan to join", size=16, fill=MUTE, anchor="middle")]
 
 # Step 2 — scan QR
 y = 446
@@ -153,8 +146,9 @@ y = 880
 parts += [badge("3", 100, y + 20)]
 parts += [sliders_icon(190, y + 12), download_icon(250, y + 16)]
 parts += [text(300, y, "Set the delay · save clips", size=30, weight=700)]
-parts += [text(300, y + 38, "Drag the slider to choose how many seconds late", size=20, fill=MUTE)]
-parts += [text(300, y + 66, "the mirror shows you. Download the last clip to keep it.", size=20, fill=MUTE)]
+parts += [text(300, y + 38, "Drag the slider to choose how many seconds", size=20, fill=MUTE)]
+parts += [text(300, y + 64, "late the mirror shows you.", size=20, fill=MUTE)]
+parts += [text(300, y + 96, "Download the last clip to keep it.", size=20, fill=MUTE)]
 
 # footer
 parts += [

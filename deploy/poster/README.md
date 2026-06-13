@@ -9,8 +9,8 @@ set the delay / save clips. Tape it next to the mirror.
 Open the SVG in any browser and print (it's sized A4 portrait, fits Letter
 too). Or convert: `rsvg-convert -f pdf zeitspiegel-poster.svg > poster.pdf`.
 
-The committed poster is generic: SSID `zeitspiegel`, a blank line to write
-the password, and a QR to `http://zeitspiegel.local`.
+The poster carries two QR codes: one that **joins the open Wi-Fi** on scan
+(no password) and one that **opens the controls** (`http://zeitspiegel.local`).
 
 ## Regenerate / customize
 
@@ -23,15 +23,7 @@ Environment overrides:
 
 | Var | Default | Effect |
 |-----|---------|--------|
-| `URL` | `http://zeitspiegel.local` | what the main QR opens |
-| `SSID` | `zeitspiegel` | Wi-Fi name shown |
-| `WIFI_PASS` | _(blank line)_ | if set, prints the password **and** adds a second QR that joins the Wi-Fi on scan (WPA) |
-
-Example, a ready-to-hang poster for one appliance (password from
-`build/credentials.txt`):
-
-```
-WIFI_PASS=zie5vtlb05zm .venv/bin/python make-poster.py
-```
+| `URL` | `http://zeitspiegel.local` | what the controls QR opens |
+| `SSID` | `zeitspiegel` | Wi-Fi name shown (and encoded in the join QR) |
 
 Both QR codes are verified scannable (rendered to raster and decoded back).

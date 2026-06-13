@@ -4,13 +4,13 @@
 # Zeitspiegel appliance image: packages are installed here at build time, so
 # the card never needs internet. Native arm64 chroot — no qemu.
 #
-# Inputs (env):  AP_SSID AP_PASS ADMIN_HASH WIFI_COUNTRY  [GROW_MB]
+# Inputs (env):  AP_SSID ADMIN_HASH WIFI_COUNTRY  [GROW_MB]   (open AP, no pass)
 # Inputs (files under /work):  raspios.img.xz, payload/{zeitspiegel,config.toml,
 #                              zeitspiegel.service,zeitspiegel-seal.service,seal.sh}
 # Output:        /work/zeitspiegel-appliance.img
 set -euo pipefail
 
-: "${AP_SSID:?}" "${AP_PASS:?}" "${ADMIN_HASH:?}" "${WIFI_COUNTRY:?}"
+: "${AP_SSID:?}" "${ADMIN_HASH:?}" "${WIFI_COUNTRY:?}"
 GROW_MB="${GROW_MB:-1500}"
 SRC_XZ=/work/raspios.img.xz
 OUT=/work/zeitspiegel-appliance.img
@@ -94,7 +94,7 @@ if [[ -f "$PAYLOAD/authorized_keys" ]]; then
     install -D -m0644 "$PAYLOAD/authorized_keys" "$ROOT/boot/firmware/zeitspiegel-authorized_keys"
 fi
 
-echo "==> Wi-Fi access point profile (NetworkManager keyfile)"
+echo "==> Wi-Fi access point profile (open network, NetworkManager keyfile)"
 install -d -m0700 "$ROOT/etc/NetworkManager/system-connections"
 cat > "$ROOT/etc/NetworkManager/system-connections/zeitspiegel-ap.nmconnection" <<EOF
 [connection]
@@ -109,10 +109,6 @@ mode=ap
 band=bg
 channel=6
 ssid=${AP_SSID}
-
-[wifi-security]
-key-mgmt=wpa-psk
-psk=${AP_PASS}
 
 [ipv4]
 method=shared

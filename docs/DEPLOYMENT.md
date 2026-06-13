@@ -21,17 +21,19 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 |---|---|
 | `zeitspiegel.service` | `Restart=always`, `RuntimeDirectory=zeitspiegel` (tmpfs for clips), journal logging; ordered after `network-online.target` but NOT requiring it — the mirror must work with Wi-Fi down; the web UI appears when the network does |
 | `config.toml` | profile=720p60, buffer 120 s / 1.5 GB cap, mirror_flip=true, focus pinning, bind `:80` |
-| `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the Wi-Fi AP (`AP_SSID`/`AP_PASS`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
+| `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the open Wi-Fi AP (`AP_SSID`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
 | `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg/SDL2 and write the binary, AP keyfile, user and regdomain — produces a finished, network-free image |
 | `sd/seal.sh` + `zeitspiegel-seal.service` | one-time first-boot finisher baked into the image: places the SSH key, enables the read-only overlay, reboots; self-disables (offline) |
 | `PROVISIONING.md` | plug-and-play path: `make sd` (bakes the image + writes the card on macOS) → boot once, no network → done |
 
 ## Network & discovery (E-7: the appliance is its own network)
 
-- The Pi hosts a WPA2 access point via NetworkManager (`zeitspiegel-ap`
-  profile, `ipv4.method shared` → built-in DHCP, gateway `10.42.0.1`).
-  Phones/laptops join SSID `zeitspiegel` directly — no venue Wi-Fi, no
-  router, no client-isolation surprises.
+- The Pi hosts an **open** (passwordless) access point via NetworkManager
+  (`zeitspiegel-ap` profile, `ipv4.method shared` → built-in DHCP, gateway
+  `10.42.0.1`). Phones/laptops just pick SSID `zeitspiegel` and connect — no
+  password, no venue Wi-Fi, no router, no client-isolation surprises. The AP
+  is an isolated, internet-less LAN serving only the LAN-only control UI
+  (NFR-6, no auth in v1).
 - mDNS via Avahi (preinstalled): `http://zeitspiegel.local`; fallback
   `http://10.42.0.1` always works.
 - The Pi never needs internet: packages are baked into the image at build

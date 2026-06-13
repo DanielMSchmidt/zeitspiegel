@@ -12,15 +12,16 @@ Insert the micro-SD into your computer, then:
 
 ```
 make sd                      # auto-detects the card, asks before erasing
-AP_PASS=studiopw make sd     # choose the Wi-Fi passphrase yourself
+SSID=studio-mirror make sd   # choose the Wi-Fi network name
 ```
 
 This downloads Pi OS Lite (cached under `build/cache/`), cross-builds the Pi
 binary, and **bakes a finished image** — ffmpeg/SDL2 packages, the binary,
-the Wi-Fi access point and the `zeitspiegel` admin user are all installed
-into the image inside a Docker container, so the card needs **no network,
-ever**. Your `~/.ssh/*.pub` is authorized automatically. The Wi-Fi and admin
-passwords are printed at the end and saved to `build/credentials.txt`.
+the open Wi-Fi access point and the `zeitspiegel` admin user are all
+installed into the image inside a Docker container, so the card needs **no
+network, ever**. The Wi-Fi is open (no password). Your `~/.ssh/*.pub` is
+authorized automatically; the admin (ssh) password is printed at the end and
+saved to `build/credentials.txt`.
 
 `make image` bakes the image without touching a card (useful to inspect it
 first); `make sd` runs that, then writes the card.
@@ -41,7 +42,7 @@ Done when the Wi-Fi `zeitspiegel` appears.
 
 ## 3. Use it
 
-- Join Wi-Fi `zeitspiegel` (passphrase from step 1)
+- Join Wi-Fi `zeitspiegel` (open — no password)
 - Open `http://zeitspiegel.local` — fallback `http://10.42.0.1`
 - Phones may warn "no internet on this network" — stay connected; the
   appliance is intentionally offline (E-7).
@@ -66,8 +67,7 @@ sudo raspi-config nonint disable_overlayfs && sudo reboot
 sudo raspi-config nonint enable_overlayfs && sudo reboot
 ```
 
-To change the Wi-Fi passphrase: unseal, `AP_PASS=newpw sudo -E ./setup.sh`,
-re-seal.
+To rename the Wi-Fi: unseal, `SSID=new-name sudo -E ./setup.sh`, re-seal.
 
 ## 6. Troubleshooting
 

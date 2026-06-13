@@ -83,8 +83,8 @@ Notes:
 
 ## On the Pi (real hardware, milestone M3/M4)
 
-Join the appliance's Wi-Fi (SSID `zeitspiegel`, passphrase stored on the SD
-card — E-7), then run the same checklist against `http://zeitspiegel.local`
+Join the appliance's open Wi-Fi (SSID `zeitspiegel`, no password — E-7),
+then run the same checklist against `http://zeitspiegel.local`
 (fallback `http://10.42.0.1`) with `source = "camera"`, plus:
 
 - MT-8: film a millisecond stopwatch; measured glass-to-glass delay =

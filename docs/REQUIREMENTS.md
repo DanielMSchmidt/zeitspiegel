@@ -26,7 +26,7 @@
 | NFR-3 | Display jitter < 1 frame interval (p99) |
 | NFR-4 | API < 50 ms (except /clip); 30 s clip export < 5 s on Pi 5 |
 | NFR-5 | systemd service, auto-restart, camera reconnect on USB loss |
-| NFR-6 | LAN-only, no auth in v1 (documented); bind address configurable; the appliance hosts its own Wi-Fi access point (SSID `zeitspiegel`, WPA2) — no venue network involved (E-7) |
+| NFR-6 | LAN-only, no auth in v1 (documented); bind address configurable; the appliance hosts its own **open** Wi-Fi access point (SSID `zeitspiegel`, no password) — an isolated, internet-less LAN, no venue network involved (E-7) |
 | NFR-7 | Core logic 100 % testable without hardware |
 | NFR-8 | Structured logs (volatile journal) + expvar metrics (drops, fill, export duration) |
 | NFR-9 | Unplug tolerance: read-only root (overlayfs), no persistent writes, clips on tmpfs |
@@ -57,4 +57,4 @@ semantics; capture/display read atomic snapshots.
 | E-4 | Audio out of scope v1 (architecture admits a second ring later) |
 | E-5 | Appliance: Pi OS Lite, KMSDRM, systemd, read-only overlay, tmpfs, Avahi |
 | E-6 | *Superseded by E-7.* (Was: regular member Wi-Fi; no Pi-hosted AP) |
-| E-7 | Appliance hosts its own Wi-Fi AP (NetworkManager hotspot, `ipv4.method shared`): no venue Wi-Fi, no client-isolation issues, mDNS works with no router in between; the Pi never needs internet (packages baked into the image at build time, `make image`). Clients get no internet while connected — acceptable for a control UI. The join-venue-Wi-Fi variant lives on branch `wifi-client` |
+| E-7 | Appliance hosts its own **open** (passwordless) Wi-Fi AP (NetworkManager hotspot, `ipv4.method shared`): guests just pick the SSID and connect — no password to print or type. No venue Wi-Fi, no client-isolation issues, mDNS works with no router in between; the Pi never needs internet (packages baked into the image at build time, `make image`). Clients get no internet while connected, and the open AP carries only the no-auth LAN-only control UI (NFR-6) on an isolated network — acceptable for a single-purpose appliance. The join-venue-Wi-Fi variant lives on branch `wifi-client` |

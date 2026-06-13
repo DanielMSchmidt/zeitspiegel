@@ -10,8 +10,8 @@
 #
 # Environment:
 #   AP_SSID       Wi-Fi network the appliance hosts (default: zeitspiegel)
-#   AP_PASS       WPA2 passphrase (≥ 8 chars; default: random, printed)
 #   WIFI_COUNTRY  regulatory domain for the radio (default: DE)
+# The AP is open (no password) — see E-7 / NFR-6.
 #
 # --seal   enable the read-only overlayfs at the end (NFR-9). Without the
 #          flag you are prompted; answer no on a dev box you still edit.
@@ -70,35 +70,22 @@ fi
 CFG=/boot/firmware/config.txt; [[ -f "$CFG" ]] || CFG=/boot/config.txt
 [[ -f "$CFG" ]] && { grep -q '^disable_splash=1' "$CFG" || echo 'disable_splash=1' >> "$CFG"; }
 
-# --- Wi-Fi access point (E-7): the appliance hosts its own network ---------
-# Phones join SSID $AP_SSID directly; NetworkManager's ipv4.method=shared
-# runs DHCP for clients (gateway 10.42.0.1) and mDNS works with no router
-# in between. The connection profile persists and autoconnects on boot.
+# --- Wi-Fi access point (E-7): the appliance hosts its own OPEN network -----
+# No password: guests just pick "$AP_SSID" and connect. The AP is an isolated,
+# internet-less LAN (NFR-6, no auth in v1). NetworkManager's ipv4.method=shared
+# runs DHCP for clients (gateway 10.42.0.1) and mDNS works with no router in
+# between. The connection profile persists and autoconnects on boot.
 AP_SSID="${AP_SSID:-zeitspiegel}"
-AP_PASS="${AP_PASS:-}"
 WIFI_COUNTRY="${WIFI_COUNTRY:-DE}"
-if [[ -z "$AP_PASS" ]]; then
-    # head-first ordering avoids SIGPIPE under pipefail
-    while [[ ${#AP_PASS} -lt 12 ]]; do
-        AP_PASS="$AP_PASS$(head -c 64 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9')"
-    done
-    AP_PASS="${AP_PASS:0:12}"
-    echo "generated AP passphrase: $AP_PASS  (set AP_PASS= to choose your own)"
-fi
-if [[ ${#AP_PASS} -lt 8 ]]; then
-    echo "error: AP_PASS must be at least 8 characters (WPA2)" >&2
-    exit 1
-fi
 # Unblock the radio: a regulatory domain must be set before AP mode works.
 raspi-config nonint do_wifi_country "$WIFI_COUNTRY" || true
 rfkill unblock wifi || true
-# Recreate the profile so SSID/passphrase changes on re-run take effect.
+# Recreate the profile so an SSID change on re-run takes effect.
 nmcli connection delete zeitspiegel-ap >/dev/null 2>&1 || true
 nmcli connection add type wifi ifname wlan0 con-name zeitspiegel-ap \
     autoconnect yes connection.autoconnect-priority 100 \
     ssid "$AP_SSID" \
     802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 6 \
-    wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$AP_PASS" \
     ipv4.method shared ipv6.method disabled
 nmcli connection up zeitspiegel-ap || \
     echo "note: AP not up yet (radio may need a reboot) — autoconnect will bring it up"
@@ -120,5 +107,5 @@ fi
 echo
 echo "Done: binary -> /usr/local/bin/zeitspiegel, config -> /etc/zeitspiegel/,"
 echo "unit enabled and started, hostname -> zeitspiegel."
-echo "Wi-Fi:     join \"$AP_SSID\" (passphrase: $AP_PASS)"
+echo "Wi-Fi:     join \"$AP_SSID\" (open network, no password)"
 echo "Mirror UI: http://zeitspiegel.local  (or http://10.42.0.1)"

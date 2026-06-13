@@ -5,9 +5,9 @@
 # linux/arm64 container running deploy/sd/bake.sh.
 #
 #   make image                       # uses defaults / cached download
-#   AP_PASS=studiopw make image
+#   SSID=studio-mirror make image    # rename the open Wi-Fi network
 #
-# Env: AP_SSID AP_PASS ADMIN_PASS WIFI_COUNTRY SSH_PUBKEY IMG_URL
+# Env: AP_SSID ADMIN_PASS WIFI_COUNTRY SSH_PUBKEY IMG_URL  (Wi-Fi is open)
 # Output: build/zeitspiegel-appliance.img  +  build/credentials.txt
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -23,12 +23,10 @@ command -v docker >/dev/null || die "docker not found"
 command -v xz >/dev/null || die "xz not found — brew install xz"
 [[ -f bin/zeitspiegel-pi ]] || die "bin/zeitspiegel-pi missing — run 'make pi-binary' (make image does this for you)"
 
-AP_SSID="${AP_SSID:-zeitspiegel}"
-AP_PASS="${AP_PASS:-$(randpw)}"
-ADMIN_PASS="${ADMIN_PASS:-$(randpw)}"
+AP_SSID="${AP_SSID:-zeitspiegel}"          # open Wi-Fi network (no password, E-7)
+ADMIN_PASS="${ADMIN_PASS:-$(randpw)}"      # ssh login for the zeitspiegel user
 WIFI_COUNTRY="${WIFI_COUNTRY:-DE}"
 IMG_URL="${IMG_URL:-https://downloads.raspberrypi.com/raspios_lite_arm64_latest}"
-[[ ${#AP_PASS} -ge 8 ]] || die "AP_PASS must be at least 8 characters (WPA2)"
 
 mkdir -p build/cache build/payload
 IMG_XZ=build/cache/raspios-lite-arm64.img.xz
@@ -60,14 +58,13 @@ ADMIN_HASH=$(docker run --rm golang:1.25-trixie openssl passwd -6 "$ADMIN_PASS")
 echo "==> baking image (privileged linux/arm64 container) ..."
 docker run --rm --privileged --platform linux/arm64 \
     -v "$PWD/build":/work -v "$PWD/deploy":/deploy:ro \
-    -e AP_SSID="$AP_SSID" -e AP_PASS="$AP_PASS" \
+    -e AP_SSID="$AP_SSID" \
     -e ADMIN_HASH="$ADMIN_HASH" -e WIFI_COUNTRY="$WIFI_COUNTRY" \
     golang:1.25-trixie bash /deploy/sd/bake.sh
 
 cat > build/credentials.txt <<EOF
 Zeitspiegel appliance credentials
-  Wi-Fi SSID:   $AP_SSID
-  Wi-Fi pass:   $AP_PASS
+  Wi-Fi SSID:   $AP_SSID   (open network, no password)
   Mirror UI:    http://zeitspiegel.local   (or http://10.42.0.1)
   ssh login:    zeitspiegel@zeitspiegel.local   password: $ADMIN_PASS
 EOF
