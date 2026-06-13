@@ -186,17 +186,35 @@ func TestBinaryAPIContract(t *testing.T) {
 	})
 
 	t.Run("web ui served (FR-7)", func(t *testing.T) {
-		resp, err := http.Get(base + "/")
-		if err != nil {
-			t.Fatal(err)
+		get := func(path string) string {
+			t.Helper()
+			resp, err := http.Get(base + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				t.Fatalf("GET %s: %d", path, resp.StatusCode)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			return string(b)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			t.Fatalf("GET /: %d", resp.StatusCode)
+
+		index := get("/")
+		for _, want := range []string{"zeitspiegel", `id="delay-slider"`, `id="download-btn"`,
+			`href="/settings.html"`, "What is this"} {
+			if !strings.Contains(strings.ToLower(index), strings.ToLower(want)) {
+				t.Errorf("index page missing %q", want)
+			}
 		}
-		b, _ := io.ReadAll(resp.Body)
-		if !strings.Contains(strings.ToLower(string(b)), "zeitspiegel") {
-			t.Error("UI page does not mention zeitspiegel")
+		settings := get("/settings.html")
+		for _, want := range []string{`id="status"`, `id="mirror-toggle"`, `href="/"`} {
+			if !strings.Contains(settings, want) {
+				t.Errorf("settings page missing %q", want)
+			}
+		}
+		if css := get("/style.css"); !strings.Contains(css, "--bg") {
+			t.Error("shared stylesheet not served")
 		}
 	})
 

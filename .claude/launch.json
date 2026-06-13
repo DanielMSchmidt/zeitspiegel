@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "zeitspiegel-synth",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "./cmd/zeitspiegel", "--source", "synth", "--bind", "127.0.0.1:8080"],
+      "port": 8080
+    }
+  ]
+}

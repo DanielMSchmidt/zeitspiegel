@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14161a">
+<title>Zeitspiegel — Status &amp; settings</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Zeitspiegel<small>status &amp; settings</small></h1>
+  <span class="header-badges">
+    <span class="badge" id="warming-badge" hidden>Warming up</span>
+    <span class="badge" id="offline-badge" hidden>Offline</span>
+  </span>
+</header>
+
+<main>
+  <!-- Status -->
+  <section>
+    <h2>Status</h2>
+    <div id="status">
+      <dl>
+        <dt>Delay</dt>         <dd id="st-delay">&ndash;</dd>
+        <dt>Frame rate</dt>    <dd id="st-fps">&ndash;</dd>
+        <dt>Resolution</dt>    <dd id="st-resolution">&ndash;</dd>
+        <dt>Buffer</dt>        <dd id="st-buffer">&ndash;</dd>
+        <dt>Dropped frames</dt><dd id="st-dropped">&ndash;</dd>
+        <dt>Min latency</dt>   <dd id="st-latency">&ndash;</dd>
+        <dt>Uptime</dt>        <dd id="st-uptime">&ndash;</dd>
+      </dl>
+      <div class="bar"><div id="buffer-bar"></div></div>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section>
+    <h2>Settings</h2>
+    <div class="switch-row">
+      <span>Mirror flip</span>
+      <button type="button" id="mirror-toggle" aria-pressed="false">Off</button>
+    </div>
+    <p class="hint">The flip applies to the mirror display (and the
+    &ldquo;delayed mirror&rdquo; on the TV), not to saved clips or the live
+    preview.</p>
+  </section>
+</main>
+
+<footer>
+  <a href="/">&larr; Back to mirror controls</a>
+</footer>
+
+<div id="toast" role="alert"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  function $(id) { return document.getElementById(id); }
+
+  var warmBadge  = $("warming-badge");
+  var offBadge   = $("offline-badge");
+  var bufferBar  = $("buffer-bar");
+  var mirrToggle = $("mirror-toggle");
+  var toast      = $("toast");
+
+  // ---------- toast ----------
+  var toastTimer = null;
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add("show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toast.classList.remove("show");
+    }, 4000);
+  }
+
+  // ---------- helpers ----------
+  function fmtSecs(s) {
+    return (Math.round(s * 10) / 10).toFixed(1);
+  }
+  function fmtUptime(s) {
+    s = Math.max(0, Math.floor(s));
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    var ss = s % 60;
+    function pad(n) { return n < 10 ? "0" + n : "" + n; }
+    return pad(h) + ":" + pad(m) + ":" + pad(ss);
+  }
+  function problemDetail(body, fallback) {
+    if (body && typeof body === "object") {
+      return body.detail || body.title || fallback;
+    }
+    return fallback;
+  }
+
+  // ---------- status polling ----------
+  function applyStatus(st) {
+    offBadge.hidden = true;
+    warmBadge.hidden = !st.warming_up;
+
+    $("st-delay").textContent      = fmtSecs(st.delay_s) + " s";
+    $("st-fps").textContent        = st.fps + " fps";
+    $("st-resolution").textContent = st.resolution || "–";
+    $("st-dropped").textContent    = String(st.dropped_frames);
+    $("st-latency").textContent    = st.min_latency_ms + " ms";
+    $("st-uptime").textContent     = fmtUptime(st.uptime_s);
+
+    var cap  = (st.buffer && st.buffer.capacity_s) || 0;
+    var fill = (st.buffer && st.buffer.filled_s) || 0;
+    $("st-buffer").textContent = fmtSecs(fill) + "s / " + fmtSecs(cap) + "s";
+    bufferBar.style.width = cap > 0
+      ? Math.min(100, (fill / cap) * 100) + "%"
+      : "0%";
+  }
+
+  function pollStatus() {
+    fetch("/api/v1/status").then(function (res) {
+      if (!res.ok) throw new Error("status " + res.status);
+      return res.json();
+    }).then(applyStatus).catch(function () {
+      offBadge.hidden = false;
+    });
+  }
+
+  pollStatus();
+  setInterval(pollStatus, 1000);
+
+  // ---------- mirror flip ----------
+  var mirrorFlip = false;
+  function renderMirror() {
+    mirrToggle.textContent = mirrorFlip ? "On" : "Off";
+    mirrToggle.setAttribute("aria-pressed", String(mirrorFlip));
+  }
+  function loadConfig() {
+    fetch("/api/v1/config").then(function (res) {
+      if (!res.ok) throw new Error("config " + res.status);
+      return res.json();
+    }).then(function (cfg) {
+      mirrorFlip = !!cfg.mirror_flip;
+      renderMirror();
+    }).catch(function () {
+      // Offline badge from the status poll covers unreachable server.
+    });
+  }
+  mirrToggle.addEventListener("click", function () {
+    var want = !mirrorFlip;
+    fetch("/api/v1/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mirror_flip: want })
+    }).then(function (res) {
+      if (res.ok) {
+        mirrorFlip = want;
+        renderMirror();
+        return;
+      }
+      return res.json().catch(function () { return null; }).then(function (body) {
+        showToast(problemDetail(body, "Could not change mirror setting"));
+      });
+    }).catch(function () {
+      showToast("Could not reach server");
+    });
+  });
+  loadConfig();
+})();
+</script>
+</body>
+</html>

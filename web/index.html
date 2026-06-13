@@ -3,242 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14161a">
 <title>Zeitspiegel</title>
-<style>
-  :root {
-    --bg: #14161a;
-    --panel: #1d2026;
-    --panel-edge: #2a2e36;
-    --text: #e8eaed;
-    --muted: #9aa0a8;
-    --accent: #5b9dd9;
-    --accent-dim: #3d6b94;
-    --warn: #d9a05b;
-    --error: #d96b5b;
-  }
-  * { box-sizing: border-box; }
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                 Helvetica, Arial, sans-serif;
-    font-size: 16px;
-    line-height: 1.4;
-    -webkit-text-size-adjust: 100%;
-  }
-  main {
-    max-width: 560px;
-    margin: 0 auto;
-    padding: 16px 14px 48px;
-  }
-  h1 {
-    font-size: 1.4rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    margin: 8px 0 16px;
-  }
-  h1 small {
-    font-size: 0.75rem;
-    font-weight: 400;
-    color: var(--muted);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin-left: 8px;
-  }
-  section {
-    background: var(--panel);
-    border: 1px solid var(--panel-edge);
-    border-radius: 10px;
-    padding: 14px;
-    margin-bottom: 14px;
-  }
-  h2 {
-    font-size: 0.8rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--muted);
-    margin: 0 0 12px;
-  }
-  /* ---- delay ---- */
-  .delay-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
-  #delay-value {
-    font-variant-numeric: tabular-nums;
-    font-size: 1.6rem;
-    font-weight: 600;
-    min-width: 4.2ch;
-    text-align: right;
-    display: inline-block;
-  }
-  .delay-unit { color: var(--muted); font-size: 0.9rem; }
-  input[type="range"] {
-    flex: 1;
-    -webkit-appearance: none;
-    appearance: none;
-    height: 44px;
-    background: transparent;
-    margin: 0;
-    min-width: 0;
-  }
-  input[type="range"]::-webkit-slider-runnable-track {
-    height: 8px;
-    border-radius: 4px;
-    background: var(--panel-edge);
-  }
-  input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 32px;
-    height: 32px;
-    margin-top: -12px;
-    border-radius: 50%;
-    background: var(--accent);
-    border: none;
-    cursor: pointer;
-  }
-  input[type="range"]::-moz-range-track {
-    height: 8px;
-    border-radius: 4px;
-    background: var(--panel-edge);
-  }
-  input[type="range"]::-moz-range-thumb {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--accent);
-    border: none;
-    cursor: pointer;
-  }
-  /* ---- controls ---- */
-  button {
-    font: inherit;
-    color: var(--text);
-    background: var(--accent-dim);
-    border: 1px solid var(--accent);
-    border-radius: 8px;
-    min-height: 48px;
-    padding: 0 18px;
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  button:active { background: var(--accent); }
-  button[aria-pressed="true"] { background: var(--accent); }
-  input[type="number"], select {
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--panel-edge);
-    border-radius: 8px;
-    min-height: 48px;
-    padding: 0 10px;
-  }
-  input[type="number"] { width: 6.5ch; }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  label { color: var(--muted); font-size: 0.9rem; }
-  /* ---- status ---- */
-  #status dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 6px 16px;
-    margin: 0;
-  }
-  #status dt { color: var(--muted); }
-  #status dd {
-    margin: 0;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .bar {
-    height: 8px;
-    border-radius: 4px;
-    background: var(--bg);
-    border: 1px solid var(--panel-edge);
-    overflow: hidden;
-    margin-top: 10px;
-  }
-  .bar > div {
-    height: 100%;
-    width: 0%;
-    background: var(--accent);
-    transition: width 0.4s linear;
-  }
-  .badge {
-    display: inline-block;
-    font-size: 0.78rem;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    border-radius: 6px;
-    padding: 4px 10px;
-    vertical-align: middle;
-  }
-  #warming-badge {
-    background: var(--warn);
-    color: #14161a;
-  }
-  #offline-badge {
-    background: var(--error);
-    color: #14161a;
-  }
-  [hidden] { display: none !important; }
-  .status-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-  }
-  .status-head h2 { margin: 0; }
-  /* ---- preview ---- */
-  #preview {
-    display: block;
-    width: 100%;
-    border-radius: 8px;
-    background: var(--bg);
-    margin-top: 12px;
-    min-height: 40px;
-  }
-  #preview:not([src]) { display: none; }
-  /* ---- switch row ---- */
-  .switch-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-height: 48px;
-  }
-  /* ---- toast ---- */
-  #toast {
-    position: fixed;
-    left: 50%;
-    bottom: 24px;
-    transform: translateX(-50%);
-    max-width: 90vw;
-    background: var(--error);
-    color: #14161a;
-    font-weight: 600;
-    padding: 12px 18px;
-    border-radius: 8px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.25s ease;
-    z-index: 10;
-  }
-  #toast.show { opacity: 1; }
-  .hint { color: var(--muted); font-size: 0.82rem; margin: 10px 0 0; }
-</style>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<main>
+<header>
   <h1>Zeitspiegel<small>delayed mirror</small></h1>
+  <span class="header-badges">
+    <span class="badge" id="warming-badge" hidden>Warming up</span>
+    <span class="badge" id="offline-badge" hidden>Offline</span>
+    <button type="button" class="link" id="about-link">What is this?</button>
+  </span>
+</header>
 
+<main>
   <!-- Delay -->
   <section>
     <h2>Delay</h2>
@@ -246,29 +25,6 @@
       <input type="range" id="delay-slider" min="0" max="60" step="0.1" value="0"
              aria-label="Delay in seconds">
       <span><span id="delay-value">0.0</span><span class="delay-unit"> s</span></span>
-    </div>
-  </section>
-
-  <!-- Status -->
-  <section>
-    <div class="status-head">
-      <h2>Status</h2>
-      <span>
-        <span class="badge" id="warming-badge" hidden>Warming up</span>
-        <span class="badge" id="offline-badge" hidden>Offline</span>
-      </span>
-    </div>
-    <div id="status">
-      <dl>
-        <dt>Delay</dt>         <dd id="st-delay">&ndash;</dd>
-        <dt>Frame rate</dt>    <dd id="st-fps">&ndash;</dd>
-        <dt>Resolution</dt>    <dd id="st-resolution">&ndash;</dd>
-        <dt>Buffer</dt>        <dd id="st-buffer">&ndash;</dd>
-        <dt>Dropped frames</dt><dd id="st-dropped">&ndash;</dd>
-        <dt>Min latency</dt>   <dd id="st-latency">&ndash;</dd>
-        <dt>Uptime</dt>        <dd id="st-uptime">&ndash;</dd>
-      </dl>
-      <div class="bar"><div id="buffer-bar"></div></div>
     </div>
   </section>
 
@@ -293,23 +49,41 @@
   <!-- Preview -->
   <section>
     <h2>Preview</h2>
-    <button type="button" id="preview-toggle" aria-pressed="false">Start preview</button>
-    <select id="preview-view" aria-label="Preview view">
-      <option value="live" selected>live camera</option>
-      <option value="delayed">delayed mirror</option>
-    </select>
+    <div class="row">
+      <button type="button" id="preview-toggle" aria-pressed="false">Start preview</button>
+      <select id="preview-view" aria-label="Preview view">
+        <option value="live" selected>live camera</option>
+        <option value="delayed">delayed mirror</option>
+      </select>
+    </div>
     <img id="preview" alt="Live preview">
   </section>
-
-  <!-- Settings -->
-  <section>
-    <h2>Settings</h2>
-    <div class="switch-row">
-      <span>Mirror flip</span>
-      <button type="button" id="mirror-toggle" aria-pressed="false">Off</button>
-    </div>
-  </section>
 </main>
+
+<footer>
+  <a href="/settings.html">Status &amp; settings</a>
+</footer>
+
+<dialog id="about-dialog" aria-labelledby="about-title">
+  <h2 id="about-title">What is this?</h2>
+  <p><strong>Zeitspiegel</strong> (&ldquo;time mirror&rdquo;) is a mirror
+  that runs a few seconds late: the screen shows the camera image from
+  moments ago, horizontally flipped like a real mirror.</p>
+  <p><strong>Why it helps dancers</strong> (and anyone training movement):
+  you can&rsquo;t watch yourself in a mirror <em>while</em> you move
+  &mdash; looking at your reflection mid-turn breaks your posture, your
+  spotting and your focus. With a delayed mirror you dance the phrase
+  first, then look up and watch yourself do it, like a coach instantly
+  replaying every attempt. No fumbling with a phone, no stopping the
+  music.</p>
+  <p><strong>How to use it:</strong> set the delay a little longer than
+  the movement you&rsquo;re working on, do the movement, then watch the
+  screen. Liked an attempt? Save the last seconds as a video below.</p>
+  <p>Everything stays in this room: the video lives only in the
+  device&rsquo;s memory and is gone when you unplug it &mdash; nothing is
+  recorded unless you download a clip.</p>
+  <button type="button" id="about-close">Got it</button>
+</dialog>
 
 <div id="toast" role="alert"></div>
 
@@ -323,14 +97,25 @@
   var delayValue = $("delay-value");
   var warmBadge  = $("warming-badge");
   var offBadge   = $("offline-badge");
-  var bufferBar  = $("buffer-bar");
   var dlSeconds  = $("download-seconds");
   var dlFormat   = $("download-format");
   var dlBtn      = $("download-btn");
   var preview    = $("preview");
   var prevToggle = $("preview-toggle");
-  var mirrToggle = $("mirror-toggle");
   var toast      = $("toast");
+
+  // ---------- about dialog ----------
+  var aboutDialog = $("about-dialog");
+  $("about-link").addEventListener("click", function () {
+    if (typeof aboutDialog.showModal === "function") {
+      aboutDialog.showModal();
+    } else {
+      aboutDialog.setAttribute("open", ""); // ancient browsers
+    }
+  });
+  $("about-close").addEventListener("click", function () {
+    aboutDialog.close ? aboutDialog.close() : aboutDialog.removeAttribute("open");
+  });
 
   // ---------- toast ----------
   var toastTimer = null;
@@ -346,14 +131,6 @@
   // ---------- helpers ----------
   function fmtSecs(s) {
     return (Math.round(s * 10) / 10).toFixed(1);
-  }
-  function fmtUptime(s) {
-    s = Math.max(0, Math.floor(s));
-    var h = Math.floor(s / 3600);
-    var m = Math.floor((s % 3600) / 60);
-    var ss = s % 60;
-    function pad(n) { return n < 10 ? "0" + n : "" + n; }
-    return pad(h) + ":" + pad(m) + ":" + pad(ss);
   }
   // Best-effort extraction of an RFC 9457 problem+json message.
   function problemDetail(body, fallback) {
@@ -397,26 +174,12 @@
     });
   }
 
-  // ---------- status polling ----------
+  // ---------- status polling (slider range, warming/offline badges) ----------
   function applyStatus(st) {
     offBadge.hidden = true;
     warmBadge.hidden = !st.warming_up;
 
-    $("st-delay").textContent      = fmtSecs(st.delay_s) + " s";
-    $("st-fps").textContent        = st.fps + " fps";
-    $("st-resolution").textContent = st.resolution || "–";
-    $("st-dropped").textContent    = String(st.dropped_frames);
-    $("st-latency").textContent    = st.min_latency_ms + " ms";
-    $("st-uptime").textContent     = fmtUptime(st.uptime_s);
-
-    var cap  = (st.buffer && st.buffer.capacity_s) || 0;
-    var fill = (st.buffer && st.buffer.filled_s) || 0;
-    $("st-buffer").textContent = fmtSecs(fill) + "s / " + fmtSecs(cap) + "s";
-    bufferBar.style.width = cap > 0
-      ? Math.min(100, (fill / cap) * 100) + "%"
-      : "0%";
-
-    // Keep slider range in sync with buffer capacity.
+    var cap = (st.buffer && st.buffer.capacity_s) || 0;
     if (cap > 0 && parseFloat(slider.max) !== cap) {
       slider.max = cap;
     }
@@ -483,44 +246,6 @@
   preview.addEventListener("error", function () {
     if (previewOn) showToast("Preview stream unavailable");
   });
-
-  // ---------- mirror flip ----------
-  var mirrorFlip = false;
-  function renderMirror() {
-    mirrToggle.textContent = mirrorFlip ? "On" : "Off";
-    mirrToggle.setAttribute("aria-pressed", String(mirrorFlip));
-  }
-  function loadConfig() {
-    fetch("/api/v1/config").then(function (res) {
-      if (!res.ok) throw new Error("config " + res.status);
-      return res.json();
-    }).then(function (cfg) {
-      mirrorFlip = !!cfg.mirror_flip;
-      renderMirror();
-    }).catch(function () {
-      // Offline badge from the status poll covers unreachable server.
-    });
-  }
-  mirrToggle.addEventListener("click", function () {
-    var want = !mirrorFlip;
-    fetch("/api/v1/config", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mirror_flip: want })
-    }).then(function (res) {
-      if (res.ok) {
-        mirrorFlip = want;
-        renderMirror();
-        return;
-      }
-      return res.json().catch(function () { return null; }).then(function (body) {
-        showToast(problemDetail(body, "Could not change mirror setting"));
-      });
-    }).catch(function () {
-      showToast("Could not reach server");
-    });
-  });
-  loadConfig();
 })();
 </script>
 </body>

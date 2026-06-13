@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-//go:embed index.html
+//go:embed index.html settings.html style.css
 var content embed.FS
 
 // Handler serves the UI; the file server resolves "/" to index.html.
