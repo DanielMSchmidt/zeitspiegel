@@ -3,3 +3,4 @@
 *.out
 /clips/
 .DS_Store
+/build/

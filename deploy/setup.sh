@@ -4,9 +4,14 @@
 # Usage:  sudo ./setup.sh [--seal]
 #
 # Expects the built arm64 binary `zeitspiegel` next to this script (built
-# elsewhere via `make build-pi`, or on-device — see the dev-packages block
+# elsewhere via `make pi-binary`, or on-device — see the dev-packages block
 # below). Safe to re-run: an edited /etc/zeitspiegel/config.toml is never
 # clobbered.
+#
+# Environment:
+#   AP_SSID       Wi-Fi network the appliance hosts (default: zeitspiegel)
+#   AP_PASS       WPA2 passphrase (≥ 8 chars; default: random, printed)
+#   WIFI_COUNTRY  regulatory domain for the radio (default: DE)
 #
 # --seal   enable the read-only overlayfs at the end (NFR-9). Without the
 #          flag you are prompted; answer no on a dev box you still edit.
@@ -50,6 +55,39 @@ systemctl enable --now zeitspiegel.service
 # --- mDNS discovery as zeitspiegel.local via the preinstalled Avahi (NFR-10) ---
 hostnamectl set-hostname zeitspiegel
 
+# --- Wi-Fi access point (E-7): the appliance hosts its own network ---------
+# Phones join SSID $AP_SSID directly; NetworkManager's ipv4.method=shared
+# runs DHCP for clients (gateway 10.42.0.1) and mDNS works with no router
+# in between. The connection profile persists and autoconnects on boot.
+AP_SSID="${AP_SSID:-zeitspiegel}"
+AP_PASS="${AP_PASS:-}"
+WIFI_COUNTRY="${WIFI_COUNTRY:-DE}"
+if [[ -z "$AP_PASS" ]]; then
+    # head-first ordering avoids SIGPIPE under pipefail
+    while [[ ${#AP_PASS} -lt 12 ]]; do
+        AP_PASS="$AP_PASS$(head -c 64 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9')"
+    done
+    AP_PASS="${AP_PASS:0:12}"
+    echo "generated AP passphrase: $AP_PASS  (set AP_PASS= to choose your own)"
+fi
+if [[ ${#AP_PASS} -lt 8 ]]; then
+    echo "error: AP_PASS must be at least 8 characters (WPA2)" >&2
+    exit 1
+fi
+# Unblock the radio: a regulatory domain must be set before AP mode works.
+raspi-config nonint do_wifi_country "$WIFI_COUNTRY" || true
+rfkill unblock wifi || true
+# Recreate the profile so SSID/passphrase changes on re-run take effect.
+nmcli connection delete zeitspiegel-ap >/dev/null 2>&1 || true
+nmcli connection add type wifi ifname wlan0 con-name zeitspiegel-ap \
+    autoconnect yes connection.autoconnect-priority 100 \
+    ssid "$AP_SSID" \
+    802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 6 \
+    wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$AP_PASS" \
+    ipv4.method shared ipv6.method disabled
+nmcli connection up zeitspiegel-ap || \
+    echo "note: AP not up yet (radio may need a reboot) — autoconnect will bring it up"
+
 # --- LAST step: seal the appliance — read-only overlayfs (NFR-9) ---------
 # Must come last: after this, nothing above persists across reboots until
 # the overlay is disabled again (see PROVISIONING.md, Operations).
@@ -67,4 +105,5 @@ fi
 echo
 echo "Done: binary -> /usr/local/bin/zeitspiegel, config -> /etc/zeitspiegel/,"
 echo "unit enabled and started, hostname -> zeitspiegel."
-echo "Mirror UI: http://zeitspiegel.local"
+echo "Wi-Fi:     join \"$AP_SSID\" (passphrase: $AP_PASS)"
+echo "Mirror UI: http://zeitspiegel.local  (or http://10.42.0.1)"

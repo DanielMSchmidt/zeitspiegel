@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-hw build build-pi build-tv run-synth run-tv manual-test vet clean
+.PHONY: test test-integration test-hw build build-pi pi-binary sd build-tv run-synth run-tv manual-test vet clean
 
 test: vet
 	$(GO) test -race ./...
@@ -25,6 +25,19 @@ build:
 # Native build on the Pi (or cross with CC=<aarch64 cc> set, e.g. zig cc target).
 build-pi:
 	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 $(GO) build -tags "v4l2 sdl" -o $(BIN) ./cmd/zeitspiegel
+
+# Pi binary cross-built in Docker against Debian trixie (= current Pi OS
+# userland; bookworm's 6.1 kernel headers are too old for go4vl), arm64 —
+# runs natively on Apple Silicon.
+pi-binary:
+	docker run --rm --platform linux/arm64 -v "$(CURDIR)":/src -w /src \
+	  -e GOFLAGS=-buildvcs=false golang:1.25-trixie bash -c \
+	  "apt-get update -qq >/dev/null && apt-get install -y -qq libsdl2-dev libsdl2-image-dev >/dev/null \
+	   && go build -tags 'v4l2 sdl' -o bin/zeitspiegel-pi ./cmd/zeitspiegel"
+
+# Flash + stage a self-provisioning SD card (macOS). See scripts/make-sd.sh.
+sd: pi-binary
+	./scripts/make-sd.sh
 
 run-synth: build
 	./$(BIN) --source synth

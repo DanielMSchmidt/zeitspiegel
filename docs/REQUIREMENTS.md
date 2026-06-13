@@ -26,11 +26,11 @@
 | NFR-3 | Display jitter < 1 frame interval (p99) |
 | NFR-4 | API < 50 ms (except /clip); 30 s clip export < 5 s on Pi 5 |
 | NFR-5 | systemd service, auto-restart, camera reconnect on USB loss |
-| NFR-6 | LAN-only, no auth in v1 (documented); bind address configurable; regular member Wi-Fi required (no guest networks — client isolation breaks discovery + UI) |
+| NFR-6 | LAN-only, no auth in v1 (documented); bind address configurable; the appliance hosts its own Wi-Fi access point (SSID `zeitspiegel`, WPA2) — no venue network involved (E-7) |
 | NFR-7 | Core logic 100 % testable without hardware |
 | NFR-8 | Structured logs (volatile journal) + expvar metrics (drops, fill, export duration) |
 | NFR-9 | Unplug tolerance: read-only root (overlayfs), no persistent writes, clips on tmpfs |
-| NFR-10 | Discoverable as `zeitspiegel.local` (mDNS); `zeitspiegel.fritz.box` behind a Fritzbox |
+| NFR-10 | Discoverable as `zeitspiegel.local` (mDNS) on the appliance's own AP; fallback address `http://10.42.0.1` (the AP gateway) |
 
 ## 3. API contract (v1)
 
@@ -56,4 +56,5 @@ semantics; capture/display read atomic snapshots.
 | E-3 | Delay change = hard cut (ramp = v2 idea) |
 | E-4 | Audio out of scope v1 (architecture admits a second ring later) |
 | E-5 | Appliance: Pi OS Lite, KMSDRM, systemd, read-only overlay, tmpfs, Avahi |
-| E-6 | Regular member Wi-Fi (Fritzbox ok); no guest network; no Pi-hosted AP in v1 |
+| E-6 | *Superseded by E-7.* (Was: regular member Wi-Fi; no Pi-hosted AP) |
+| E-7 | Appliance hosts its own Wi-Fi AP (NetworkManager hotspot, `ipv4.method shared`): no venue Wi-Fi, no client-isolation issues, mDNS works with no router in between; needs internet only once at provisioning (ethernet). Clients get no internet while connected — acceptable for a control UI. The join-venue-Wi-Fi variant lives on branch `wifi-client` |

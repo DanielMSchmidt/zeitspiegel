@@ -26,9 +26,11 @@ frame-accurate export are trivial, and no live encoder is needed.
 ## Target hardware
 
 Raspberry Pi 5 (4/8 GB) + Razer Kiyo (USB, native MJPEG, 720p60 default) +
-any HDMI display. Runs as an unattended appliance: power on → mirror in ~20 s;
-control via `http://zeitspiegel.local`. Power-off = pull the plug (root FS is
-read-only).
+any HDMI display. Runs as an unattended appliance: power on → mirror in ~20 s.
+The appliance hosts its own Wi-Fi (SSID `zeitspiegel`): join it and open
+`http://zeitspiegel.local` — no venue network needed. Power-off = pull the
+plug (root FS is read-only). Provisioning is one command: `make sd` writes a
+fully self-installing SD card.
 
 ## Repository layout
 
@@ -61,7 +63,9 @@ internal/screen/     SDL2/KMSDRM display          [build tag: sdl]
 
 web/                 static UI (embedded)
 
-deploy/              systemd unit, config, setup script, provisioning guide
+deploy/              systemd unit, config, setup script, first-boot SD machinery, provisioning guide
+
+scripts/             manual-test harness, SD-card flasher (make sd)
 
 docs/                ARCHITECTURE.md, REQUIREMENTS.md, TESTPLAN.md, DEPLOYMENT.md
 ```
