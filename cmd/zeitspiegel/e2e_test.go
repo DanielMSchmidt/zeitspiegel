@@ -89,8 +89,8 @@ func TestBinaryAPIContract(t *testing.T) {
 				t.Errorf("missing %q", k)
 			}
 		}
-		if fps := m["fps"].(float64); fps != 60 {
-			t.Errorf("fps = %v, want 60 (default profile)", fps)
+		if fps := m["fps"].(float64); fps != 30 {
+			t.Errorf("fps = %v, want 30 (auto/1080p default profile)", fps)
 		}
 	})
 

@@ -55,6 +55,13 @@ func Open(ctx context.Context, cfg config.Config) (*Camera, error) {
 // openDevice configures and starts one specific node.
 func openDevice(ctx context.Context, cfg config.Config, path string) (*Camera, error) {
 	w, h := cfg.Resolution()
+	if cfg.AutoResolution() {
+		dw, dh, err := probeMaxMJPEG(path)
+		if err != nil {
+			return nil, fmt.Errorf("camera: probe %s: %w", path, err)
+		}
+		w, h = dw, dh
+	}
 	dev, err := device.Open(path,
 		device.WithPixFormat(v4l2.PixFormat{
 			PixelFormat: v4l2.PixelFmtMJPEG,
@@ -65,7 +72,7 @@ func openDevice(ctx context.Context, cfg config.Config, path string) (*Camera, e
 		device.WithBufferSize(4),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("camera: open %s: %w", path, err)
+		return nil, fmt.Errorf("camera: open %s (%dx%d): %w", path, w, h, err)
 	}
 	if err := applyControls(dev, cfg); err != nil {
 		dev.Close()
@@ -76,6 +83,34 @@ func openDevice(ctx context.Context, cfg config.Config, path string) (*Camera, e
 		return nil, fmt.Errorf("camera: start stream: %w", err)
 	}
 	return &Camera{dev: dev, frames: dev.GetOutput()}, nil
+}
+
+// probeMaxMJPEG opens the node briefly and returns the largest discrete
+// MJPEG frame size it advertises, capped at config.MaxAuto{Width,Height} so
+// a >1080p camera cannot exceed the Pi 5's software-decode budget (E-2 rev).
+func probeMaxMJPEG(path string) (w, h int, err error) {
+	dev, err := device.Open(path)
+	if err != nil {
+		return 0, 0, fmt.Errorf("open: %w", err)
+	}
+	defer dev.Close()
+	sizes, err := v4l2.GetFormatFrameSizes(dev.Fd(), v4l2.PixelFmtMJPEG)
+	if err != nil {
+		return 0, 0, fmt.Errorf("enum frame sizes: %w", err)
+	}
+	for _, s := range sizes {
+		fw, fh := int(s.Size.MaxWidth), int(s.Size.MaxHeight)
+		if fw == 0 || fh == 0 || fw > config.MaxAutoWidth || fh > config.MaxAutoHeight {
+			continue
+		}
+		if fw*fh > w*h {
+			w, h = fw, fh
+		}
+	}
+	if w == 0 || h == 0 {
+		return 0, 0, fmt.Errorf("no MJPEG mode at or below %dx%d", config.MaxAutoWidth, config.MaxAutoHeight)
+	}
+	return w, h, nil
 }
 
 // applyControls pins focus and exposure (FR-9; values from spike S-2).

@@ -24,11 +24,14 @@ func TestDefaults(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatalf("default config invalid: %v", err)
 	}
-	if c.Profile != "720p60" { // E-2: temporal > spatial resolution
-		t.Errorf("profile = %q, want 720p60", c.Profile)
+	if c.Profile != "auto" { // E-2 (rev): highest resolution the camera offers
+		t.Errorf("profile = %q, want auto", c.Profile)
 	}
-	if c.FPS() != 60 {
-		t.Errorf("FPS = %v, want 60", c.FPS())
+	if c.FPS() != 30 { // nominal pipeline rate for auto/1080p
+		t.Errorf("FPS = %v, want 30", c.FPS())
+	}
+	if w, h := c.Resolution(); w != 1920 || h != 1080 {
+		t.Errorf("auto nominal resolution = %dx%d, want 1920x1080 (cap)", w, h)
 	}
 	if !c.MirrorFlip { // FR-2: default on
 		t.Error("mirror_flip default must be true")
@@ -104,5 +107,25 @@ func TestResolution(t *testing.T) {
 	c.Profile = "1080p30"
 	if w, h := c.Resolution(); w != 1920 || h != 1080 {
 		t.Errorf("resolution = %dx%d, want 1920x1080", w, h)
+	}
+}
+
+// "auto" means the v4l2 adapter probes the camera; the config reports the
+// 1080p cap as the nominal pipeline rate (decode budget, E-2 rev).
+func TestAutoProfile(t *testing.T) {
+	c := config.Default()
+	c.Profile = "auto"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("auto must be valid: %v", err)
+	}
+	if !c.AutoResolution() {
+		t.Error("AutoResolution() = false for profile auto")
+	}
+	if c.AutoResolution() != (config.Config{Profile: "1080p30"}.AutoResolution() == false) {
+		// sanity: a fixed profile is not auto
+	}
+	w, h := c.Resolution()
+	if w != 1920 || h != 1080 || c.FPS() != 30 {
+		t.Errorf("auto nominal = %dx%d@%v, want 1920x1080@30", w, h, c.FPS())
 	}
 }

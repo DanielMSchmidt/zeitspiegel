@@ -51,10 +51,10 @@ func (r Runtime) WithPatch(p Patch) (Runtime, error) {
 	}
 	if p.Profile != nil {
 		switch *p.Profile {
-		case "720p60", "1080p30":
+		case "auto", "720p60", "1080p30":
 			r.Profile = *p.Profile
 		default:
-			return Runtime{}, fmt.Errorf("profile %q: %w (must be 720p60 or 1080p30)", *p.Profile, ErrInvalid)
+			return Runtime{}, fmt.Errorf("profile %q: %w (must be auto, 720p60 or 1080p30)", *p.Profile, ErrInvalid)
 		}
 	}
 	if p.BufferMaxS != nil {

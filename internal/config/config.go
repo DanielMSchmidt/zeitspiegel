@@ -33,7 +33,7 @@ func Default() Config {
 		Bind:           ":8080",
 		Source:         "camera",
 		Device:         "auto", // first device that actually streams (the Kiyo also enumerates a metadata-only node)
-		Profile:        "720p60",
+		Profile:        "auto", // highest MJPEG resolution the camera offers, capped at 1080p (E-2 rev)
 		BufferMaxS:     120,
 		BufferMaxBytes: 1536 << 20, // 1.5 GiB
 		MirrorFlip:     true,
@@ -57,9 +57,9 @@ func Load(path string) (Config, error) {
 // Validate checks value ranges and enums.
 func (c Config) Validate() error {
 	switch c.Profile {
-	case "720p60", "1080p30":
+	case "auto", "720p60", "1080p30":
 	default:
-		return fmt.Errorf("profile %q: must be 720p60 or 1080p30", c.Profile)
+		return fmt.Errorf("profile %q: must be auto, 720p60 or 1080p30", c.Profile)
 	}
 	switch c.Source {
 	case "camera", "synth":
@@ -78,18 +78,34 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// FPS returns the nominal frame rate of the profile.
+// AutoResolution reports whether the camera adapter should probe the device
+// for its highest MJPEG mode instead of using a fixed profile (capped at the
+// nominal 1080p, see MaxAutoWidth/Height).
+func (c Config) AutoResolution() bool { return c.Profile == "auto" }
+
+// MaxAutoWidth/MaxAutoHeight cap auto-detection so a >1080p camera cannot
+// blow the Pi 5's software JPEG-decode budget (unvalidated above 1080p).
+const (
+	MaxAutoWidth  = 1920
+	MaxAutoHeight = 1080
+)
+
+// FPS returns the nominal pipeline frame rate of the profile. For "auto" it
+// is the 1080p nominal (30) — the display tick and exporter use this; the
+// engine selects frames by capture timestamp, so a camera delivering a
+// slightly different rate stays correct.
 func (c Config) FPS() float64 {
-	if c.Profile == "1080p30" {
-		return 30
+	if c.Profile == "720p60" {
+		return 60
 	}
-	return 60
+	return 30 // auto, 1080p30
 }
 
-// Resolution returns the capture size of the profile.
+// Resolution returns the nominal capture size of the profile; "auto" reports
+// the 1080p cap (the actual mode is chosen by the camera adapter at open).
 func (c Config) Resolution() (w, h int) {
-	if c.Profile == "1080p30" {
-		return 1920, 1080
+	if c.Profile == "720p60" {
+		return 1280, 720
 	}
-	return 1280, 720
+	return MaxAutoWidth, MaxAutoHeight // auto, 1080p30
 }

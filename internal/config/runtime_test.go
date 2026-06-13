@@ -12,7 +12,7 @@ func ptr[T any](v T) *T { return &v }
 // Runtime config + PATCH semantics (REQUIREMENTS §3, FR-9).
 func TestRuntimeWithPatch(t *testing.T) {
 	r := config.Default().Runtime()
-	if r.Profile != "720p60" || !r.MirrorFlip {
+	if r.Profile != "auto" || !r.MirrorFlip {
 		t.Fatalf("runtime from defaults = %+v", r)
 	}
 
@@ -26,7 +26,7 @@ func TestRuntimeWithPatch(t *testing.T) {
 	if r2.BufferMaxS != r.BufferMaxS {
 		t.Error("unpatched field changed")
 	}
-	if r.Profile != "720p60" {
+	if r.Profile != "auto" {
 		t.Error("WithPatch mutated the receiver")
 	}
 

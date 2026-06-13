@@ -10,13 +10,13 @@ import (
 
 // The dev camera path (no v4l2 build tag) feeds ffmpeg per OS.
 func TestFFCamInputArgs(t *testing.T) {
-	cfg := config.Default() // device "auto", 720p60
+	cfg := config.Default() // device "auto", profile auto → 1080p nominal
 
 	mac, err := ffcamInput("darwin", cfg, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"avfoundation", "default:none", "1280x720"} {
+	for _, want := range []string{"avfoundation", "default:none", "1920x1080"} {
 		if !slices.ContainsFunc(mac, func(a string) bool { return strings.Contains(a, want) }) {
 			t.Errorf("darwin args %v missing %q", mac, want)
 		}
@@ -26,7 +26,7 @@ func TestFFCamInputArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"v4l2", "/dev/video2", "1280x720"} {
+	for _, want := range []string{"v4l2", "/dev/video2", "1920x1080"} {
 		if !slices.Contains(lin, want) {
 			t.Errorf("linux args %v missing %q", lin, want)
 		}
