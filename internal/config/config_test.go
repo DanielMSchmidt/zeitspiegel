@@ -42,6 +42,20 @@ func TestDefaults(t *testing.T) {
 	if c.Device != "auto" { // first working capture device, not a fixed node
 		t.Errorf("device default = %q, want auto", c.Device)
 	}
+	if c.DefaultDelayS != 30 { // boot default for the time-shifted mirror
+		t.Errorf("default_delay_s default = %v, want 30", c.DefaultDelayS)
+	}
+}
+
+// UT-10: default_delay_s parses from TOML (FR-9 boot default for FR-3).
+func TestLoadDefaultDelay(t *testing.T) {
+	c, err := config.Load(write(t, `default_delay_s = 12.5`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DefaultDelayS != 12.5 {
+		t.Errorf("default_delay_s = %v, want 12.5", c.DefaultDelayS)
+	}
 }
 
 // UT-10: full + partial parse; absent keys keep defaults (FR-9).
@@ -85,6 +99,7 @@ func TestLoadErrors(t *testing.T) {
 		{"bad profile", `profile = "4k120"`, "profile"},
 		{"bad source", `source = "dvd"`, "source"},
 		{"negative buffer", `buffer_max_s = -5.0`, "buffer_max_s"},
+		{"negative delay", `default_delay_s = -1.0`, "default_delay_s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

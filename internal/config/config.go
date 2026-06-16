@@ -18,7 +18,8 @@ type Config struct {
 	Profile        string  `toml:"profile"`  // "720p60" | "1080p30" (E-2)
 	BufferMaxS     float64 `toml:"buffer_max_s"`
 	BufferMaxBytes int64   `toml:"buffer_max_bytes"`
-	MirrorFlip     bool    `toml:"mirror_flip"` // FR-2, default on
+	MirrorFlip     bool    `toml:"mirror_flip"`     // FR-2, default on
+	DefaultDelayS  float64 `toml:"default_delay_s"` // FR-3 boot delay; runtime override via API
 
 	// camera controls (FR-9; values measured in spike S-2)
 	FocusAuto        bool `toml:"focus_auto"` // default off: pin focus
@@ -37,6 +38,7 @@ func Default() Config {
 		BufferMaxS:     120,
 		BufferMaxBytes: 1536 << 20, // 1.5 GiB
 		MirrorFlip:     true,
+		DefaultDelayS:  30, // boot the mirror with a 30 s shift (FR-3 default)
 		ExposureAuto:   true,
 	}
 }
@@ -74,6 +76,9 @@ func (c Config) Validate() error {
 	}
 	if c.Bind == "" {
 		return fmt.Errorf("bind: must not be empty")
+	}
+	if c.DefaultDelayS < 0 {
+		return fmt.Errorf("default_delay_s %v: must be ≥ 0", c.DefaultDelayS)
 	}
 	return nil
 }

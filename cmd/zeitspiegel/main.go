@@ -69,6 +69,7 @@ func run() error {
 
 	buf := ringbuf.New(time.Duration(cfg.BufferMaxS*float64(time.Second)), cfg.BufferMaxBytes)
 	eng := engine.New(buf)
+	eng.SetDelay(time.Duration(cfg.DefaultDelayS * float64(time.Second)))
 
 	clipDir := cfg.ClipDir
 	if clipDir == "" {
