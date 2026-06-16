@@ -22,7 +22,7 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 | `zeitspiegel.service` | `Restart=always`, `RuntimeDirectory=zeitspiegel` (tmpfs for clips), journal logging; ordered after `network-online.target` but NOT requiring it — the mirror must work with Wi-Fi down; the web UI appears when the network does |
 | `config.toml` | profile=720p60, buffer 120 s / 1.5 GB cap, mirror_flip=true, focus pinning, bind `:80` |
 | `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the open Wi-Fi AP (`AP_SSID`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
-| `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg/SDL2 and write the binary, AP keyfile, user and regdomain — produces a finished, network-free image |
+| `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg + SDL2 + NetworkManager + dnsmasq-base/iptables (needed by `ipv4.method=shared`) + rfkill/iw (for in-place debug), writes the binary, AP keyfile, user, regdomain, NOPASSWD sudo for the admin, persistent journal, and clears the stock rfkill soft-block — produces a finished, network-free image |
 | `sd/seal.sh` + `zeitspiegel-seal.service` | one-time first-boot finisher baked into the image: places the SSH key, enables the read-only overlay, reboots; self-disables (offline) |
 | `PROVISIONING.md` | plug-and-play path: `make sd` (bakes the image + writes the card on macOS) → boot once, no network → done |
 
@@ -40,13 +40,22 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
   time (`make image`, on your computer). Clients on the AP get no internet
   either; phones may warn about it ("stay connected" once).
 - Radio: 2.4 GHz (band bg, channel 6) for maximum device compatibility; the
-  regulatory domain must be set (default DE, `WIFI_COUNTRY=`) or the radio
-  stays rfkill-blocked.
+  regulatory domain must be set (default DE, `WIFI_COUNTRY=`) — and the
+  stock Pi OS image's saved rfkill state must be cleared at bake time
+  (bake.sh does this), or the radio stays soft-blocked even with the
+  regdom set, and NM logs `Wi-Fi disabled by radio killswitch; disabled
+  by state file` while wlan0 stays in `unavailable`.
 - The join-venue-Wi-Fi variant is preserved on the `wifi-client` branch.
 
 ## Operations
 
-- Logs: `journalctl -u zeitspiegel` (volatile). Metrics: `GET /debug/vars`.
+- Logs: `journalctl -u zeitspiegel` — persistent across reboots (NFR-8),
+  bake.sh creates `/var/log/journal/` so post-mortem debug survives without
+  needing a screen attached. Metrics: `GET /debug/vars`.
+- Admin: `ssh zeitspiegel@zeitspiegel.local` (SSH key only — set at bake
+  time). `sudo` is passwordless for this user; the bake-time random
+  password (saved in `build/credentials.txt`) is only needed at the local
+  console.
 - Config change / update: temporarily disable overlay
   (`raspi-config nonint disable_overlayfs` + reboot), apply, re-enable +
   reboot. Two-command procedure in PROVISIONING.md.

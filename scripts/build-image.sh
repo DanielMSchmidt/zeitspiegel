@@ -67,6 +67,8 @@ Zeitspiegel appliance credentials
   Wi-Fi SSID:   $AP_SSID   (open network, no password)
   Mirror UI:    http://zeitspiegel.local   (or http://10.42.0.1)
   ssh login:    zeitspiegel@zeitspiegel.local   password: $ADMIN_PASS
+                (sudo is passwordless for this user — the password above
+                 is only needed if you log in at the local console)
 EOF
 
 rm -f build/raspios.img.xz

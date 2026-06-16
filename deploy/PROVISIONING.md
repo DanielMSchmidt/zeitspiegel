@@ -20,8 +20,11 @@ binary, and **bakes a finished image** — ffmpeg/SDL2 packages, the binary,
 the open Wi-Fi access point and the `zeitspiegel` admin user are all
 installed into the image inside a Docker container, so the card needs **no
 network, ever**. The Wi-Fi is open (no password). Your `~/.ssh/*.pub` is
-authorized automatically; the admin (ssh) password is printed at the end and
-saved to `build/credentials.txt`.
+authorized automatically; `sudo` is passwordless for the admin user (E-7 /
+NFR-6 — the appliance is LAN-only and key-gated, so a sudo password adds
+no defense). A random admin password is still generated for the local
+console and saved to `build/credentials.txt`; if you lose it, re-baking
+will print a new one.
 
 `make image` bakes the image without touching a card (useful to inspect it
 first); `make sd` runs that, then writes the card.
@@ -57,9 +60,9 @@ overlay is not enabled — check `sudo raspi-config nonint get_overlay_now`
 
 ## 5. Config changes / updates on the sealed appliance
 
-`ssh zeitspiegel@zeitspiegel.local` (key or the admin password from the
-card). The root is read-only (NFR-9); writes vanish on reboot. Two-command
-unseal:
+`ssh zeitspiegel@zeitspiegel.local` (key only — `sudo` is passwordless).
+The root is read-only (NFR-9); writes outside `/var/log/journal` (NFR-8)
+vanish on reboot. Two-command unseal:
 
 ```
 sudo raspi-config nonint disable_overlayfs && sudo reboot
@@ -71,8 +74,9 @@ To rename the Wi-Fi: unseal, `SSID=new-name sudo -E ./setup.sh`, re-seal.
 
 ## 6. Troubleshooting
 
-- Logs: `journalctl -u zeitspiegel` (volatile, lost on power-off); the
-  one-time seal: `journalctl -u zeitspiegel-seal`
+- Logs: `journalctl -u zeitspiegel` (persistent across reboots — NFR-8,
+  so a no-AP / no-screen failure can still be diagnosed after a power
+  cycle); the one-time seal: `journalctl -u zeitspiegel-seal`
 - Metrics: `GET http://zeitspiegel.local/debug/vars` (expvar)
 - No `zeitspiegel` Wi-Fi after a few minutes → check the seal log on the
   HDMI console. The regulatory domain is baked into `cmdline.txt`

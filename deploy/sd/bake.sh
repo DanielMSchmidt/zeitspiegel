@@ -66,7 +66,11 @@ rm -f "$ROOT/etc/resolv.conf"; echo "nameserver 1.1.1.1" > "$ROOT/etc/resolv.con
 
 echo "==> install runtime packages into the image"
 chroot "$ROOT" apt-get update -qq
-chroot "$ROOT" apt-get install -y -qq ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 network-manager >/dev/null
+chroot "$ROOT" apt-get install -y -qq ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 \
+    network-manager dnsmasq-base iptables rfkill iw >/dev/null
+# dnsmasq-base + iptables: required by NM's `ipv4.method=shared` AP profile
+# (DHCP to clients + NAT rules). rfkill + iw: lightweight tools for in-place
+# debugging when the appliance won't broadcast.
 
 echo "==> install zeitspiegel binary / config / unit"
 install -D -m0755 "$PAYLOAD/zeitspiegel"          "$ROOT/usr/local/bin/zeitspiegel"
@@ -94,6 +98,16 @@ if [[ -f "$PAYLOAD/authorized_keys" ]]; then
     install -D -m0644 "$PAYLOAD/authorized_keys" "$ROOT/boot/firmware/zeitspiegel-authorized_keys"
 fi
 
+echo "==> passwordless sudo for the appliance admin (LAN-only + key-gated)"
+# E-7/NFR-6: open Wi-Fi, LAN-only, no auth in v1. SSH is key-only. A sudo
+# password on top adds no defense — anyone with the key + LAN can already
+# fully own the device — but losing the bake-time random password turns a
+# debug session into a re-flash. Trade the password for ergonomics.
+install -d -m0755 "$ROOT/etc/sudoers.d"
+printf 'zeitspiegel ALL=(ALL) NOPASSWD: ALL\n' \
+    > "$ROOT/etc/sudoers.d/010-zeitspiegel-nopasswd"
+chmod 0440 "$ROOT/etc/sudoers.d/010-zeitspiegel-nopasswd"
+
 echo "==> Wi-Fi access point profile (open network, NetworkManager keyfile)"
 install -d -m0700 "$ROOT/etc/NetworkManager/system-connections"
 cat > "$ROOT/etc/NetworkManager/system-connections/zeitspiegel-ap.nmconnection" <<EOF
@@ -117,6 +131,20 @@ method=shared
 method=disabled
 EOF
 chmod 600 "$ROOT/etc/NetworkManager/system-connections/zeitspiegel-ap.nmconnection"
+
+# Stock Pi OS ships with the Wi-Fi radio soft-blocked via a saved rfkill
+# state file ("disabled by state file" in NM's log). With our regdom set
+# the radio is supposed to be free; clear the saved state so NM can bring
+# the AP up at first boot instead of seeing the radio as killed.
+echo "==> clear stock rfkill saved soft-block state"
+rm -f "$ROOT/var/lib/systemd/rfkill/"*:wlan 2>/dev/null || true
+
+echo "==> persistent journal (post-mortem debug across reboots)"
+# /var/log/journal existing flips systemd-journald from volatile to
+# persistent storage. NFR-8 traded the "tiny disk writes" story for being
+# able to debug a no-AP appliance without attaching a screen — this whole
+# script is the receipt for that trade.
+install -d -m2755 "$ROOT/var/log/journal"
 
 echo "==> Wi-Fi regulatory domain (${WIFI_COUNTRY}) via kernel cmdline"
 CMD="$ROOT/boot/firmware/cmdline.txt"

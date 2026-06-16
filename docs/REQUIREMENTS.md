@@ -28,8 +28,8 @@
 | NFR-5 | systemd service, auto-restart, camera reconnect on USB loss |
 | NFR-6 | LAN-only, no auth in v1 (documented); bind address configurable; the appliance hosts its own **open** Wi-Fi access point (SSID `zeitspiegel`, no password) — an isolated, internet-less LAN, no venue network involved (E-7) |
 | NFR-7 | Core logic 100 % testable without hardware |
-| NFR-8 | Structured logs (volatile journal) + expvar metrics (drops, fill, export duration) |
-| NFR-9 | Unplug tolerance: read-only root (overlayfs), no persistent writes, clips on tmpfs |
+| NFR-8 | Structured logs (persistent journal at `/var/log/journal`, so a no-AP / no-screen field appliance can still be post-mortem-debugged after a power cycle) + expvar metrics (drops, fill, export duration) |
+| NFR-9 | Unplug tolerance: read-only root (overlayfs), clips on tmpfs. Persistent journal at `/var/log/journal` is the one allowed write path (NFR-8); ext4 journaling keeps it crash-consistent on power loss |
 | NFR-10 | Discoverable as `zeitspiegel.local` (mDNS) on the appliance's own AP; fallback address `http://10.42.0.1` (the AP gateway) |
 
 ## 3. API contract (v1)
