@@ -1,0 +1,20 @@
+# Snapshot KERNEL rfkill state before systemd-rfkill can restore the
+# saved soft-block. If /sys/class/rfkill/*/soft is already 1 here, the
+# block is the kernel/driver's doing (Pi 5 / brcmfmac default), not
+# systemd-rfkill or NetworkManager. That distinction is the whole point
+# of running before systemd-rfkill.
+[Unit]
+Description=zeitspiegel: snapshot rfkill state BEFORE systemd-rfkill
+After=sys-subsystem-rfkill-devices.device local-fs.target
+Before=systemd-rfkill.service NetworkManager.service
+DefaultDependencies=no
+RequiresMountsFor=/boot/firmware
+ConditionPathExists=/usr/local/sbin/zeitspiegel-debug
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zeitspiegel-debug pre-rfkill
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

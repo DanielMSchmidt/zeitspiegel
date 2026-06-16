@@ -46,6 +46,10 @@ cp deploy/config.toml                       build/payload/config.toml
 cp deploy/zeitspiegel.service               build/payload/zeitspiegel.service
 cp deploy/sd/seal.sh                        build/payload/seal.sh
 cp deploy/sd/zeitspiegel-seal.service       build/payload/zeitspiegel-seal.service
+cp deploy/sd/zeitspiegel-debug.sh           build/payload/zeitspiegel-debug.sh
+cp deploy/sd/zeitspiegel-debug-pre-rfkill.service  build/payload/zeitspiegel-debug-pre-rfkill.service
+cp deploy/sd/zeitspiegel-debug-post-rfkill.service build/payload/zeitspiegel-debug-post-rfkill.service
+cp deploy/sd/zeitspiegel-debug-late.service        build/payload/zeitspiegel-debug-late.service
 rm -f build/payload/authorized_keys
 if [[ -z "${SSH_PUBKEY:-}" ]]; then
     for k in ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub; do [[ -f "$k" ]] && SSH_PUBKEY="$k" && break; done

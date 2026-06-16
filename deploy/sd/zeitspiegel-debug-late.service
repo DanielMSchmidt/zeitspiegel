@@ -1,0 +1,22 @@
+# Late snapshot after NetworkManager has had a chance to fail or
+# succeed. Includes nmcli/iw output and NM journal excerpts — the
+# definitive "here's why the AP didn't come up" capture for offline
+# review (the SD card travels back to a Mac with the file already
+# written to FAT32 /boot/firmware/zeitspiegel-debug.log).
+[Unit]
+Description=zeitspiegel: late snapshot after NM has settled
+After=multi-user.target NetworkManager.service
+Wants=multi-user.target
+ConditionPathExists=/usr/local/sbin/zeitspiegel-debug
+
+[Service]
+Type=oneshot
+# Give NM ~20 s to actually try the AP profile and have its journal
+# fill in before we snapshot. Sleep is crude but adequate for a
+# diagnostic unit.
+ExecStartPre=/bin/sleep 20
+ExecStart=/usr/local/sbin/zeitspiegel-debug late
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

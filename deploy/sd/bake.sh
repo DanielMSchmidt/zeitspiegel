@@ -83,6 +83,16 @@ chroot "$ROOT" systemctl enable ssh             >/dev/null 2>&1 || true
 chroot "$ROOT" systemctl enable zeitspiegel.service      >/dev/null
 chroot "$ROOT" systemctl enable zeitspiegel-seal.service >/dev/null
 
+echo "==> install + enable boot-time diagnostic capture (3 stages → /boot/firmware/zeitspiegel-debug.log)"
+# Until the AP is reliably coming up on first boot, every appliance image
+# self-instruments and dumps rfkill / NM / kernel state to the FAT32 boot
+# partition. The user pulls the SD card and reads the log directly.
+install -D -m0755 "$PAYLOAD/zeitspiegel-debug.sh" "$ROOT/usr/local/sbin/zeitspiegel-debug"
+for u in zeitspiegel-debug-pre-rfkill zeitspiegel-debug-post-rfkill zeitspiegel-debug-late; do
+    install -D -m0644 "$PAYLOAD/${u}.service" "$ROOT/etc/systemd/system/${u}.service"
+    chroot "$ROOT" systemctl enable "${u}.service" >/dev/null
+done
+
 echo "==> hostname + mDNS (zeitspiegel.local)"
 echo zeitspiegel > "$ROOT/etc/hostname"
 sed -i 's/127\.0\.1\.1.*/127.0.1.1\tzeitspiegel/' "$ROOT/etc/hosts" 2>/dev/null \

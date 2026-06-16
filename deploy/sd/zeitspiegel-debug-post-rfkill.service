@@ -1,0 +1,18 @@
+# Snapshot rfkill state AFTER systemd-rfkill has had a chance to apply
+# its saved state, but BEFORE NetworkManager.service starts. Compared
+# against the pre-rfkill snapshot this tells us whether systemd-rfkill
+# changed anything. Also captures /var/lib/NetworkManager/NetworkManager.state
+# in its pre-NM-modification form (NM rewrites it on every run).
+[Unit]
+Description=zeitspiegel: snapshot rfkill state AFTER systemd-rfkill, BEFORE NM
+After=systemd-rfkill.service local-fs.target
+Before=NetworkManager.service
+ConditionPathExists=/usr/local/sbin/zeitspiegel-debug
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zeitspiegel-debug post-rfkill
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
