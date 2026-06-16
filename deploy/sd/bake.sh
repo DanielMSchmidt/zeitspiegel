@@ -142,12 +142,39 @@ method=disabled
 EOF
 chmod 600 "$ROOT/etc/NetworkManager/system-connections/zeitspiegel-ap.nmconnection"
 
-# Stock Pi OS ships with the Wi-Fi radio soft-blocked via a saved rfkill
-# state file ("disabled by state file" in NM's log). With our regdom set
-# the radio is supposed to be free; clear the saved state so NM can bring
-# the AP up at first boot instead of seeing the radio as killed.
-echo "==> clear stock rfkill saved soft-block state"
-rm -f "$ROOT/var/lib/systemd/rfkill/"*:wlan 2>/dev/null || true
+# Primary evidence from the previous bake's zeitspiegel-debug.log: Pi OS
+# Lite Trixie on Pi 5 has TWO independent gates blocking the AP, both
+# need addressing:
+#   (a) kernel/driver brings up the WiFi radio soft-blocked at every boot
+#       (/sys/class/rfkill/rfkill1/soft = 1 captured at uptime 3.32s
+#       before any userland could have intervened) and nothing in the
+#       default boot path clears it. → install + enable a oneshot that
+#       runs `rfkill unblock all` Before=NetworkManager.service.
+#   (b) NM's own enable gate /var/lib/NetworkManager/NetworkManager.state
+#       ships with `WirelessEnabled=false` (Pi OS expects raspi-config or
+#       Imager to flip this; we don't run either). → overwrite at bake.
+# Also mask systemd-rfkill so the kernel state we set doesn't get
+# re-saved/re-restored across reboots, and wipe its stale cache.
+echo "==> wifi: clear stale rfkill saved state + mask systemd-rfkill"
+rm -rf "$ROOT/var/lib/systemd/rfkill"
+install -d -m0755 "$ROOT/var/lib/systemd/rfkill"
+chroot "$ROOT" systemctl mask systemd-rfkill.service systemd-rfkill.socket \
+    >/dev/null 2>&1 || true
+
+echo "==> wifi: NetworkManager.state — flip WirelessEnabled=false → true"
+install -d -m0700 "$ROOT/var/lib/NetworkManager"
+cat > "$ROOT/var/lib/NetworkManager/NetworkManager.state" <<'NMS'
+[main]
+NetworkingEnabled=true
+WirelessEnabled=true
+WWANEnabled=true
+NMS
+chmod 0600 "$ROOT/var/lib/NetworkManager/NetworkManager.state"
+
+echo "==> wifi: install + enable rfkill-unblock oneshot (runs before NM)"
+install -D -m0644 "$PAYLOAD/zeitspiegel-rfkill-unblock.service" \
+    "$ROOT/etc/systemd/system/zeitspiegel-rfkill-unblock.service"
+chroot "$ROOT" systemctl enable zeitspiegel-rfkill-unblock.service >/dev/null
 
 echo "==> persistent journal (post-mortem debug across reboots)"
 # /var/log/journal existing flips systemd-journald from volatile to

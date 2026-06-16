@@ -1,0 +1,21 @@
+# Pi OS Lite Trixie on Pi 5 brings up the WiFi radio soft-blocked at
+# every boot — primary evidence is in zeitspiegel-debug.log from the
+# previous bake: /sys/class/rfkill/rfkill1/soft = 1 at uptime 3.32s
+# (before systemd-rfkill could have finished restoring state), and
+# never gets cleared by anything else in the boot path. Unblock it
+# explicitly before NetworkManager activates wlan0.
+#
+# systemd-rfkill is masked alongside this (in bake.sh) so the kernel
+# state we set here doesn't get re-saved/re-restored across reboots.
+[Unit]
+Description=Unblock all radios for the appliance AP (Pi 5 brcmfmac quirk)
+Before=NetworkManager.service
+ConditionPathExists=/usr/sbin/rfkill
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/rfkill unblock all
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
