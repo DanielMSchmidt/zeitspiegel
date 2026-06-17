@@ -5,6 +5,7 @@ package screen
 import (
 	_ "embed"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/veandco/go-sdl2/img"
@@ -65,10 +66,11 @@ func (s *Screen) drawBadge(d time.Duration) error {
 
 	// Blit each glyph from the atlas.
 	for i, r := range text {
-		idx := int32(indexOf(atlasOrder, r))
-		if idx < 0 {
+		rawIdx := strings.IndexRune(atlasOrder, r)
+		if rawIdx < 0 {
 			return fmt.Errorf("screen: badge has unknown rune %q", r)
 		}
+		idx := int32(rawIdx)
 		src := sdl.Rect{X: idx * glyphW, Y: 0, W: glyphW, H: glyphH}
 		dst := sdl.Rect{
 			X: bx + badgePadInner + int32(i)*glyphW,
@@ -81,13 +83,4 @@ func (s *Screen) drawBadge(d time.Duration) error {
 		}
 	}
 	return nil
-}
-
-func indexOf(s string, r rune) int {
-	for i, c := range s {
-		if c == r {
-			return i
-		}
-	}
-	return -1
 }
