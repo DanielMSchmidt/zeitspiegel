@@ -8,6 +8,7 @@ package screen
 import (
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/veandco/go-sdl2/img"
 	"github.com/veandco/go-sdl2/sdl"
@@ -18,10 +19,16 @@ import (
 // Screen implements engine.Display. All methods must run on the main OS
 // thread (cmd locks it; SDL requirement).
 type Screen struct {
-	win    *sdl.Window
-	ren    *sdl.Renderer
-	mirror atomic.Bool
+	win      *sdl.Window
+	ren      *sdl.Renderer
+	mirror   atomic.Bool
+	delayNS  atomic.Int64
+	glyphTex *sdl.Texture
 }
+
+// SetDelay stores the delay shown by the on-screen badge. Called from the
+// render loop each tick; no locking needed (single writer in practice).
+func (s *Screen) SetDelay(d time.Duration) { s.delayNS.Store(int64(d)) }
 
 // Options configures the display.
 type Options struct {
@@ -39,7 +46,7 @@ func Open(o Options) (*Screen, error) {
 	if err := sdl.Init(sdl.INIT_VIDEO); err != nil {
 		return nil, fmt.Errorf("screen: sdl init: %w", err)
 	}
-	if err := img.Init(img.INIT_JPG); err != nil {
+	if err := img.Init(img.INIT_JPG | img.INIT_PNG); err != nil {
 		sdl.Quit()
 		return nil, fmt.Errorf("screen: sdl_image init: %w", err)
 	}
@@ -73,6 +80,15 @@ func Open(o Options) (*Screen, error) {
 	}
 	s := &Screen{win: win, ren: ren}
 	s.mirror.Store(o.Mirror)
+	tex, err := loadGlyphAtlas(ren)
+	if err != nil {
+		ren.Destroy()
+		win.Destroy()
+		img.Quit()
+		sdl.Quit()
+		return nil, err
+	}
+	s.glyphTex = tex
 	return s, nil
 }
 
@@ -123,12 +139,18 @@ func (s *Screen) Render(f frame.Frame) error {
 	if err := s.ren.CopyEx(tex, nil, nil, 0, nil, flip); err != nil {
 		return fmt.Errorf("screen: copy: %w", err)
 	}
+	if err := s.drawBadge(time.Duration(s.delayNS.Load())); err != nil {
+		return err
+	}
 	s.ren.Present()
 	return nil
 }
 
 // Close tears down SDL.
 func (s *Screen) Close() error {
+	if s.glyphTex != nil {
+		s.glyphTex.Destroy()
+	}
 	s.ren.Destroy()
 	s.win.Destroy()
 	img.Quit()

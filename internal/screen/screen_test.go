@@ -57,3 +57,22 @@ func TestProcessEventsQuietByDefault(t *testing.T) {
 		t.Error("no events pending, ProcessEvents must not report quit")
 	}
 }
+
+// UT-11 (sdl side): SetDelay before Render must not affect rendering and
+// the glyph atlas must have loaded successfully in Open.
+func TestRenderWithDelayBadge(t *testing.T) {
+	s := openDummy(t)
+	src := synth.NewSource(30, time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC))
+	s.SetDelay(0)
+	if err := s.Render(src.Next()); err != nil {
+		t.Fatalf("render at delay 0: %v", err)
+	}
+	s.SetDelay(90 * time.Second)
+	if err := s.Render(src.Next()); err != nil {
+		t.Fatalf("render at delay 90s: %v", err)
+	}
+	s.SetDelay(-1 * time.Second) // clamp path
+	if err := s.Render(src.Next()); err != nil {
+		t.Fatalf("render at negative delay: %v", err)
+	}
+}
