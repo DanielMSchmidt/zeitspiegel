@@ -4,6 +4,7 @@ package main
 
 import (
 	"runtime"
+	"time"
 
 	"github.com/danielmschmidt/zeitspiegel/internal/config"
 	"github.com/danielmschmidt/zeitspiegel/internal/engine"
@@ -41,6 +42,14 @@ func displayEvents(d engine.Display) func() bool {
 func displayMirrorFunc(d engine.Display) func(bool) {
 	if s, ok := d.(*screen.Screen); ok {
 		return s.SetMirror
+	}
+	return nil
+}
+
+// displayDelayFunc exposes the badge delay setter used by the render loop.
+func displayDelayFunc(d engine.Display) func(time.Duration) {
+	if s, ok := d.(*screen.Screen); ok {
+		return s.SetDelay
 	}
 	return nil
 }

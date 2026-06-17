@@ -3,6 +3,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/danielmschmidt/zeitspiegel/internal/config"
 	"github.com/danielmschmidt/zeitspiegel/internal/engine"
 )
@@ -18,3 +20,6 @@ func displayMirrorFunc(engine.Display) func(bool) { return nil }
 
 // displayEvents: no window, no events.
 func displayEvents(engine.Display) func() bool { return nil }
+
+// displayDelayFunc: no badge in headless mode.
+func displayDelayFunc(engine.Display) func(time.Duration) { return nil }

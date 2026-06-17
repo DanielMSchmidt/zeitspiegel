@@ -170,6 +170,7 @@ func run() error {
 	if display != nil {
 		logger.Info("display loop starting", "fps", cfg.FPS(), "mirror", cfg.MirrorFlip, "windowed", *windowed)
 		pump := displayEvents(display)
+		setDelay := displayDelayFunc(display)
 		tick := time.NewTicker(time.Duration(float64(time.Second) / cfg.FPS()))
 		defer tick.Stop()
 	loop:
@@ -185,6 +186,9 @@ func run() error {
 				if pump != nil && pump() { // window closed (dev mode)
 					stop()
 					break loop
+				}
+				if setDelay != nil {
+					setDelay(eng.Delay())
 				}
 				if sel := eng.Tick(time.Now()); sel.Render {
 					if err := display.Render(sel.Frame); err != nil {
