@@ -49,7 +49,10 @@ func (s *Screen) drawBadge(d time.Duration) error {
 	if len(text) != 5 {
 		return fmt.Errorf("screen: badge text %q not 5 chars", text)
 	}
-	winW, _ := s.win.GetSize()
+	winW, _, err := s.ren.GetOutputSize()
+	if err != nil {
+		return fmt.Errorf("screen: badge output size: %w", err)
+	}
 	innerW := int32(len(text)) * glyphW
 	badgeW := innerW + 2*badgePadInner
 	badgeH := int32(glyphH) + 2*badgePadInner
