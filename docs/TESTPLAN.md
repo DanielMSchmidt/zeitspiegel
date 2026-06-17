@@ -23,7 +23,7 @@ cross build.
 | UT-8 | window | [t−n, t]: count = n·fps ± 1; clamp when under-buffered; empty ⇒ error |
 | UT-9 | httpapi | Table-driven validation ⇒ 200/422 (FR-11) |
 | UT-10 | config | Parse, defaults, invalid file ⇒ clear startup error |
-| UT-11 | screen | `formatDelay` table: 0⇒"00:00", 30s⇒"00:30", 1m30s⇒"01:30", 61m⇒"61:00", 2h⇒"99:59" (clamp), -5s⇒"00:00" (clamp); plus sdl-tagged smoke that `Render` after `SetDelay` succeeds and the glyph texture loads (FR-13) |
+| UT-11 | screen | `formatDelay` table: 0⇒"0s delay", 2s⇒"2s delay", 30s⇒"30s delay", 90s⇒"90s delay", 999ms⇒"0s delay" (truncate), -5s⇒"0s delay" (clamp), 4h⇒"9999s delay" (clamp); plus sdl-tagged smoke that `Render` after `SetDelay` succeeds and the glyph texture loads (FR-13) |
 
 ## 2. Tier 2 — integration (SyntheticSource, seconds, every PR)
 

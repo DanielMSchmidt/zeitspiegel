@@ -31,12 +31,12 @@ background.
 ## Decisions
 
 1. **Always on.** No fade, no toggle, no config flag. Simpler, predictable.
-2. **Format: `MM:SS`, fixed five characters.** Examples: `00:30`, `01:30`,
-   `99:59`. Delays above 99:59 (we never buffer that long) are clamped for
-   display.
+2. **Format: `Ns delay`, whole seconds.** Examples: `0s delay`, `2s delay`,
+   `90s delay`. Variable-width by character count; sub-second truncates
+   down, negatives clamp to 0, delays above 9999 s clamp to 9999 s.
 3. **White text on opaque black rectangle.** 16 px padding from top and
-   right edges. Badge ≈ 78 × 32 px at 720p (5 glyphs × 14 px + 8 px
-   internal padding).
+   right edges. Badge width = `len(text) × 14 px + 8 px` internal padding;
+   at 720p the typical `30s delay` (9 chars) is ≈ 134 × 32 px.
 4. **Pre-rendered PNG glyph atlas, embedded via `go:embed`.** Hand-coded
    7×12 bitmap font, scaled 2× to 14 × 24 per glyph, baked into
    `internal/screen/glyphs.png`.
@@ -53,10 +53,10 @@ background.
 
 - New file `internal/screen/badge.go` (sdl build tag) holds:
   - The embedded `glyphs.png` atlas and the loaded `*sdl.Texture`.
-  - `formatDelay(d time.Duration) string` returning a fixed 5-char `MM:SS`.
-    Clamps `d < 0` to `0` and `d > 99m59s` to `99:59`.
+  - `formatDelay(d time.Duration) string` returning `"Ns delay"` (whole
+    seconds). Clamps `d < 0` to `0`, `d > 9999 s` to `9999`.
   - `(*Screen).drawBadge(delay time.Duration)` that draws the rectangle
-    and blits five glyphs from the atlas.
+    and blits one glyph per character from the atlas.
 - `Screen` gains:
   - `delayNS atomic.Int64`
   - `glyphTex *sdl.Texture` (loaded in `Open`, destroyed in `Close`)

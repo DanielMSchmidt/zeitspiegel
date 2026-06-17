@@ -17,7 +17,7 @@ var glyphsPNG []byte
 
 // Atlas geometry — must match internal/screen/fontgen/main.go.
 const (
-	atlasOrder    = "0123456789:"
+	atlasOrder    = "0123456789s delay"
 	glyphW        = 14
 	glyphH        = 24
 	badgePadEdge  = 16 // px from top + right edges of the screen
@@ -42,13 +42,10 @@ func loadGlyphAtlas(ren *sdl.Renderer) (*sdl.Texture, error) {
 	return tex, nil
 }
 
-// drawBadge renders the 5-char MM:SS badge in the top-right corner.
-// Must be called after CopyEx so it is never mirror-flipped.
+// drawBadge renders the "Ns delay" badge in the top-right corner. Must
+// be called after CopyEx so it is never mirror-flipped.
 func (s *Screen) drawBadge(d time.Duration) error {
 	text := formatDelay(d)
-	if len(text) != 5 {
-		return fmt.Errorf("screen: badge text %q not 5 chars", text)
-	}
 	winW, _, err := s.ren.GetOutputSize()
 	if err != nil {
 		return fmt.Errorf("screen: badge output size: %w", err)

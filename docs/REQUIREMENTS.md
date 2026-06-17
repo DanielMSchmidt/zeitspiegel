@@ -16,7 +16,7 @@
 | FR-10 | Warm-up: `delay > filled_s` ⇒ show oldest frame, status `warming_up` | FakeClock test |
 | FR-11 | Invalid input ⇒ 422 problem+json with limits | Table-driven API tests |
 | FR-12 | Boot to full-screen mirror ≤ 25 s, no login/desktop: Pi OS Lite (no desktop), SDL/KMSDRM fullscreen, getty@tty1 masked, quiet boot (`quiet logo.nologo vt.global_cursor_default=0`, `disable_splash`), unit starts without waiting on the network | Boot timing on target (M4) |
-| FR-13 | On-screen delay indicator: top-right badge showing current delay as `MM:SS`, white on opaque black, always visible, not mirror-flipped | UT-11 + manual visual check |
+| FR-13 | On-screen delay indicator: top-right badge showing current delay as `Ns delay` (whole seconds), white on opaque black, always visible, not mirror-flipped | UT-11 + manual visual check |
 
 ## 2. Non-functional requirements
 

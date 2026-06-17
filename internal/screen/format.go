@@ -5,18 +5,16 @@ import (
 	"time"
 )
 
-// formatDelay renders d as fixed-width "MM:SS" for the on-screen badge.
-// Clamps negatives to zero and anything above 99:59 to 99:59 — the buffer
-// can never reach that duration in practice, but the display must stay
-// five glyphs wide regardless of input.
+// formatDelay renders d as "Ns delay" for the on-screen badge. Negatives
+// clamp to zero; anything above 9999 s clamps to 9999 s, just so the badge
+// width cannot grow without bound if a runaway delay is ever set.
 func formatDelay(d time.Duration) string {
-	const max = 99*time.Minute + 59*time.Second
 	if d < 0 {
 		d = 0
 	}
-	if d > max {
-		d = max
+	sec := int(d / time.Second)
+	if sec > 9999 {
+		sec = 9999
 	}
-	totalSec := int(d / time.Second)
-	return fmt.Sprintf("%02d:%02d", totalSec/60, totalSec%60)
+	return fmt.Sprintf("%ds delay", sec)
 }
