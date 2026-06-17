@@ -23,6 +23,7 @@ cross build.
 | UT-8 | window | [t−n, t]: count = n·fps ± 1; clamp when under-buffered; empty ⇒ error |
 | UT-9 | httpapi | Table-driven validation ⇒ 200/422 (FR-11) |
 | UT-10 | config | Parse, defaults, invalid file ⇒ clear startup error |
+| UT-11 | screen | `formatDelay` table: 0⇒"00:00", 30s⇒"00:30", 1m30s⇒"01:30", 61m⇒"61:00", 2h⇒"99:59" (clamp), -5s⇒"00:00" (clamp); plus sdl-tagged smoke that `Render` after `SetDelay` succeeds and the glyph texture loads (FR-13) |
 
 ## 2. Tier 2 — integration (SyntheticSource, seconds, every PR)
 
@@ -52,7 +53,7 @@ ARCHITECTURE.md §7.
 | 3 | engine: tick logic, hard-cut semantics, warm-up | UT-6,7; IT-1, IT-6 |
 | 4 | window + export vs real ffmpeg (`integration` tag) | UT-8; IT-3,4 |
 | 5 | httpapi + config | UT-9,10; IT-2,5,8 |
-| 6 | camera + screen adapters (thin), reconnect supervisor | IT-7; ST-1 |
+| 6 | camera + screen adapters (thin), reconnect supervisor | UT-11; IT-7; ST-1 |
 | 7 | wiring, web UI, deploy artifacts, soak | ST-2..6 |
 
 ## 4. Tier 3 — system/E2E (real binary, nightly) & milestones
