@@ -79,19 +79,42 @@ install -D -m0644 "$PAYLOAD/zeitspiegel.service"  "$ROOT/etc/systemd/system/zeit
 install -D -m0755 "$PAYLOAD/seal.sh"              "$ROOT/usr/local/sbin/zeitspiegel-seal"
 install -D -m0644 "$PAYLOAD/zeitspiegel-seal.service" "$ROOT/etc/systemd/system/zeitspiegel-seal.service"
 chroot "$ROOT" systemctl enable NetworkManager  >/dev/null 2>&1 || true
-chroot "$ROOT" systemctl enable ssh             >/dev/null 2>&1 || true
 chroot "$ROOT" systemctl enable zeitspiegel.service      >/dev/null
 chroot "$ROOT" systemctl enable zeitspiegel-seal.service >/dev/null
+
+echo "==> install + enable boot-time profile capture (→ /boot/firmware/zeitspiegel-boot-profile.log)"
+install -D -m0755 "$PAYLOAD/zeitspiegel-boot-profile.sh" \
+    "$ROOT/usr/local/sbin/zeitspiegel-boot-profile"
+install -D -m0644 "$PAYLOAD/zeitspiegel-boot-profile.service" \
+    "$ROOT/etc/systemd/system/zeitspiegel-boot-profile.service"
+install -D -m0644 "$PAYLOAD/zeitspiegel-boot-profile.timer" \
+    "$ROOT/etc/systemd/system/zeitspiegel-boot-profile.timer"
+# Enable the timer, not the service — the service is not in any
+# target's wants graph (would deadlock multi-user.target). The timer
+# fires it once, 30s after boot, by which point FinishTimestamp is set.
+chroot "$ROOT" systemctl enable zeitspiegel-boot-profile.timer >/dev/null
+# Belt-and-suspenders: if a previous bake left the .service enabled,
+# disable it so we don't double-fire.
+chroot "$ROOT" systemctl disable zeitspiegel-boot-profile.service >/dev/null 2>&1 || true
 
 echo "==> install + enable boot-time diagnostic capture (3 stages → /boot/firmware/zeitspiegel-debug.log)"
 # Until the AP is reliably coming up on first boot, every appliance image
 # self-instruments and dumps rfkill / NM / kernel state to the FAT32 boot
 # partition. The user pulls the SD card and reads the log directly.
 install -D -m0755 "$PAYLOAD/zeitspiegel-debug.sh" "$ROOT/usr/local/sbin/zeitspiegel-debug"
-for u in zeitspiegel-debug-pre-rfkill zeitspiegel-debug-post-rfkill zeitspiegel-debug-late; do
+# pre-rfkill + post-rfkill are cheap (≈150 ms total, run before NM) and
+# capture the kernel/userland rfkill state that's only meaningful early
+# in boot — kept enabled. zeitspiegel-debug-late has done its job (AP
+# bring-up is verified 2026-04-21) and adds 20 s to FinishTimestamp via
+# its ExecStartPre=/bin/sleep 20 — installed but NOT enabled. Run on
+# demand: `systemctl start zeitspiegel-debug-late.service`.
+for u in zeitspiegel-debug-pre-rfkill zeitspiegel-debug-post-rfkill; do
     install -D -m0644 "$PAYLOAD/${u}.service" "$ROOT/etc/systemd/system/${u}.service"
     chroot "$ROOT" systemctl enable "${u}.service" >/dev/null
 done
+install -D -m0644 "$PAYLOAD/zeitspiegel-debug-late.service" \
+    "$ROOT/etc/systemd/system/zeitspiegel-debug-late.service"
+chroot "$ROOT" systemctl disable zeitspiegel-debug-late.service >/dev/null 2>&1 || true
 
 echo "==> hostname + mDNS (zeitspiegel.local)"
 echo zeitspiegel > "$ROOT/etc/hostname"
@@ -102,9 +125,11 @@ echo "==> admin user + ssh (Pi OS userconf mechanism)"
 # userconf.txt is the supported headless way to create the first user on
 # first boot; it also satisfies the Bookworm/Trixie first-run user gate.
 printf 'zeitspiegel:%s\n' "$ADMIN_HASH" > "$ROOT/boot/firmware/userconf.txt"
-touch "$ROOT/boot/firmware/ssh"
+# SSH is not enabled: this appliance is read by pulling the SD card, not
+# by ssh'ing in (E-7 + user preference 2026-04-21). authorized_keys is
+# still staged so an emergency `touch /boot/firmware/ssh` on the FAT32
+# partition turns ssh back on in one boot without rebuilding the image.
 if [[ -f "$PAYLOAD/authorized_keys" ]]; then
-    # staged for the user systemd-firstboot will create on /home/zeitspiegel
     install -D -m0644 "$PAYLOAD/authorized_keys" "$ROOT/boot/firmware/zeitspiegel-authorized_keys"
 fi
 
@@ -117,6 +142,27 @@ install -d -m0755 "$ROOT/etc/sudoers.d"
 printf 'zeitspiegel ALL=(ALL) NOPASSWD: ALL\n' \
     > "$ROOT/etc/sudoers.d/010-zeitspiegel-nopasswd"
 chmod 0440 "$ROOT/etc/sudoers.d/010-zeitspiegel-nopasswd"
+
+echo "==> NetworkManager: trim for an AP-only appliance (no internet, no DNS)"
+# - connectivity check pings http://connectivity-check.ubuntu.com to
+#   distinguish "connected" from "captive portal". We have no upstream;
+#   the check times out and wastes time. Disable it.
+# - We don't run a DNS resolver on the device. NM defaults to managing
+#   /etc/resolv.conf via systemd-resolved or a similar plugin — `none`
+#   skips that whole code path.
+# - plugins=keyfile only. We ship one .nmconnection in
+#   /etc/NetworkManager/system-connections; no ifupdown plugin needed.
+install -d -m0755 "$ROOT/etc/NetworkManager/conf.d"
+cat > "$ROOT/etc/NetworkManager/conf.d/00-zeitspiegel.conf" <<'NMCONF'
+[main]
+plugins=keyfile
+dns=none
+no-auto-default=*
+
+[connectivity]
+enabled=false
+NMCONF
+chmod 0644 "$ROOT/etc/NetworkManager/conf.d/00-zeitspiegel.conf"
 
 echo "==> Wi-Fi access point profile (open network, NetworkManager keyfile)"
 install -d -m0700 "$ROOT/etc/NetworkManager/system-connections"
@@ -187,13 +233,44 @@ echo "==> Wi-Fi regulatory domain (${WIFI_COUNTRY}) via kernel cmdline"
 CMD="$ROOT/boot/firmware/cmdline.txt"
 grep -q ieee80211_regdom "$CMD" || sed -i "1 s|\$| cfg80211.ieee80211_regdom=${WIFI_COUNTRY}|" "$CMD"
 
+echo "==> trim: mask services this appliance doesn't use (boot time + RAM)"
+# Sealed single-purpose appliance: open Wi-Fi AP, no Bluetooth, no
+# keyboard, no swap, no apt updates (read-only root), no upstream NTP.
+# Masking — not just disabling — also blocks units pulled in as deps,
+# which is what eats seconds during boot. systemctl mask on an
+# already-absent unit just creates a /dev/null symlink, so this list is
+# safe to apply to a stock Pi OS Lite image without probing first.
+for u in \
+    bluetooth.service hciuart.service \
+    ModemManager.service \
+    triggerhappy.service triggerhappy.socket \
+    keyboard-setup.service console-setup.service \
+    apt-daily.timer apt-daily-upgrade.timer \
+    apt-daily.service apt-daily-upgrade.service \
+    man-db.timer man-db.service \
+    dphys-swapfile.service \
+    systemd-timesyncd.service \
+    rpi-eeprom-update.service \
+    e2scrub_all.timer e2scrub_reap.service \
+    cloud-init.service cloud-init-local.service \
+    cloud-init-main.service cloud-init-network.service \
+    cloud-config.service cloud-final.service \
+    alsa-restore.service alsa-state.service \
+    systemd-zram-setup@zram0.service \
+    rpi-resize-swap-file.service rpi-setup-loop@var-swap.service \
+    ssh.service sshswitch.service \
+    NetworkManager-dispatcher.service NetworkManager-wait-online.service \
+; do
+    chroot "$ROOT" systemctl mask "$u" >/dev/null 2>&1 || true
+done
+
 echo "==> kiosk: silent boot, no login prompt (FR-12)"
 # No getty login prompt on the HDMI console — the mirror is the only thing shown.
 chroot "$ROOT" systemctl mask getty@tty1.service >/dev/null 2>&1 || true
 chroot "$ROOT" systemctl disable getty@tty1.service >/dev/null 2>&1 || true
 # Quiet the boot text and hide the console cursor (idempotent, single line).
 read -r KLINE < "$CMD"
-for t in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0; do
+for t in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0 fastboot; do
     case " $KLINE " in *" $t "*) ;; *) KLINE="$KLINE $t" ;; esac
 done
 printf '%s\n' "$KLINE" > "$CMD"

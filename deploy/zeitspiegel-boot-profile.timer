@@ -1,0 +1,18 @@
+# Fires zeitspiegel-boot-profile.service ~30 s after boot. Picked so
+# NetworkManager + the AP bring-up (≈1.5 s observed) and every other
+# real unit has long completed and `FinishTimestampMonotonic` is set
+# — the script itself also polls as a safety net.
+#
+# Timers live in their own activation graph and aren't part of
+# multi-user.target.wants, which is what makes this design work where
+# a plain WantedBy=multi-user.target would deadlock.
+[Unit]
+Description=zeitspiegel: fire boot timing profile capture once after boot
+
+[Timer]
+OnBootSec=30s
+AccuracySec=1s
+Unit=zeitspiegel-boot-profile.service
+
+[Install]
+WantedBy=timers.target

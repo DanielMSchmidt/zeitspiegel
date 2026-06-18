@@ -1,0 +1,16 @@
+# Captures `systemd-analyze` output after the system is fully up so the
+# numbers reflect a finished boot. Writes to /boot/firmware so the SD
+# card carries the result off-device (same pattern as the rfkill/NM
+# debug units).
+#
+# NOT wanted by multi-user.target — see zeitspiegel-boot-profile.timer
+# for why. Putting a oneshot in multi-user.target.wants creates a cycle:
+# the target can't reach finished while our unit is still running, so
+# `systemd-analyze` always reports "Bootup is not yet finished".
+[Unit]
+Description=zeitspiegel: capture boot timing profile
+ConditionPathExists=/usr/local/sbin/zeitspiegel-boot-profile
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zeitspiegel-boot-profile

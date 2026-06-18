@@ -49,8 +49,48 @@ else
 fi
 
 install -D -m 0644 "$DIR/zeitspiegel.service" /etc/systemd/system/zeitspiegel.service
+
+# Boot-profile capture — dumps systemd-analyze output to /boot/firmware
+# so the SD card carries the numbers off-device. The timer (not the
+# service) is what we enable; the service in multi-user.target would
+# deadlock the target it's measuring.
+if [[ -f "$DIR/zeitspiegel-boot-profile.sh" && -f "$DIR/zeitspiegel-boot-profile.service" ]]; then
+    install -D -m 0755 "$DIR/zeitspiegel-boot-profile.sh"      /usr/local/sbin/zeitspiegel-boot-profile
+    install -D -m 0644 "$DIR/zeitspiegel-boot-profile.service" /etc/systemd/system/zeitspiegel-boot-profile.service
+    install -D -m 0644 "$DIR/zeitspiegel-boot-profile.timer"   /etc/systemd/system/zeitspiegel-boot-profile.timer
+    systemctl disable zeitspiegel-boot-profile.service 2>/dev/null || true
+    systemctl enable zeitspiegel-boot-profile.timer
+fi
+
 systemctl daemon-reload
 systemctl enable --now zeitspiegel.service
+
+# Trim: mask services this appliance doesn't use. Sealed single-purpose
+# kiosk — no Bluetooth, no keyboard, no swap, no apt updates (read-only
+# root), no upstream NTP. Mirrors the sweep in deploy/sd/bake.sh.
+for u in \
+    bluetooth.service hciuart.service \
+    ModemManager.service \
+    triggerhappy.service triggerhappy.socket \
+    keyboard-setup.service console-setup.service \
+    apt-daily.timer apt-daily-upgrade.timer \
+    apt-daily.service apt-daily-upgrade.service \
+    man-db.timer man-db.service \
+    dphys-swapfile.service \
+    systemd-timesyncd.service \
+    rpi-eeprom-update.service \
+    e2scrub_all.timer e2scrub_reap.service \
+    cloud-init.service cloud-init-local.service \
+    cloud-init-main.service cloud-init-network.service \
+    cloud-config.service cloud-final.service \
+    alsa-restore.service alsa-state.service \
+    systemd-zram-setup@zram0.service \
+    rpi-resize-swap-file.service rpi-setup-loop@var-swap.service \
+    ssh.service sshswitch.service \
+    NetworkManager-dispatcher.service NetworkManager-wait-online.service \
+; do
+    systemctl mask "$u" >/dev/null 2>&1 || true
+done
 
 # --- mDNS discovery as zeitspiegel.local via the preinstalled Avahi (NFR-10) ---
 hostnamectl set-hostname zeitspiegel
@@ -62,7 +102,7 @@ systemctl mask getty@tty1.service 2>/dev/null || true
 CMD=/boot/firmware/cmdline.txt; [[ -f "$CMD" ]] || CMD=/boot/cmdline.txt
 if [[ -f "$CMD" ]]; then
     read -r KLINE < "$CMD"
-    for t in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0; do
+    for t in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0 fastboot; do
         case " $KLINE " in *" $t "*) ;; *) KLINE="$KLINE $t" ;; esac
     done
     printf '%s\n' "$KLINE" > "$CMD"
@@ -77,6 +117,19 @@ CFG=/boot/firmware/config.txt; [[ -f "$CFG" ]] || CFG=/boot/config.txt
 # between. The connection profile persists and autoconnects on boot.
 AP_SSID="${AP_SSID:-zeitspiegel}"
 WIFI_COUNTRY="${WIFI_COUNTRY:-DE}"
+# Trim NM for an AP-only appliance: no captive-portal probe, no DNS
+# resolver. Mirrors the conf drop done in bake.sh.
+install -d -m 0755 /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/00-zeitspiegel.conf <<'NMCONF'
+[main]
+plugins=keyfile
+dns=none
+no-auto-default=*
+
+[connectivity]
+enabled=false
+NMCONF
+chmod 0644 /etc/NetworkManager/conf.d/00-zeitspiegel.conf
 # Unblock the radio: a regulatory domain must be set before AP mode works.
 raspi-config nonint do_wifi_country "$WIFI_COUNTRY" || true
 rfkill unblock wifi || true
