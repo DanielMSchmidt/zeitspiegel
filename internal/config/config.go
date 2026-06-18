@@ -38,7 +38,7 @@ func Default() Config {
 		BufferMaxS:     120,
 		BufferMaxBytes: 1536 << 20, // 1.5 GiB
 		MirrorFlip:     true,
-		DefaultDelayS:  30, // boot the mirror with a 30 s shift (FR-3 default)
+		DefaultDelayS:  15, // boot the mirror with a 15 s shift (FR-3 default)
 		ExposureAuto:   true,
 	}
 }

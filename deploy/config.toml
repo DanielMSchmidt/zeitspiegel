@@ -10,7 +10,7 @@ profile = "auto"                  # probe the camera's highest MJPEG mode, cappe
 buffer_max_s = 120.0              # ring buffer length in seconds
 buffer_max_bytes = 1610612736     # 1.5 GiB hard cap; 720p60 MJPEG ≈ 5 MB/s ⇒ 120 s ≈ 600 MB
 mirror_flip = true                # horizontal flip — it is a mirror (FR-2)
-default_delay_s = 30.0            # FR-3 boot delay; runtime slider overrides via PUT /api/v1/delay
+default_delay_s = 15.0            # FR-3 boot delay; runtime slider overrides via PUT /api/v1/delay
 
 # Camera controls (FR-9). The Kiyo hunts focus on movement; pin it.
 focus_auto = false                # disable continuous autofocus

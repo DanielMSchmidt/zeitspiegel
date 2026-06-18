@@ -6,7 +6,7 @@
 |---|---|---|
 | FR-1 | Delayed full-screen display | Displayed frame capture time = `now − delay ± 1 frame interval` |
 | FR-2 | Horizontal mirroring (default on, configurable) | Pixel comparison flipped/unflipped |
-| FR-3 | Delay changeable at runtime, 0…`capacity_s`, resolution ≥ 0.1 s. Boot value from `default_delay_s` (default 30 s) | Effective ≤ 1 frame interval after the 200 response |
+| FR-3 | Delay changeable at runtime, 0…`capacity_s`, resolution ≥ 0.1 s. Boot value from `default_delay_s` (default 15 s) | Effective ≤ 1 frame interval after the 200 response |
 | FR-4 | Delay change = hard cut | Increase ⇒ past replays once; decrease ⇒ forward jump, no double display |
 | FR-5 | Download last *n* seconds as MP4 (H.264 default, MJPEG copy option) | ffprobe-valid, duration = min(n, buffered) ± 1 frame, `X-Clip-Duration` correct |
 | FR-6 | Export never blocks capture or display | Drop counter does not increase during export |
