@@ -240,7 +240,7 @@
 <rect x="180" y="434" width="40" height="68" rx="7" fill="none" stroke="#2f6db0" stroke-width="5"/><circle cx="200" cy="492" r="3.2" fill="#2f6db0"/>
 <text x="250" y="446" fill="#14161a" font-size="30" font-weight="700" text-anchor="start">Scan to open the controls</text>
 <text x="250" y="484" fill="#5b6470" font-size="20" font-weight="400" text-anchor="start">or type it into any browser:</text>
-<text x="250" y="516" fill="#2f6db0" font-size="24" font-weight="700" text-anchor="start">zeitspiegel.local</text>
+<text x="250" y="516" fill="#2f6db0" font-size="24" font-weight="700" text-anchor="start">10.42.0.1</text>
 <rect x="275.0" y="546.0" width="250.0" height="250.0" fill="#ffffff"/>
 <rect x="292.24" y="563.24" width="60.34" height="8.62" fill="#000"/>
 <rect x="361.21" y="563.24" width="34.48" height="8.62" fill="#000"/>

@@ -24,6 +24,7 @@ Environment overrides:
 | Var | Default | Effect |
 |-----|---------|--------|
 | `URL` | `http://zeitspiegel.local` | what the controls QR opens |
+| `IP` | `10.42.0.1` | always-works typed address (AP gateway) |
 | `SSID` | `zeitspiegel` | Wi-Fi name shown (and encoded in the join QR) |
 
 Both QR codes are verified scannable (rendered to raster and decoded back).
