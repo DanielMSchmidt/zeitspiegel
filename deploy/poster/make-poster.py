@@ -10,6 +10,7 @@ QR that joins it on scan.
 
 Options (env):
     URL    what the controls QR opens   (default http://zeitspiegel.local)
+    IP     always-works typed address   (default 10.42.0.1)
     SSID   Wi-Fi network name shown      (default zeitspiegel)
 
 Writes deploy/poster/zeitspiegel-poster.svg — vector, scales to any paper.
@@ -19,6 +20,7 @@ import pathlib
 import segno
 
 URL = os.environ.get("URL", "http://zeitspiegel.local")
+IP = os.environ.get("IP", "10.42.0.1")
 SSID = os.environ.get("SSID", "zeitspiegel")
 
 # Palette — print-friendly: dark ink on white, one accent. QR stays pure black.
@@ -135,7 +137,7 @@ y = 446
 parts += [badge("2", 100, y + 20), phone_icon(200, y + 22)]
 parts += [text(250, y, "Scan to open the controls", size=30, weight=700)]
 parts += [text(250, y + 38, "or type it into any browser:", size=20, fill=MUTE)]
-parts += [text(250, y + 70, URL.replace("http://", ""), size=24, weight=700, fill=ACCENT)]
+parts += [text(250, y + 70, IP, size=24, weight=700, fill=ACCENT)]
 QR = 250
 parts += [qr_group(URL, (W - QR) / 2, y + 100, QR)]
 parts += [text(W / 2, y + 100 + QR + 28, "point your camera here",
