@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>For dancers &amp; students · Zeitspiegel</title>
+<meta name="description" content="How to use Zeitspiegel at your studio, plus answers to common questions about privacy and where your video goes.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="./">Zeitspiegel</a>
+  <span class="tag">The delayed dance mirror</span>
+  <nav>
+    <a href="./">Overview</a>
+    <a href="setup.html">Set up at your studio</a>
+    <a href="guests.html" aria-current="page">For dancers &amp; students</a>
+    <a href="https://github.com/DanielMSchmidt/zeitspiegel">GitHub</a>
+  </nav>
+</header>
+<main>
+
+<h1>For dancers &amp; students</h1>
+<p class="lead">
+  Your studio has set up a Zeitspiegel — a mirror that shows you what you did
+  a few seconds ago. Here's how to use it, and answers to the questions
+  people ask most.
+</p>
+
+<h2>How to use it</h2>
+<ol>
+  <li><strong>Look at the screen.</strong> The screen <em>is</em> the mirror.
+    By default it shows you 15 seconds ago.</li>
+  <li><strong>Do your thing.</strong> Dance, lift, stretch, swing — without
+    looking at the screen.</li>
+  <li><strong>A few seconds later, look up.</strong> You'll see what you just
+    did, played back.</li>
+  <li><strong>Want a different delay, or want to save a clip?</strong>
+    Connect your phone to the Wi-Fi network called <code>zeitspiegel</code>
+    (no password) and open
+    <a href="http://zeitspiegel.local"><code>zeitspiegel.local</code></a>.</li>
+</ol>
+
+<p>The studio probably has this poster taped up next to the mirror:</p>
+
+<div class="poster">
+  <img src="poster.svg" alt="A printable poster: 1. join the Wi-Fi called zeitspiegel. 2. scan the QR code or open zeitspiegel.local. 3. set the delay and save clips.">
+</div>
+
+<h2>Frequently asked questions</h2>
+
+<details>
+  <summary>Is someone on the internet watching me train?</summary>
+  <p>
+    <strong>No.</strong> The mirror has no internet connection at all. It
+    can't upload anything anywhere because it has nowhere to upload to.
+  </p>
+  <p>
+    Technically: the device hosts its own little Wi-Fi network so that your
+    phone can talk to it, but that Wi-Fi network is not connected to the
+    studio's internet, the building's internet, or anyone else's. When your
+    phone is connected to it, your phone will tell you "no internet" — that
+    isn't a bug. That's exactly the point.
+  </p>
+</details>
+
+<details>
+  <summary>Is my video being recorded?</summary>
+  <p>
+    <strong>Only in the mirror's short-term memory, and only while it's
+    powered on.</strong>
+  </p>
+  <p>
+    To show you what you did a few seconds ago, the mirror has to remember
+    the last couple of minutes of video. It keeps that memory in temporary
+    storage (RAM), the same kind of memory your phone uses when you have
+    several apps open at once. When you pull the plug — or anyone does —
+    the memory is wiped.
+  </p>
+  <p>
+    Nothing is written to permanent storage. There's no archive, no folder
+    of old sessions, no "today's recordings" anywhere.
+  </p>
+</details>
+
+<details>
+  <summary>What about the clips people download?</summary>
+  <p>
+    When you (or someone else) taps the "save clip" button on the web page,
+    the mirror packages up the last few seconds of video and sends it
+    directly to that phone, as a download. The clip lives on the phone of
+    whoever asked for it — not on the mirror, not on a server.
+  </p>
+</details>
+
+<details>
+  <summary>Can other people see what I'm doing while I use it?</summary>
+  <p>
+    Anyone in the room can see the screen — that's normal mirror behaviour.
+  </p>
+  <p>
+    Anyone who connects to the <code>zeitspiegel</code> Wi-Fi while you're
+    in the room can also see the live and delayed view through the same web
+    page you'd use to change the delay. The mirror is designed for shared
+    studio use, so it doesn't ask for a password or log in — anyone in
+    range with the Wi-Fi joined gets the same view.
+  </p>
+  <p>
+    If you want privacy, ask the studio to power off the mirror, or unplug
+    the USB camera, while you train.
+  </p>
+</details>
+
+<details>
+  <summary>The Wi-Fi has no password. Is that safe?</summary>
+  <p>
+    The Wi-Fi only reaches a few rooms — the range is the same as any home
+    Wi-Fi router. And the only thing on that Wi-Fi is the mirror itself.
+    There's no internet, no file shares, no other devices. Joining it gives
+    someone access to the mirror's controls (the same controls everyone in
+    the studio uses), and nothing else.
+  </p>
+  <p>
+    It's the same kind of "open" as a paper sign-up sheet on a wall: anyone
+    in the room can use it.
+  </p>
+</details>
+
+<details>
+  <summary>My phone says "no internet on this network"</summary>
+  <p>
+    That's correct — the mirror's Wi-Fi doesn't connect to the internet on
+    purpose. Tap "stay connected anyway." After a moment your phone learns
+    that's fine and stops asking.
+  </p>
+</details>
+
+<details>
+  <summary>Can I use this from my normal phone Wi-Fi instead?</summary>
+  <p>
+    No. The mirror is reachable only when you're connected to its own Wi-Fi
+    network. That's a deliberate design choice — it means the mirror works
+    in any building, even ones with bad or no internet, and it never depends
+    on a router or a guest network being configured a certain way.
+  </p>
+</details>
+
+<details>
+  <summary>What's the longest delay I can set?</summary>
+  <p>
+    Two minutes is the default cap, which is more than enough for almost
+    anything. The studio can change it.
+  </p>
+</details>
+
+<details>
+  <summary>Can I see what the mirror is "remembering" right now?</summary>
+  <p>
+    Yes — the web page (<code>zeitspiegel.local</code>) shows you how many
+    seconds of video the mirror currently has in memory. When you set the
+    delay to that number, you're seeing the oldest thing the mirror still
+    remembers.
+  </p>
+</details>
+
+<h2>I want to use this at home</h2>
+<p>
+  Zeitspiegel is open source. The studio's mirror was built from parts that
+  cost about €150 plus a screen. If you'd like one yourself, the
+  <a href="setup.html">setup guide</a> walks through what to buy and what
+  to type.
+</p>
+
+</main>
+<footer>
+  <p>
+    Zeitspiegel is open source ·
+    <a href="https://github.com/DanielMSchmidt/zeitspiegel">github.com/DanielMSchmidt/zeitspiegel</a>
+  </p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setup guide · Zeitspiegel</title>
+<meta name="description" content="Build a Zeitspiegel delayed mirror for your studio. Bill of materials, host prerequisites, and the commands to flash an SD card.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="./">Zeitspiegel</a>
+  <span class="tag">The delayed dance mirror</span>
+  <nav>
+    <a href="./">Overview</a>
+    <a href="setup.html" aria-current="page">Set up at your studio</a>
+    <a href="guests.html">For dancers &amp; students</a>
+    <a href="https://github.com/DanielMSchmidt/zeitspiegel">GitHub</a>
+  </nav>
+</header>
+<main>
+
+<h1>Set up Zeitspiegel at your studio</h1>
+<p class="lead">
+  Total time: about 30 minutes of computer work, plus shipping time for the
+  parts. The flashing tools run on macOS or Linux; everything else is plug
+  and play.
+</p>
+
+<h2>1. What to buy</h2>
+
+<p>Total parts cost is roughly €120–€180, plus a screen.</p>
+
+<table>
+  <thead>
+    <tr><th>Part</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Raspberry Pi 5</strong> (4 GB is fine; 8 GB if you want long buffers)</td>
+      <td>
+        The brain. Get the 4 GB for normal use; the 8 GB is only worth it if
+        you want delays longer than a minute or two at 1080p.
+        <br>
+        <a href="https://www.raspberrypi.com/products/raspberry-pi-5/">raspberrypi.com</a>
+        ·
+        <a href="https://www.google.com/search?q=raspberry+pi+5+4gb">find a reseller</a>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Official Raspberry Pi 5 power supply</strong> (27 W / 5 V&nbsp;5 A USB-C)</td>
+      <td>
+        Required, not optional — the camera draws power from the Pi and the
+        video encode pushes all four cores. Third-party USB-C bricks tend to
+        be 3 A and will brownout under load.
+        <br>
+        <a href="https://www.google.com/search?q=raspberry+pi+5+power+supply+27w">search</a>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Active cooler for Pi 5</strong></td>
+      <td>
+        The official one with the small fan is fine. Without it the Pi
+        throttles during MP4 export.
+        <br>
+        <a href="https://www.google.com/search?q=raspberry+pi+5+active+cooler">search</a>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>micro-SD card</strong>, A2 rating, 16 GB or more</td>
+      <td>
+        Any reputable brand (SanDisk, Samsung, Kingston). The whole appliance
+        fits in &lt; 4 GB; the rest is headroom.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Razer Kiyo</strong> webcam (USB)</td>
+      <td>
+        This is the recommended camera. It outputs MJPEG natively at 720p60
+        and has a hardware ring light controlled by a bezel. Other UVC
+        webcams with native MJPEG should work too, but Kiyo is what's
+        actually tested.
+        <br>
+        <a href="https://www.google.com/search?q=razer+kiyo">search</a>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Micro-HDMI → HDMI cable</strong></td>
+      <td>The Pi 5 has micro-HDMI sockets. One cable is enough.</td>
+    </tr>
+    <tr>
+      <td><strong>Any HDMI display</strong></td>
+      <td>
+        Whatever screen you want to use as the mirror. A 32" TV is a good
+        starting size; bigger is better if guests will read it from across
+        the room.
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <strong>You'll also need:</strong> a way to mount the camera near or on the
+  screen, pointed at where dancers will stand. Many studios use a small
+  desktop tripod sitting on top of the TV, or a clamp on a mic stand.
+</div>
+
+<h2>2. What you need on your computer</h2>
+
+<p>
+  Flashing the SD card is done from your Mac (or any Linux machine — see the
+  note below). You need:
+</p>
+
+<ul>
+  <li><strong>Docker Desktop</strong> — the image is baked inside a Linux
+    container, so the recipe is the same on any host.
+    <a href="https://www.docker.com/products/docker-desktop/">docker.com</a>.</li>
+  <li><strong>Git</strong> — usually already installed; if not, install Xcode
+    Command Line Tools (<code>xcode-select --install</code>) or
+    <a href="https://git-scm.com/downloads">git-scm.com</a>.</li>
+  <li><strong>Go 1.25 or newer</strong> — used to cross-build the Pi binary.
+    <a href="https://go.dev/dl/">go.dev/dl</a>.</li>
+  <li><strong>An SSH key</strong> at <code>~/.ssh/id_*.pub</code>. The flasher
+    copies it onto the Pi so you can later <code>ssh</code> in. If you don't
+    have one: <code>ssh-keygen -t ed25519</code>.</li>
+</ul>
+
+<p>
+  Not on macOS? The baking step works anywhere Docker runs. Writing the card
+  is the only Mac-specific bit (<code>make sd</code>); on Linux, after
+  <code>make image</code>, write the resulting <code>build/zeitspiegel-appliance.img</code>
+  with <code>dd</code> or with the Raspberry Pi Imager's "Use custom image"
+  option.
+</p>
+
+<h2>3. Get the code and flash a card</h2>
+
+<pre><code>git clone https://github.com/DanielMSchmidt/zeitspiegel.git
+cd zeitspiegel</code></pre>
+
+<p>Insert your micro-SD card into your Mac, then:</p>
+
+<pre><code>make sd</code></pre>
+
+<p>
+  That single command downloads Raspberry Pi OS Lite (cached for next time),
+  cross-builds the Zeitspiegel binary, bakes everything into a finished image
+  inside Docker, then asks you to confirm before erasing the card and
+  writing the image.
+</p>
+
+<p>If you want a different Wi-Fi name than the default <code>zeitspiegel</code>:</p>
+
+<pre><code>SSID=studio-mirror make sd</code></pre>
+
+<div class="callout">
+  <strong>What gets baked in:</strong> the binary, ffmpeg, SDL2, the
+  systemd service, an open Wi-Fi hotspot, your SSH key, and a passwordless
+  <code>sudo</code> user. A random console password is generated and saved
+  to <code>build/credentials.txt</code> in the repo. Keep it; you'll only
+  need it if you ever plug a keyboard into the Pi directly.
+</div>
+
+<h2>4. First boot</h2>
+
+<ol>
+  <li>Put the card into the Pi.</li>
+  <li>Plug in the camera, the HDMI cable to your screen, and finally the
+    power.</li>
+  <li>Wait about three minutes. The Pi resizes its filesystem, starts the
+    Wi-Fi hotspot, locks itself into read-only mode, and reboots a couple
+    of times. No interaction needed.</li>
+  <li>You're done when the Wi-Fi network <code>zeitspiegel</code> (or
+    whatever name you chose) appears on your phone.</li>
+</ol>
+
+<h2>5. Use it</h2>
+
+<ol>
+  <li>Connect your phone to the Wi-Fi network <code>zeitspiegel</code>. There
+    is no password.</li>
+  <li>Your phone might warn "this network has no internet" — that's expected
+    and correct. Stay connected.</li>
+  <li>Open <a href="http://zeitspiegel.local"><code>http://zeitspiegel.local</code></a>
+    in any browser. (If that doesn't resolve, try <code>http://10.42.0.1</code>.)</li>
+  <li>Use the slider to set the delay. Use the download button to save the
+    last clip to your phone.</li>
+</ol>
+
+<p>
+  Print the <a href="guests.html">guest poster</a> and tape it next to the
+  screen so dancers know what to do.
+</p>
+
+<h2>6. Day-to-day operation</h2>
+
+<ul>
+  <li><strong>To start:</strong> plug in power. The full-screen mirror is up
+    in about 20 seconds.</li>
+  <li><strong>To stop:</strong> pull the plug. The storage is read-only;
+    nothing gets corrupted.</li>
+  <li><strong>To move it:</strong> it's a Pi, a camera and a cable. Pack it
+    up, set it up somewhere else, plug it in. No reconfiguration needed.</li>
+</ul>
+
+<h2>7. When things go wrong</h2>
+
+<details>
+  <summary>The Wi-Fi <code>zeitspiegel</code> doesn't appear after 5 minutes</summary>
+  <p>
+    Plug a USB keyboard into the Pi and look at the console on the HDMI
+    output for error messages — the first-boot script logs there. The most
+    common cause is a country code mismatch blocking the radio; re-bake the
+    card with <code>WIFI_COUNTRY=YourTwoLetterCode make sd</code>.
+  </p>
+</details>
+
+<details>
+  <summary><code>zeitspiegel.local</code> doesn't resolve</summary>
+  <p>
+    Some phones and routers don't do mDNS. Use the fallback IP
+    <a href="http://10.42.0.1"><code>http://10.42.0.1</code></a>
+    — this always works when you're on the appliance's Wi-Fi.
+  </p>
+</details>
+
+<details>
+  <summary>The mirror looks fine but the delay slider does nothing</summary>
+  <p>
+    Make sure you're connected to the <code>zeitspiegel</code> Wi-Fi
+    (not your home or studio Wi-Fi) when you open the web page. The
+    appliance is only reachable on its own network.
+  </p>
+</details>
+
+<details>
+  <summary>I need to change a setting (camera mode, buffer length, etc.)</summary>
+  <p>
+    <code>ssh zeitspiegel@zeitspiegel.local</code> (uses the SSH key you
+    baked in). The root filesystem is read-only by design, so you need to
+    unseal it for one boot to make changes — the procedure is in
+    <a href="https://github.com/DanielMSchmidt/zeitspiegel/blob/main/deploy/PROVISIONING.md">deploy/PROVISIONING.md §5</a>.
+  </p>
+</details>
+
+<details>
+  <summary>How do I update to a new version?</summary>
+  <p>
+    Easiest: <code>git pull</code> in your local checkout, run
+    <code>make sd</code> again, swap the card. The Pi treats it as a fresh
+    boot. If you've configured anything custom on the device, back that up
+    first.
+  </p>
+</details>
+
+<h2>For developers</h2>
+
+<p>
+  Running Zeitspiegel without a Pi or camera (synthetic source) for
+  development:
+</p>
+
+<pre><code>make run-synth</code></pre>
+
+<p>
+  See <a href="https://github.com/DanielMSchmidt/zeitspiegel/blob/main/CLAUDE.md">CLAUDE.md</a>,
+  <a href="https://github.com/DanielMSchmidt/zeitspiegel/blob/main/docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a>
+  and <a href="https://github.com/DanielMSchmidt/zeitspiegel/blob/main/docs/TESTPLAN.md">docs/TESTPLAN.md</a>
+  for the engineering side of the project.
+</p>
+
+</main>
+<footer>
+  <p>
+    Zeitspiegel is open source ·
+    <a href="https://github.com/DanielMSchmidt/zeitspiegel">github.com/DanielMSchmidt/zeitspiegel</a>
+  </p>
+</footer>
+</body>
+</html>
