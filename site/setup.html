@@ -121,9 +121,6 @@
     <a href="https://git-scm.com/downloads">git-scm.com</a>.</li>
   <li><strong>Go 1.25 or newer</strong> — used to cross-build the Pi binary.
     <a href="https://go.dev/dl/">go.dev/dl</a>.</li>
-  <li><strong>An SSH key</strong> at <code>~/.ssh/id_*.pub</code>. The flasher
-    copies it onto the Pi so you can later <code>ssh</code> in. If you don't
-    have one: <code>ssh-keygen -t ed25519</code>.</li>
 </ul>
 
 <p>
@@ -155,11 +152,12 @@ cd zeitspiegel</code></pre>
 <pre><code>SSID=studio-mirror make sd</code></pre>
 
 <div class="callout">
-  <strong>What gets baked in:</strong> the binary, ffmpeg, SDL2, the
-  systemd service, an open Wi-Fi hotspot, your SSH key, and a passwordless
-  <code>sudo</code> user. A random console password is generated and saved
-  to <code>build/credentials.txt</code> in the repo. Keep it; you'll only
-  need it if you ever plug a keyboard into the Pi directly.
+  <strong>What gets baked in:</strong> the binary, ffmpeg, SDL2, the systemd
+  service, and an open Wi-Fi hotspot. SSH is off by default — the appliance
+  is meant to be re-flashed, not logged into. A random console password is
+  generated and saved to <code>build/credentials.txt</code> in the repo;
+  keep it for the rare case where you need to plug a keyboard into the Pi
+  directly.
 </div>
 
 <h2>4. First boot</h2>
@@ -202,6 +200,9 @@ cd zeitspiegel</code></pre>
     nothing gets corrupted.</li>
   <li><strong>To move it:</strong> it's a Pi, a camera and a cable. Pack it
     up, set it up somewhere else, plug it in. No reconfiguration needed.</li>
+  <li><strong>To change settings or update:</strong> re-flash the SD card
+    from your computer (<code>make sd</code>) and swap it. The appliance
+    has no login on purpose.</li>
 </ul>
 
 <h2>7. When things go wrong</h2>
@@ -237,10 +238,10 @@ cd zeitspiegel</code></pre>
 <details>
   <summary>I need to change a setting (camera mode, buffer length, etc.)</summary>
   <p>
-    <code>ssh zeitspiegel@zeitspiegel.local</code> (uses the SSH key you
-    baked in). The root filesystem is read-only by design, so you need to
-    unseal it for one boot to make changes — the procedure is in
-    <a href="https://github.com/DanielMSchmidt/zeitspiegel/blob/main/deploy/PROVISIONING.md">deploy/PROVISIONING.md §5</a>.
+    The appliance is read-only by design and SSH is off, so the supported
+    way to change settings is to edit <code>deploy/config.toml</code> in
+    your local checkout, run <code>make sd</code> again, and swap the card.
+    Boot is fast enough that this is genuinely easier than logging in.
   </p>
 </details>
 
