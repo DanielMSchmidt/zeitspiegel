@@ -83,15 +83,25 @@ func run() error {
 		gauge: exportSeconds,
 	}
 
+	displayStart := time.Now()
 	display, closeDisplay, err := openDisplay(cfg, *windowed)
 	if err != nil {
 		return err
 	}
+	logger.Info("display opened", "took", time.Since(displayStart).Round(time.Millisecond))
 	if *windowed && display == nil {
 		return errors.New("--windowed needs a display build (go build -tags sdl, see make build-tv)")
 	}
 	if closeDisplay != nil {
 		defer closeDisplay()
+	}
+	// Paint the splash immediately so HDMI shows something while the
+	// camera is enumerating — the render loop will keep repainting it
+	// every tick until the first real frame arrives.
+	if splash := displaySplashFunc(display); splash != nil {
+		if err := splash(); err != nil {
+			logger.Error("initial splash", "err", err)
+		}
 	}
 
 	restart := &atomic.Bool{}
@@ -99,10 +109,14 @@ func run() error {
 
 	sup := capture.New(capture.Options{
 		Open: func(ctx context.Context) (capture.Source, error) {
+			t := time.Now()
 			src, err := openSource(ctx, cfg, store.Current())
 			if err != nil {
 				return nil, err
 			}
+			logger.Info("source opened",
+				"took", time.Since(t).Round(time.Millisecond),
+				"source", cfg.Source)
 			return &restartable{Source: src, restart: restart}, nil
 		},
 		Push:    buf.Push,
@@ -171,8 +185,10 @@ func run() error {
 		logger.Info("display loop starting", "fps", cfg.FPS(), "mirror", cfg.MirrorFlip, "windowed", *windowed)
 		pump := displayEvents(display)
 		setDelay := displayDelayFunc(display)
+		splash := displaySplashFunc(display)
 		tick := time.NewTicker(time.Duration(float64(time.Second) / cfg.FPS()))
 		defer tick.Stop()
+		var firstFrameDone bool
 	loop:
 		for {
 			select {
@@ -193,6 +209,18 @@ func run() error {
 				if sel := eng.Tick(time.Now()); sel.Render {
 					if err := display.Render(sel.Frame); err != nil {
 						logger.Error("render", "seq", sel.Frame.Seq, "err", err)
+					} else if !firstFrameDone {
+						firstFrameDone = true
+						logger.Info("first frame presented",
+							"since_start", time.Since(start).Round(time.Millisecond),
+							"uptime", procUptime())
+					}
+				} else if !firstFrameDone && splash != nil {
+					// Camera is still enumerating / buffer is empty.
+					// Repaint the splash each tick so the screen
+					// shows our colour instead of SDL's default.
+					if err := splash(); err != nil {
+						logger.Error("splash", "err", err)
 					}
 				}
 			}
@@ -217,6 +245,24 @@ func run() error {
 	}
 	logger.Info("shut down", "uptime", time.Since(start).Round(time.Second))
 	return runErr
+}
+
+// procUptime returns the seconds-since-power-on the kernel records in
+// /proc/uptime, or "" on non-Linux / read failure. Used once at first-
+// frame to give the SD-card-readable boot profile an end-to-end number
+// independent of the binary's own start time. Cheap (~1 syscall, two
+// dozen bytes); only called once per process.
+func procUptime() string {
+	data, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return ""
+	}
+	for i, b := range data {
+		if b == ' ' || b == '\n' {
+			return string(data[:i])
+		}
+	}
+	return string(data)
 }
 
 // ctxSleep is the injected reconnect pause (capture itself is clock-free).

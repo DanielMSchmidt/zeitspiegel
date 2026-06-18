@@ -23,3 +23,6 @@ func displayEvents(engine.Display) func() bool { return nil }
 
 // displayDelayFunc: no badge in headless mode.
 func displayDelayFunc(engine.Display) func(time.Duration) { return nil }
+
+// displaySplashFunc: no screen to paint headless.
+func displaySplashFunc(engine.Display) func() error { return nil }

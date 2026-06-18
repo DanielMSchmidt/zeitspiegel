@@ -146,6 +146,27 @@ func (s *Screen) Render(f frame.Frame) error {
 	return nil
 }
 
+// Splash paints a non-black backdrop plus the delay badge so the
+// HDMI output shows something between SDL open and the first camera
+// frame (typically 1–5 s of USB enumerate + first MJPEG decode). The
+// render loop calls this only while warming up before any frame has
+// been presented; after the first real Render the splash is never
+// drawn again. Safe to call repeatedly — paints the same content,
+// presents idempotently.
+func (s *Screen) Splash() error {
+	if err := s.ren.SetDrawColor(16, 18, 38, 255); err != nil {
+		return fmt.Errorf("screen: splash color: %w", err)
+	}
+	if err := s.ren.Clear(); err != nil {
+		return fmt.Errorf("screen: splash clear: %w", err)
+	}
+	if err := s.drawBadge(time.Duration(s.delayNS.Load())); err != nil {
+		return err
+	}
+	s.ren.Present()
+	return nil
+}
+
 // Close tears down SDL.
 func (s *Screen) Close() error {
 	if s.glyphTex != nil {

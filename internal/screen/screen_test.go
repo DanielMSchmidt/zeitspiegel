@@ -58,6 +58,22 @@ func TestProcessEventsQuietByDefault(t *testing.T) {
 	}
 }
 
+// Splash must paint without a frame: covers the warm-up window between
+// SDL open and the first camera capture. Exercises both before any real
+// Render (the boot path) and after (defensive — no-op'd by caller).
+func TestSplashPaintsWithoutFrame(t *testing.T) {
+	s := openDummy(t)
+	s.SetDelay(15 * time.Second)
+	if err := s.Splash(); err != nil {
+		t.Fatalf("splash on fresh display: %v", err)
+	}
+	// Real frame after splash still works (no SDL state corruption).
+	src := synth.NewSource(30, time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC))
+	if err := s.Render(src.Next()); err != nil {
+		t.Fatalf("render after splash: %v", err)
+	}
+}
+
 // UT-11 (sdl side): SetDelay before Render must not affect rendering and
 // the glyph atlas must have loaded successfully in Open.
 func TestRenderWithDelayBadge(t *testing.T) {

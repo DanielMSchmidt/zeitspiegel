@@ -53,3 +53,13 @@ func displayDelayFunc(d engine.Display) func(time.Duration) {
 	}
 	return nil
 }
+
+// displaySplashFunc returns the paint-the-splash closure (nil headless).
+// The render loop calls it while warming up so the screen isn't black
+// between SDL open and the first camera frame.
+func displaySplashFunc(d engine.Display) func() error {
+	if s, ok := d.(*screen.Screen); ok {
+		return s.Splash
+	}
+	return nil
+}
