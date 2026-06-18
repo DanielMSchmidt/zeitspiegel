@@ -24,7 +24,7 @@ command -v xz >/dev/null || die "xz not found — brew install xz"
 [[ -f bin/zeitspiegel-pi ]] || die "bin/zeitspiegel-pi missing — run 'make pi-binary' (make image does this for you)"
 
 AP_SSID="${AP_SSID:-zeitspiegel}"          # open Wi-Fi network (no password, E-7)
-ADMIN_PASS="${ADMIN_PASS:-$(randpw)}"      # ssh login for the zeitspiegel user
+ADMIN_PASS="${ADMIN_PASS:-$(randpw)}"      # local-console login (SSH is off by default)
 WIFI_COUNTRY="${WIFI_COUNTRY:-DE}"
 IMG_URL="${IMG_URL:-https://downloads.raspberrypi.com/raspios_lite_arm64_latest}"
 
@@ -69,11 +69,14 @@ docker run --rm --privileged --platform linux/arm64 \
 
 cat > build/credentials.txt <<EOF
 Zeitspiegel appliance credentials
-  Wi-Fi SSID:   $AP_SSID   (open network, no password)
-  Mirror UI:    http://zeitspiegel.local   (or http://10.42.0.1)
-  ssh login:    zeitspiegel@zeitspiegel.local   password: $ADMIN_PASS
-                (sudo is passwordless for this user — the password above
-                 is only needed if you log in at the local console)
+  Wi-Fi SSID:    $AP_SSID   (open network, no password)
+  Mirror UI:     http://zeitspiegel.local   (or http://10.42.0.1)
+  Console login: zeitspiegel / $ADMIN_PASS
+                 (HDMI + keyboard only — SSH is off by default.
+                  sudo is passwordless. Escape hatch: touch ssh on
+                  the SD's bootfs partition to enable SSH for one
+                  boot; the authorized_keys baked from your
+                  ~/.ssh/*.pub will then work.)
 EOF
 
 rm -f build/raspios.img.xz

@@ -23,7 +23,7 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 | `config.toml` | profile=720p60, buffer 120 s / 1.5 GB cap, mirror_flip=true, focus pinning, bind `:80` |
 | `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the open Wi-Fi AP (`AP_SSID`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
 | `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg + SDL2 + NetworkManager + dnsmasq-base/iptables (needed by `ipv4.method=shared`) + rfkill/iw (for in-place debug), writes the binary, AP keyfile, user, regdomain, NOPASSWD sudo for the admin, persistent journal, and clears the stock rfkill soft-block — produces a finished, network-free image |
-| `sd/seal.sh` + `zeitspiegel-seal.service` | one-time first-boot finisher baked into the image: places the SSH key, enables the read-only overlay, reboots; self-disables (offline) |
+| `sd/seal.sh` + `zeitspiegel-seal.service` | one-time first-boot finisher baked into the image: stages `authorized_keys` for the SSH escape hatch, enables the read-only overlay, reboots; self-disables (offline). SSH itself stays masked. |
 | `PROVISIONING.md` | plug-and-play path: `make sd` (bakes the image + writes the card on macOS) → boot once, no network → done |
 
 ## Network & discovery (E-7: the appliance is its own network)
@@ -52,12 +52,16 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 - Logs: `journalctl -u zeitspiegel` — persistent across reboots (NFR-8),
   bake.sh creates `/var/log/journal/` so post-mortem debug survives without
   needing a screen attached. Metrics: `GET /debug/vars`.
-- Admin: `ssh zeitspiegel@zeitspiegel.local` (SSH key only — set at bake
-  time). `sudo` is passwordless for this user; the bake-time random
-  password (saved in `build/credentials.txt`) is only needed at the local
-  console.
-- Config change / update: temporarily disable overlay
-  (`raspi-config nonint disable_overlayfs` + reboot), apply, re-enable +
-  reboot. Two-command procedure in PROVISIONING.md.
+- Admin: SSH is **off** by default (bake.sh masks `ssh.service`); the
+  supported admin path is re-flashing the card. The bake-time random
+  password (saved in `build/credentials.txt`) is for the local HDMI +
+  keyboard console; `sudo` is passwordless.
+- SSH escape hatch (post-mortem / on-site debug only): mount the SD's
+  FAT32 `bootfs` on any computer and `touch ssh` — Pi OS unmasks
+  `ssh.service` on next boot. The `authorized_keys` from your
+  `~/.ssh/*.pub` was staged at bake time, so the key already works.
+- Config change / update: re-flash via `make sd`. If you must edit
+  in place, unseal first (`raspi-config nonint disable_overlayfs` +
+  reboot), apply, re-enable + reboot — full procedure in PROVISIONING.md §5.
 - RAM budget: buffer cap 1.5 GB default; 720p60 MJPEG ≈ 5 MB/s ⇒ 120 s ≈
   600 MB (1080p30 ≈ 6 MB/s ⇒ 720 MB).

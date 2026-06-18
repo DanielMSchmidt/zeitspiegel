@@ -19,12 +19,14 @@ This downloads Pi OS Lite (cached under `build/cache/`), cross-builds the Pi
 binary, and **bakes a finished image** — ffmpeg/SDL2 packages, the binary,
 the open Wi-Fi access point and the `zeitspiegel` admin user are all
 installed into the image inside a Docker container, so the card needs **no
-network, ever**. The Wi-Fi is open (no password). Your `~/.ssh/*.pub` is
-authorized automatically; `sudo` is passwordless for the admin user (E-7 /
-NFR-6 — the appliance is LAN-only and key-gated, so a sudo password adds
-no defense). A random admin password is still generated for the local
-console and saved to `build/credentials.txt`; if you lose it, re-baking
-will print a new one.
+network, ever**. The Wi-Fi is open (no password). `sudo` is passwordless
+for the admin user (E-7 / NFR-6 — the appliance is LAN-only, so a sudo
+password adds no defense). SSH is **off** by default: the appliance is
+re-imaged, not logged into. A random admin password is still generated
+for the local (HDMI + keyboard) console and saved to
+`build/credentials.txt`; if you lose it, re-baking prints a new one. Your
+`~/.ssh/*.pub` is staged into the image as `authorized_keys` so the SSH
+escape hatch below works without rebuilding.
 
 `make image` bakes the image without touching a card (useful to inspect it
 first); `make sd` runs that, then writes the card.
@@ -58,11 +60,25 @@ and web UI reappear. If anything required fsck or manual recovery, the
 overlay is not enabled — check `sudo raspi-config nonint get_overlay_now`
 (0 = enabled).
 
-## 5. Config changes / updates on the sealed appliance
+## 5. Config changes / updates
 
-`ssh zeitspiegel@zeitspiegel.local` (key only — `sudo` is passwordless).
-The root is read-only (NFR-9); writes outside `/var/log/journal` (NFR-8)
-vanish on reboot. Two-command unseal:
+Re-flash the card. SSH is off by default and the root is read-only
+(NFR-9), so the supported update path is to edit
+`deploy/config.toml` (or whatever else) in your local checkout,
+re-run `make sd`, and swap the card. Boot is fast enough that this
+is genuinely simpler than logging in.
+
+### Emergency SSH escape hatch
+
+When you absolutely need to poke at a field appliance without re-imaging
+(post-mortem, on-site debug), enable SSH for one boot by mounting the
+SD's FAT32 `bootfs` partition on any computer and `touch ssh` on it.
+On next boot, Pi OS sees that file and unmasks `ssh.service`. The
+`authorized_keys` baked in from your `~/.ssh/*.pub` at image time is
+used; `sudo` is passwordless.
+
+To then make persistent changes the overlay has to come off — two-command
+unseal:
 
 ```
 sudo raspi-config nonint disable_overlayfs && sudo reboot
@@ -71,6 +87,7 @@ sudo raspi-config nonint enable_overlayfs && sudo reboot
 ```
 
 To rename the Wi-Fi: unseal, `SSID=new-name sudo -E ./setup.sh`, re-seal.
+Easier: just re-bake the card with `SSID=new-name make sd`.
 
 ## 6. Troubleshooting
 
