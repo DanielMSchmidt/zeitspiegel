@@ -80,8 +80,8 @@ func (e *Exporter) Export(ctx context.Context, frames []frame.Frame, fps float64
 		"-framerate", fmt.Sprintf("%g", fps), "-i", "-"}
 	switch format {
 	case FormatMP4:
-		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-			"-pix_fmt", "yuv420p", "-movflags", "+faststart")
+		args = append(args, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+			"-pix_fmt", "yuv420p", "-vf", "scale='min(1280,iw)':-2")
 	case FormatMJPEG:
 		args = append(args, "-c:v", "copy")
 	default:

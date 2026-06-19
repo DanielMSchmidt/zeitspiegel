@@ -33,13 +33,16 @@ add network jitter and uncontrolled latency; the web UI is control-only
 
 ### D4 — Export via ffmpeg subprocess
 JPEG frames of the requested window are piped to ffmpeg. Default output is
-H.264 (`libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -movflags
-+faststart`) because MJPEG-in-MP4 is effectively unplayable on phones/
-browsers and the use case is "watch on the phone, share in a chat".
-`?format=mjpeg` remains as a CPU-free stream-copy option. Note: Pi 5 has NO
-hardware H.264 encoder; x264 veryfast on its A76 cores is fast enough
-(benchmark in M3). Subprocess isolation > libav bindings (crash isolation,
-no binding maintenance).
+H.264 (`libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p
+-vf scale='min(1280,iw)':-2`) because MJPEG-in-MP4 is effectively unplayable
+on phones/browsers and the use case is "watch on the phone, share in a
+chat". `?format=mjpeg` remains as a CPU-free stream-copy option. Note: Pi 5
+has NO hardware H.264 encoder; x264 ultrafast on its A76 cores keeps the
+export comfortably faster than realtime (benchmark in M3). The 720p long-
+edge cap halves x264 work on 1080p sources at no visible cost for phone
+playback. `+faststart` is intentionally omitted: clips are downloaded then
+played locally, so the second-pass moov rewrite is wasted work. Subprocess
+isolation > libav bindings (crash isolation, no binding maintenance).
 
 ### D5 — REST API + thin static frontend
 Versioned HTTP API is the testable contract; the UI is one embedded
@@ -134,4 +137,4 @@ Exposure + USB + decode + render + vsync ≈ 60–120 ms. `delay = 0` means
 |---|---|---|
 | Kiyo MJPEG bitrate @720p60 / @1080p30 | S-2 | _tbd_ |
 | 720p JPEG decode+render per frame (Pi 5) | S-1 | _tbd_ |
-| x264 veryfast export speed, 30 s clip (Pi 5) | M3 | _tbd_ |
+| x264 ultrafast export speed, 30 s clip (Pi 5) | M3 | _tbd_ |
