@@ -14,7 +14,9 @@ Options (env):
     IP     always-works typed address   (default 10.42.0.1)
     SSID   Wi-Fi network name shown      (default zeitspiegel)
 
-Writes deploy/poster/zeitspiegel-poster.svg — vector, scales to any paper.
+Writes both deploy/poster/zeitspiegel-poster.svg (the print master) and
+site/poster.svg (embedded by site/guests.html). Both files are byte-identical
+— this script is the single source of truth, so they cannot drift.
 """
 import os
 import pathlib
@@ -194,6 +196,14 @@ parts += [
     "</svg>",
 ]
 
-out = pathlib.Path(__file__).with_name("zeitspiegel-poster.svg")
-out.write_text("\n".join(parts))
-print("wrote", out)
+svg = "\n".join(parts)
+# Single source of truth: the script writes BOTH the print master and the
+# site copy. Don't hand-edit either SVG — re-run this script.
+repo_root = pathlib.Path(__file__).resolve().parents[2]
+targets = [
+    repo_root / "deploy" / "poster" / "zeitspiegel-poster.svg",
+    repo_root / "site" / "poster.svg",
+]
+for t in targets:
+    t.write_text(svg)
+    print("wrote", t.relative_to(repo_root))

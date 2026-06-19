@@ -63,6 +63,19 @@ jobs:
       # dummy video driver -- no display needed.
       - run: SDL_VIDEODRIVER=dummy go test -tags sdl ./internal/screen/
 
+  # Guard: deploy/poster/zeitspiegel-poster.svg (print master) and
+  # site/poster.svg (embedded by site/guests.html) must stay in sync.
+  # make-poster.py writes both; this job re-runs it and fails on drift.
+  poster:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: pip install segno
+      - run: make poster-check PYTHON=python3
+
   # Pure-Go arm64 binary (headless-capable, --source synth). The full
   # v4l2+sdl Pi binary needs cgo against Pi libs and is built on-device
   # with `make build-pi` -- see docs/ARCHITECTURE.md §5.

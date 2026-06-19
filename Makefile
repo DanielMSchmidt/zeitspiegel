@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-hw build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean
+.PHONY: test test-integration test-hw build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean poster poster-check
 
 test: vet
 	$(GO) test -race ./...
@@ -60,3 +60,18 @@ run-tv: build-tv
 
 clean:
 	rm -rf bin
+
+# Regenerate the guest poster. The script writes both the print master
+# (deploy/poster/zeitspiegel-poster.svg) and the site copy (site/poster.svg);
+# don't hand-edit either SVG.
+#
+# Override PYTHON to use a different interpreter, e.g.
+#   make poster PYTHON=python3   # if segno is on the system path
+PYTHON ?= deploy/poster/.venv/bin/python
+poster:
+	$(PYTHON) deploy/poster/make-poster.py
+
+# CI guard: regenerate and fail if either checked-in copy drifted.
+poster-check:
+	$(PYTHON) deploy/poster/make-poster.py
+	git diff --exit-code -- deploy/poster/zeitspiegel-poster.svg site/poster.svg
