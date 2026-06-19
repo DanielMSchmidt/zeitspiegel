@@ -76,7 +76,7 @@ func (e *Exporter) Export(ctx context.Context, frames []frame.Frame, fps float64
 	f.Close()
 	cleanup = func() { os.Remove(path) }
 
-	args := []string{"-v", "error", "-y", "-f", "image2pipe",
+	args := []string{"-v", "error", "-y", "-f", "image2pipe", "-vcodec", "mjpeg",
 		"-framerate", fmt.Sprintf("%g", fps), "-i", "-"}
 	switch format {
 	case FormatMP4:
