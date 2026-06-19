@@ -203,6 +203,25 @@
   setInterval(pollStatus, 1000);
 
   // ---------- clip download ----------
+  // Parse `filename="..."` out of a Content-Disposition header. Best-effort;
+  // returns null on miss so the caller can fall back to a default.
+  function filenameFromCD(cd) {
+    if (!cd) return null;
+    var m = /filename\s*=\s*"([^"]+)"/.exec(cd) ||
+            /filename\s*=\s*([^;]+)/.exec(cd);
+    return m ? m[1].trim() : null;
+  }
+
+  function setDownloadPreparing(on) {
+    dlBtn.disabled = on;
+    dlBtn.textContent = on ? "Preparing…" : "Download";
+    if (on) {
+      dlBtn.setAttribute("aria-busy", "true");
+    } else {
+      dlBtn.removeAttribute("aria-busy");
+    }
+  }
+
   dlBtn.addEventListener("click", function () {
     var secs = parseInt(dlSeconds.value, 10);
     if (!isFinite(secs) || secs < 1) {
@@ -211,16 +230,32 @@
     }
     var url = "/api/v1/clip?seconds=" + encodeURIComponent(secs) +
               "&format=" + encodeURIComponent(dlFormat.value);
-    try {
-      var a = document.createElement("a");
-      a.href = url;
-      a.download = "";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      showToast("Could not start download");
-    }
+
+    setDownloadPreparing(true);
+    fetch(url).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return null; }).then(function (body) {
+          showToast(problemDetail(body, "Could not start download"));
+          setDownloadPreparing(false);
+        });
+      }
+      var filename = filenameFromCD(res.headers.get("Content-Disposition"))
+                  || "zeitspiegel-clip.mp4";
+      return res.blob().then(function (blob) {
+        var objectURL = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = objectURL;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(objectURL); }, 0);
+        setDownloadPreparing(false);
+      });
+    }).catch(function () {
+      showToast("Could not reach server");
+      setDownloadPreparing(false);
+    });
   });
 
   // ---------- preview ----------

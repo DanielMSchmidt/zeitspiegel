@@ -73,6 +73,7 @@ still come from spike S-1 on real hardware.
 | MT-5 | Download a 10 s clip (mp4) | File plays (QuickTime/browser/phone), ~10 s long, content matches what the delayed view showed | FR-5 |
 | MT-6 | Download with seconds = 0 (type it manually) | Clean error from the UI, no download; API answers 422 problem+json | FR-11 |
 | MT-7 | Start a 60 s clip download; while it runs, watch "dropped frames" in the status panel | Stays 0 during the export | FR-6 |
+| MT-11 | Click Download; while the export runs, try to click again | Button reads "Preparing…" and is unclickable until the save dialog appears, then resets to "Download". A 503 (buffer empty / busy) surfaces as a toast and the button resets the same way | FR-5 |
 
 Notes:
 - **Mirror flip (FR-2)** is applied by the SDL display renderer, *not* by the
