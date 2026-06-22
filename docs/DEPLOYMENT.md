@@ -8,7 +8,8 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 
 ## Hardware checklist
 
-- Raspberry Pi 5, 4 GB (8 GB for long 1080p buffers); official 5 V/5 A PSU
+- Raspberry Pi 5, **8 GB** (required for the default 12 min / 5 GiB 1080p
+  ring buffer; the 4 GB variant cannot hold it); official 5 V/5 A PSU
   (required — Kiyo is USB-powered and x264 exports load all cores); active
   cooler; micro-HDMI → HDMI cable
 - Razer Kiyo (USB). Ring light is hardware-controlled via its bezel.
@@ -63,5 +64,8 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 - Config change / update: re-flash via `make sd`. If you must edit
   in place, unseal first (`raspi-config nonint disable_overlayfs` +
   reboot), apply, re-enable + reboot — full procedure in PROVISIONING.md §5.
-- RAM budget: buffer cap 1.5 GB default; 720p60 MJPEG ≈ 5 MB/s ⇒ 120 s ≈
-  600 MB (1080p30 ≈ 6 MB/s ⇒ 720 MB).
+- RAM budget: buffer cap 5 GiB default (12 min × ~6 MB/s 1080p30 MJPEG ≈
+  4.3 GiB + spike headroom). Requires the 8 GiB Pi 5 variant; the 4 GiB
+  variant cannot hold the default buffer. To shrink, lower `buffer_max_s`
+  (and optionally `buffer_max_bytes`) in config.toml; the delay slider cap
+  is independent (`delay_max_s`, default 120 s).

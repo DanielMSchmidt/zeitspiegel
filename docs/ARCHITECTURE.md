@@ -22,9 +22,16 @@ Picamera2's `CircularOutput` issues (#226/#323/#815) show the GOP problem:
 clips must start at keyframes, raw H.264 needs muxing, frame counts drift.
 MJPEG makes every frame independently decodable → frame-accurate delay AND
 export with zero special cases, no live encoder (the camera emits MJPEG
-natively over UVC). Cost: ~5× RAM vs H.264 (~5 MB/s at 720p60; 120 s ≈
-600 MB) — acceptable. A second GOP-aligned H.264 ring for very long history
-is a possible v2, not v1.
+natively over UVC). Cost: ~5× RAM vs H.264 (~5 MB/s at 720p60, ~6 MB/s at
+1080p30). The default boot config sizes the buffer for ~12 min of 1080p30
+(`buffer_max_s = 720`, `buffer_max_bytes = 5 GiB`) so a full clip export
+covers a meaningful practice session; this requires the 8 GiB Pi 5 variant.
+Delay is independently capped at `delay_max_s = 120` so the slider stays
+familiar even while the buffer is long. The 12 min figure is provisional
+pending the real-hardware bitrate measurement (S-2, §7); if the Kiyo runs
+hotter than the ~6 MB/s estimate, lower `config.DefaultBufferMaxS`. A
+second GOP-aligned H.264 ring for very long history is a possible v2, not
+v1.
 
 ### D3 — Native full-screen display, not a browser
 SDL2 via KMSDRM renders directly to HDMI without X11. A browser display would

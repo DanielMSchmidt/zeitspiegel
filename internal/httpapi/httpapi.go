@@ -30,6 +30,7 @@ type BufferStatus struct {
 // Status is the GET /api/v1/status response (FR-8).
 type Status struct {
 	DelayS        float64      `json:"delay_s"`
+	DelayMaxS     float64      `json:"delay_max_s"` // user-facing delay cap, independent of buffer capacity
 	FPS           float64      `json:"fps"`
 	Resolution    string       `json:"resolution"`
 	Buffer        BufferStatus `json:"buffer"`
@@ -151,8 +152,10 @@ func (s *server) getStatus(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *server) putDelay(w http.ResponseWriter, r *http.Request) {
-	capS := s.d.Status.Status().Buffer.CapacityS
-	limits := map[string]any{"min_seconds": 0.0, "max_seconds": capS}
+	// Delay is bounded by DelayMaxS (user-facing cap), not buffer capacity:
+	// the buffer can hold 12 min for export while the slider stays at 2 min.
+	maxS := s.d.Status.Status().DelayMaxS
+	limits := map[string]any{"min_seconds": 0.0, "max_seconds": maxS}
 	var body struct {
 		Seconds *float64 `json:"seconds"`
 	}
@@ -162,9 +165,9 @@ func (s *server) putDelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sec := *body.Seconds
-	if sec < 0 || sec > capS {
+	if sec < 0 || sec > maxS {
 		s.problem(w, http.StatusUnprocessableEntity, "delay out of range",
-			fmt.Sprintf("seconds %g outside 0…%g", sec, capS), limits)
+			fmt.Sprintf("seconds %g outside 0…%g", sec, maxS), limits)
 		return
 	}
 	s.d.Delay.SetDelay(time.Duration(sec * float64(time.Second)))

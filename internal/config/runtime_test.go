@@ -36,4 +36,23 @@ func TestRuntimeWithPatch(t *testing.T) {
 	if _, err := r.WithPatch(config.Patch{BufferMaxS: ptr(-1.0)}); !errors.Is(err, config.ErrInvalid) {
 		t.Errorf("negative buffer: err = %v, want ErrInvalid", err)
 	}
+
+	// UT-10: delay_max_s is patchable and validated against buffer_max_s.
+	r3, err := r.WithPatch(config.Patch{DelayMaxS: ptr(60.0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r3.DelayMaxS != 60 {
+		t.Errorf("DelayMaxS = %v, want 60", r3.DelayMaxS)
+	}
+	if _, err := r.WithPatch(config.Patch{DelayMaxS: ptr(-1.0)}); !errors.Is(err, config.ErrInvalid) {
+		t.Errorf("negative delay max: err = %v, want ErrInvalid", err)
+	}
+	if _, err := r.WithPatch(config.Patch{DelayMaxS: ptr(r.BufferMaxS + 1)}); !errors.Is(err, config.ErrInvalid) {
+		t.Errorf("delay max > buffer max: err = %v, want ErrInvalid", err)
+	}
+	// Shrinking buffer_max_s below the current delay_max_s is also invalid.
+	if _, err := r.WithPatch(config.Patch{BufferMaxS: ptr(r.DelayMaxS - 1)}); !errors.Is(err, config.ErrInvalid) {
+		t.Errorf("buffer below delay max: err = %v, want ErrInvalid", err)
+	}
 }

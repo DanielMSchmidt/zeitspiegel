@@ -14,6 +14,7 @@ type Runtime struct {
 	MirrorFlip       bool    `json:"mirror_flip"`
 	Profile          string  `json:"profile"`
 	BufferMaxS       float64 `json:"buffer_max_s"`
+	DelayMaxS        float64 `json:"delay_max_s"`
 	FocusAuto        bool    `json:"focus_auto"`
 	FocusAbsolute    int     `json:"focus_absolute"`
 	ExposureAuto     bool    `json:"exposure_auto"`
@@ -26,6 +27,7 @@ func (c Config) Runtime() Runtime {
 		MirrorFlip:       c.MirrorFlip,
 		Profile:          c.Profile,
 		BufferMaxS:       c.BufferMaxS,
+		DelayMaxS:        c.DelayMaxS,
 		FocusAuto:        c.FocusAuto,
 		FocusAbsolute:    c.FocusAbsolute,
 		ExposureAuto:     c.ExposureAuto,
@@ -38,6 +40,7 @@ type Patch struct {
 	MirrorFlip       *bool    `json:"mirror_flip"`
 	Profile          *string  `json:"profile"`
 	BufferMaxS       *float64 `json:"buffer_max_s"`
+	DelayMaxS        *float64 `json:"delay_max_s"`
 	FocusAuto        *bool    `json:"focus_auto"`
 	FocusAbsolute    *int     `json:"focus_absolute"`
 	ExposureAuto     *bool    `json:"exposure_auto"`
@@ -62,6 +65,18 @@ func (r Runtime) WithPatch(p Patch) (Runtime, error) {
 			return Runtime{}, fmt.Errorf("buffer_max_s %v: %w (must be > 0)", *p.BufferMaxS, ErrInvalid)
 		}
 		r.BufferMaxS = *p.BufferMaxS
+	}
+	if p.DelayMaxS != nil {
+		if *p.DelayMaxS <= 0 {
+			return Runtime{}, fmt.Errorf("delay_max_s %v: %w (must be > 0)", *p.DelayMaxS, ErrInvalid)
+		}
+		r.DelayMaxS = *p.DelayMaxS
+	}
+	// Both caps must satisfy delay_max_s ≤ buffer_max_s after any patch
+	// that touches either field; checked here so shrinking the buffer
+	// below an existing delay cap also fails.
+	if (p.BufferMaxS != nil || p.DelayMaxS != nil) && r.DelayMaxS > r.BufferMaxS {
+		return Runtime{}, fmt.Errorf("delay_max_s %v: %w (must be ≤ buffer_max_s %v)", r.DelayMaxS, ErrInvalid, r.BufferMaxS)
 	}
 	if p.FocusAuto != nil {
 		r.FocusAuto = *p.FocusAuto

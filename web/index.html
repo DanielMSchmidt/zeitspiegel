@@ -179,9 +179,11 @@
     offBadge.hidden = true;
     warmBadge.hidden = !st.warming_up;
 
-    var cap = (st.buffer && st.buffer.capacity_s) || 0;
-    if (cap > 0 && parseFloat(slider.max) !== cap) {
-      slider.max = cap;
+    // Slider max follows delay_max_s (user-facing cap), not the buffer
+    // capacity — the buffer can be much larger to allow long clip exports.
+    var maxDelay = st.delay_max_s || (st.buffer && st.buffer.capacity_s) || 0;
+    if (maxDelay > 0 && parseFloat(slider.max) !== maxDelay) {
+      slider.max = maxDelay;
     }
     // Reflect server-side delay unless the user changed it very recently.
     if (!sliderActive && !debounceTimer && Date.now() > holdOff) {

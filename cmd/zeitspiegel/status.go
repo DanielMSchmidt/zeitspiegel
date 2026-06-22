@@ -35,6 +35,7 @@ func (s *sysStatus) Status() httpapi.Status {
 	filled := st.Span.Seconds()
 	return httpapi.Status{
 		DelayS:        s.eng.Delay().Seconds(),
+		DelayMaxS:     rt.DelayMaxS,
 		FPS:           profileFPS(rt.Profile),
 		Resolution:    fmt.Sprintf("%dx%d", w, h),
 		Buffer:        httpapi.BufferStatus{CapacityS: rt.BufferMaxS, FilledS: filled, Bytes: st.Bytes},
