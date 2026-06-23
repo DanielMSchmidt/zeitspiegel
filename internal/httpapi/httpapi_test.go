@@ -31,8 +31,7 @@ func (f *fakeStatus) Status() httpapi.Status { return f.st }
 func defaultStatus() httpapi.Status {
 	return httpapi.Status{
 		DelayS: 2, FPS: 60, Resolution: "1280x720",
-		Buffer:       httpapi.BufferStatus{CapacityS: 720, FilledS: 30, Bytes: 1 << 20},
-		DelayMaxS:    120,
+		Buffer:       httpapi.BufferStatus{CapacityS: 120, FilledS: 30, Bytes: 1 << 20},
 		MinLatencyMS: 80, UptimeS: 12,
 	}
 }
@@ -120,7 +119,7 @@ func TestStatusSchema(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"delay_s", "delay_max_s", "fps", "resolution", "buffer", "dropped_frames", "min_latency_ms", "warming_up", "uptime_s"} {
+	for _, k := range []string{"delay_s", "fps", "resolution", "buffer", "dropped_frames", "min_latency_ms", "warming_up", "uptime_s"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("status missing key %q", k)
 		}
@@ -145,22 +144,16 @@ func TestValidation(t *testing.T) {
 	}{
 		{"delay ok", "PUT", "/api/v1/delay", `{"seconds": 4.0}`, 200},
 		{"delay zero ok", "PUT", "/api/v1/delay", `{"seconds": 0}`, 200},
-		{"delay at delay_max", "PUT", "/api/v1/delay", `{"seconds": 120}`, 200},
+		{"delay max ok", "PUT", "/api/v1/delay", `{"seconds": 120}`, 200},
 		{"delay negative", "PUT", "/api/v1/delay", `{"seconds": -1}`, 422},
-		// delay_max_s=120 < buffer.capacity_s=720, so 121 is still within
-		// the buffer but above the delay cap — must be rejected.
-		{"delay above delay_max but below buffer", "PUT", "/api/v1/delay", `{"seconds": 121}`, 422},
+		{"delay over capacity", "PUT", "/api/v1/delay", `{"seconds": 120.1}`, 422},
 		{"delay bad json", "PUT", "/api/v1/delay", `{"seconds": "x"}`, 422},
 		{"delay empty body", "PUT", "/api/v1/delay", ``, 422},
 		{"clip ok", "GET", "/api/v1/clip?seconds=10", "", 200},
-		// Clip is bounded by the buffer (720 s), not the delay cap (120 s).
-		// 600 must succeed even though delay_max_s = 120.
-		{"clip long export", "GET", "/api/v1/clip?seconds=600", "", 200},
-		{"clip at capacity", "GET", "/api/v1/clip?seconds=720", "", 200},
 		{"clip with format", "GET", "/api/v1/clip?seconds=10&format=mjpeg", "", 200},
 		{"clip zero", "GET", "/api/v1/clip?seconds=0", "", 422},
 		{"clip negative", "GET", "/api/v1/clip?seconds=-3", "", 422},
-		{"clip over capacity", "GET", "/api/v1/clip?seconds=999", "", 422},
+		{"clip over capacity", "GET", "/api/v1/clip?seconds=500", "", 422},
 		{"clip not a number", "GET", "/api/v1/clip?seconds=ten", "", 422},
 		{"clip bad format", "GET", "/api/v1/clip?seconds=10&format=avi", "", 422},
 		{"config get", "GET", "/api/v1/config", "", 200},

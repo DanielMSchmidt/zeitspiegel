@@ -39,49 +39,11 @@ func TestDefaults(t *testing.T) {
 	if c.BufferMaxS <= 0 || c.BufferMaxBytes <= 0 {
 		t.Errorf("buffer budgets must default > 0, got %v s / %v B", c.BufferMaxS, c.BufferMaxBytes)
 	}
-	// UT-10: the 12-minute export window is a single source of truth
-	// (see internal/config DefaultBufferMaxS). Both the duration and the
-	// byte cap must accommodate ~12 min of 1080p30 MJPEG (~6 MB/s) on an
-	// 8 GiB Pi 5; lower this if real-hardware bitrate (spike S-1) disagrees.
-	if c.BufferMaxS != float64(config.DefaultBufferMaxS) {
-		t.Errorf("buffer_max_s default = %v, want %v (DefaultBufferMaxS)", c.BufferMaxS, config.DefaultBufferMaxS)
-	}
-	if c.BufferMaxS < 720 {
-		t.Errorf("buffer_max_s default = %v, want >= 720 (12 min export window)", c.BufferMaxS)
-	}
-	if c.BufferMaxBytes < 5<<30 {
-		t.Errorf("buffer_max_bytes default = %v, want >= 5 GiB (12 min @ ~6 MB/s + headroom)", c.BufferMaxBytes)
-	}
-	// UT-10: delay cap is independent of buffer cap — the operator can keep
-	// the user-facing max delay at 120 s while the buffer holds 12 min for
-	// export. See REQUIREMENTS §3 (delay_max_s).
-	if c.DelayMaxS != 120 {
-		t.Errorf("delay_max_s default = %v, want 120", c.DelayMaxS)
-	}
 	if c.Device != "auto" { // first working capture device, not a fixed node
 		t.Errorf("device default = %q, want auto", c.Device)
 	}
 	if c.DefaultDelayS != 15 { // boot default for the time-shifted mirror
 		t.Errorf("default_delay_s default = %v, want 15", c.DefaultDelayS)
-	}
-}
-
-// UT-10: delay_max_s round-trips from TOML; absent key keeps default.
-func TestLoadDelayMaxS(t *testing.T) {
-	c, err := config.Load(write(t, `delay_max_s = 90`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.DelayMaxS != 90 {
-		t.Errorf("delay_max_s = %v, want 90", c.DelayMaxS)
-	}
-	// absent key
-	c2, err := config.Load(write(t, ``))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c2.DelayMaxS != 120 {
-		t.Errorf("default delay_max_s after empty load = %v, want 120", c2.DelayMaxS)
 	}
 }
 
@@ -102,7 +64,7 @@ func TestLoad(t *testing.T) {
 bind = ":80"
 source = "synth"
 profile = "1080p30"
-buffer_max_s = 200.0
+buffer_max_s = 60.0
 mirror_flip = false
 focus_auto = false
 focus_absolute = 30
@@ -138,8 +100,6 @@ func TestLoadErrors(t *testing.T) {
 		{"bad source", `source = "dvd"`, "source"},
 		{"negative buffer", `buffer_max_s = -5.0`, "buffer_max_s"},
 		{"negative delay", `default_delay_s = -1.0`, "default_delay_s"},
-		{"negative delay max", `delay_max_s = -1.0`, "delay_max_s"},
-		{"delay max above buffer", `delay_max_s = 9000`, "delay_max_s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

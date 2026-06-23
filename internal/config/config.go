@@ -18,7 +18,6 @@ type Config struct {
 	Profile        string  `toml:"profile"`  // "720p60" | "1080p30" (E-2)
 	BufferMaxS     float64 `toml:"buffer_max_s"`
 	BufferMaxBytes int64   `toml:"buffer_max_bytes"`
-	DelayMaxS      float64 `toml:"delay_max_s"`     // max delay the slider/PUT /api/v1/delay accepts; ≤ BufferMaxS
 	MirrorFlip     bool    `toml:"mirror_flip"`     // FR-2, default on
 	DefaultDelayS  float64 `toml:"default_delay_s"` // FR-3 boot delay; runtime override via API
 
@@ -29,26 +28,6 @@ type Config struct {
 	ExposureAbsolute int  `toml:"exposure_absolute"`
 }
 
-// DefaultBufferMaxS is the default export-window / ring-buffer duration in
-// seconds. Sized for ~12 min of 1080p30 MJPEG (~6 MB/s estimate) on an
-// 8 GiB Pi 5 with ~1.4 GiB slack for ffmpeg export and OS overhead. If the
-// real-hardware bitrate (spike S-1 / M3) shows the Kiyo runs hotter than
-// the estimate in ARCHITECTURE §3, lower this value — every other default
-// follows from it.
-const DefaultBufferMaxS = 720
-
-// DefaultBufferMaxBytes is the default byte cap for the ring buffer.
-// 5 GiB: large enough that DefaultBufferMaxS is the binding eviction
-// constraint at ~6 MB/s, small enough that a sustained bitrate spike
-// (busy scene) evicts early instead of crowding out the ffmpeg export
-// subprocess and the 200 MB NFR-2 reserve.
-const DefaultBufferMaxBytes = 5 << 30 // 5 GiB
-
-// DefaultDelayMaxS is the default user-facing delay cap. Independent of
-// DefaultBufferMaxS so the delay slider can stay at a familiar value
-// (2 min) while the buffer retains 12 min for export.
-const DefaultDelayMaxS = 120
-
 // Default returns the boot defaults (deploy/config.toml overrides for the Pi).
 func Default() Config {
 	return Config{
@@ -56,9 +35,8 @@ func Default() Config {
 		Source:         "camera",
 		Device:         "auto", // first device that actually streams (the Kiyo also enumerates a metadata-only node)
 		Profile:        "auto", // highest MJPEG resolution the camera offers, capped at 1080p (E-2 rev)
-		BufferMaxS:     DefaultBufferMaxS,
-		BufferMaxBytes: DefaultBufferMaxBytes,
-		DelayMaxS:      DefaultDelayMaxS,
+		BufferMaxS:     120,
+		BufferMaxBytes: 1536 << 20, // 1.5 GiB
 		MirrorFlip:     true,
 		DefaultDelayS:  15, // boot the mirror with a 15 s shift (FR-3 default)
 		ExposureAuto:   true,
@@ -95,12 +73,6 @@ func (c Config) Validate() error {
 	}
 	if c.BufferMaxBytes <= 0 {
 		return fmt.Errorf("buffer_max_bytes %v: must be > 0", c.BufferMaxBytes)
-	}
-	if c.DelayMaxS <= 0 {
-		return fmt.Errorf("delay_max_s %v: must be > 0", c.DelayMaxS)
-	}
-	if c.DelayMaxS > c.BufferMaxS {
-		return fmt.Errorf("delay_max_s %v: must be ≤ buffer_max_s %v", c.DelayMaxS, c.BufferMaxS)
 	}
 	if c.Bind == "" {
 		return fmt.Errorf("bind: must not be empty")
