@@ -13,9 +13,10 @@ Options (env):
     URL    what the controls QR opens   (default http://zeitspiegel.local)
     IP     always-works typed address   (default 10.42.0.1)
     SSID   Wi-Fi network name shown      (default zeitspiegel)
+    LANG   poster language: en or de     (default en)
 
-Writes both deploy/poster/zeitspiegel-poster.svg (the print master) and
-site/poster.svg (embedded by site/guests.html). Both files are byte-identical
+Writes both deploy/poster/zeitspiegel-poster[-de].svg (the print master) and
+site/poster[-de].svg (embedded by site/guests.html). Both files are byte-identical
 — this script is the single source of truth, so they cannot drift.
 """
 import os
@@ -25,6 +26,53 @@ import segno
 URL = os.environ.get("URL", "http://zeitspiegel.local")
 IP = os.environ.get("IP", "10.42.0.1")
 SSID = os.environ.get("SSID", "zeitspiegel")
+LANG = os.environ.get("LANG", "en")
+
+STRINGS = {
+    "en": {
+        "subtitle": "THE DELAYED DANCE MIRROR",
+        "scan_prompt": "Scan these two — in order:",
+        "cap_wifi": "Join the Wi-Fi",
+        "cap_controls": "Open the controls",
+        "label_network": "Network",
+        "label_browser": "or type in any browser",
+        "warn_line1": "“No internet connection”.",
+        "warn_heading": "Your phone will say “No internet connection”.",
+        "warn_body_pre": "That’s expected — tap ",
+        "warn_bold": "“Stay connected”",
+        "warn_body_post": ' (or “Keep trying” / “Yes”).',
+        "main_heading": "Dance now — watch yourself a few seconds later.",
+        "main_sub": "The camera shows you on a delay. Move, then look up.",
+        "bullet1_head": "Drag the slider",
+        "bullet1_body": "to choose how many seconds late the mirror shows you.",
+        "bullet2_head": "Tap download",
+        "bullet2_body": "to save the last clip to your phone.",
+        "footer1": "No internet needed — everything stays in this room.",
+        "footer2": "Nothing is recorded unless you download a clip.",
+    },
+    "de": {
+        "subtitle": "DER VERZÖGERTE TANZSPIEGEL",
+        "scan_prompt": "Diese zwei scannen — der Reihe nach:",
+        "cap_wifi": "Mit WLAN verbinden",
+        "cap_controls": "Steuerung öffnen",
+        "label_network": "Netzwerk",
+        "label_browser": "oder im Browser eingeben",
+        "warn_heading": "Dein Handy zeigt „Kein Internet“ an.",
+        "warn_body_pre": "Das ist normal — tippe auf ",
+        "warn_bold": "„Verbunden bleiben“",
+        "warn_body_post": ' (oder „Ja“).',
+        "main_heading": "Jetzt tanzen — kurz darauf siehst du dich im Spiegel.",
+        "main_sub": "Die Kamera zeigt dich verzögert. Bewege dich, schau dann hoch.",
+        "bullet1_head": "Schieberegler bewegen",
+        "bullet1_body": "um einzustellen, wie viele Sekunden der Spiegel verzögert ist.",
+        "bullet2_head": "Download antippen",
+        "bullet2_body": "um den letzten Clip auf dein Handy zu speichern.",
+        "footer1": "Kein Internet nötig — alles bleibt in diesem Raum.",
+        "footer2": "Nichts wird aufgezeichnet, außer du lädst einen Clip herunter.",
+    },
+}
+
+S = STRINGS.get(LANG, STRINGS["en"])
 
 # Palette — print-friendly: dark ink on white, one accent. QR stays pure black.
 INK = "#14161a"
@@ -89,9 +137,9 @@ parts = [
     f'fill="none" stroke="{LINE}" stroke-width="2"/>',
     # header — compact, leaves room for QRs near the top
     text(W / 2, 80, "Zeitspiegel", size=48, weight=700, anchor="middle"),
-    text(W / 2, 110, "THE DELAYED DANCE MIRROR", size=16, weight=600,
+    text(W / 2, 110, S["subtitle"], size=16, weight=600,
          fill=ACCENT, anchor="middle", spacing="3"),
-    text(W / 2, 156, "Scan these two — in order:",
+    text(W / 2, 156, S["scan_prompt"],
          size=24, weight=600, fill=INK, anchor="middle"),
 ]
 
@@ -112,9 +160,9 @@ parts += [arrow(left_cx + 50, badge_cy, right_cx - 50)]
 
 # Row 2: caption directly under each badge, just above its QR.
 cap_top_y = 270
-parts += [text(left_cx, cap_top_y, "Join the Wi-Fi",
+parts += [text(left_cx, cap_top_y, S["cap_wifi"],
                size=22, weight=700, anchor="middle")]
-parts += [text(right_cx, cap_top_y, "Open the controls",
+parts += [text(right_cx, cap_top_y, S["cap_controls"],
                size=22, weight=700, anchor="middle")]
 
 qr_y = 290
@@ -126,9 +174,9 @@ parts += [qr_group(URL, right_x, qr_y, QR)]
 
 # Captions under QRs — network name / URL
 cap_y = qr_y + QR + 28
-parts += [text(left_cx, cap_y, "Network", size=15, fill=MUTE, anchor="middle")]
+parts += [text(left_cx, cap_y, S["label_network"], size=15, fill=MUTE, anchor="middle")]
 parts += [text(left_cx, cap_y + 24, SSID, size=22, weight=700, anchor="middle")]
-parts += [text(right_cx, cap_y, "or type in any browser",
+parts += [text(right_cx, cap_y, S["label_browser"],
                size=15, fill=MUTE, anchor="middle")]
 parts += [text(right_cx, cap_y + 24, IP, size=22, weight=700,
                fill=ACCENT, anchor="middle")]
@@ -145,14 +193,13 @@ parts += [
     f'<line x1="110" y1="{warn_y + 50}" x2="110" y2="{warn_y + 68}" '
     f'stroke="{WARN_BORDER}" stroke-width="4" stroke-linecap="round"/>',
     f'<circle cx="110" cy="{warn_y + 76}" r="2.8" fill="{WARN_BORDER}"/>',
-    text(160, warn_y + 40,
-         "Your phone will say “No internet connection”.",
+    text(160, warn_y + 40, S["warn_heading"],
          size=19, weight=700, fill=WARN_INK),
     f'<text x="160" y="{warn_y + 68}" fill="{WARN_INK}" font-size="18" '
     f'font-weight="400">'
-    f'That’s expected — tap '
-    f'<tspan font-weight="700">“Stay connected”</tspan>'
-    f' (or “Keep trying” / “Yes”).'
+    f'{S["warn_body_pre"]}'
+    f'<tspan font-weight="700">{S["warn_bold"]}</tspan>'
+    f'{S["warn_body_post"]}'
     f'</text>',
 ]
 
@@ -163,35 +210,32 @@ parts += [f'<line x1="64" y1="{exp_y}" x2="{W-64}" y2="{exp_y}" '
 
 # Then the rest — what it is and what you can do.
 y = exp_y + 50
-parts += [text(W / 2, y, "Dance now — watch yourself a few seconds later.",
+parts += [text(W / 2, y, S["main_heading"],
                size=24, weight=700, anchor="middle")]
 y += 36
-parts += [text(W / 2, y,
-               "The camera shows you on a delay. Move, then look up.",
+parts += [text(W / 2, y, S["main_sub"],
                size=18, fill=MUTE, anchor="middle")]
 
 # Bullet rows: delay slider + download
 y += 56
 parts += [
     f'<circle cx="120" cy="{y - 6}" r="6" fill="{ACCENT}"/>',
-    text(146, y, "Drag the slider", size=20, weight=700),
-    text(146, y + 26, "to choose how many seconds late the mirror shows you.",
-         size=18, fill=MUTE),
+    text(146, y, S["bullet1_head"], size=20, weight=700),
+    text(146, y + 26, S["bullet1_body"], size=18, fill=MUTE),
 ]
 y += 64
 parts += [
     f'<circle cx="120" cy="{y - 6}" r="6" fill="{ACCENT}"/>',
-    text(146, y, "Tap download", size=20, weight=700),
-    text(146, y + 26, "to save the last clip to your phone.",
-         size=18, fill=MUTE),
+    text(146, y, S["bullet2_head"], size=20, weight=700),
+    text(146, y + 26, S["bullet2_body"], size=18, fill=MUTE),
 ]
 
 # footer
 parts += [
     f'<line x1="64" y1="{H-92}" x2="{W-64}" y2="{H-92}" stroke="{LINE}" stroke-width="2"/>',
-    text(W / 2, H - 56, "No internet needed — everything stays in this room.",
+    text(W / 2, H - 56, S["footer1"],
          size=19, weight=600, anchor="middle"),
-    text(W / 2, H - 30, "Nothing is recorded unless you download a clip.",
+    text(W / 2, H - 30, S["footer2"],
          size=17, fill=MUTE, anchor="middle"),
     "</svg>",
 ]
@@ -200,9 +244,10 @@ svg = "\n".join(parts)
 # Single source of truth: the script writes BOTH the print master and the
 # site copy. Don't hand-edit either SVG — re-run this script.
 repo_root = pathlib.Path(__file__).resolve().parents[2]
+suffix = "-de" if LANG == "de" else ""
 targets = [
-    repo_root / "deploy" / "poster" / "zeitspiegel-poster.svg",
-    repo_root / "site" / "poster.svg",
+    repo_root / "deploy" / "poster" / f"zeitspiegel-poster{suffix}.svg",
+    repo_root / "site" / f"poster{suffix}.svg",
 ]
 for t in targets:
     t.write_text(svg)
