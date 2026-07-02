@@ -19,7 +19,7 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 
 | File | Content |
 |---|---|
-| `zeitspiegel.service` | `Restart=always`, `RuntimeDirectory=zeitspiegel` (tmpfs for clips), journal logging; ordered after `network-online.target` but NOT requiring it — the mirror must work with Wi-Fi down; the web UI appears when the network does |
+| `zeitspiegel.service` | `Restart=always` with `StartLimitIntervalSec=0` (an appliance never stops retrying), `RestartSec=1`, `RuntimeDirectory=zeitspiegel` (tmpfs for clips), journal logging; ordered after `local-fs.target` only — no network ordering, the mirror must work with Wi-Fi down and the web UI appears when the network does. An `ExecStartPre` waits ≤5 s for `/dev/dri/card*` so early boot doesn't race udev's DRM cold-plug |
 | `config.toml` | profile=720p60, buffer 120 s / 1.5 GB cap, mirror_flip=true, focus pinning, bind `:80` |
 | `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the open Wi-Fi AP (`AP_SSID`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
 | `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg + SDL2 + NetworkManager + dnsmasq-base/iptables (needed by `ipv4.method=shared`) + rfkill/iw (for in-place debug), writes the binary, AP keyfile, user, regdomain, NOPASSWD sudo for the admin, persistent journal, and clears the stock rfkill soft-block — produces a finished, network-free image |
