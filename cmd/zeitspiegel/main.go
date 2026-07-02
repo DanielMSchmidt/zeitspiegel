@@ -40,6 +40,11 @@ type sysClock struct{}
 
 func (sysClock) Now() time.Time { return time.Now() }
 
+// displayTickFPS is the render-loop tick rate: the highest nominal rate any
+// profile can deliver (720p60). The ticker is created once, so it must not
+// depend on the boot profile — the profile can change at runtime.
+const displayTickFPS = 60
+
 func run() error {
 	configPath := flag.String("config", "", "path to config.toml (defaults apply when empty)")
 	sourceFlag := flag.String("source", "", "override frame source: camera | synth")
@@ -75,11 +80,18 @@ func run() error {
 	if clipDir == "" {
 		clipDir = os.TempDir()
 	}
+	restart := &atomic.Bool{}
+	var store *runtimeStore // assigned below, after the display exists
+
 	// 3 export slots (ARCHITECTURE §3, IT-8)
 	exporter := export.New(clipDir, 3)
 	exportSeconds := expvar.NewFloat("zeitspiegel_export_seconds")
 	clipper := &meteredClipper{
-		inner: &httpapi.Clipper{Buffer: buf, Exporter: exporter, Clock: sysClock{}, FPS: cfg.FPS()},
+		inner: &httpapi.Clipper{Buffer: buf, Exporter: exporter, Clock: sysClock{},
+			// per export: a runtime profile change (PATCH /config) changes
+			// the nominal rate, and a stale fps makes clips play at the
+			// wrong speed (FR-5)
+			FPS: func() float64 { return profileFPS(store.Current().Profile) }},
 		gauge: exportSeconds,
 	}
 
@@ -104,8 +116,7 @@ func run() error {
 		}
 	}
 
-	restart := &atomic.Bool{}
-	store := &runtimeStore{rt: cfg.Runtime(), buf: buf, restart: restart, setMirror: displayMirrorFunc(display)}
+	store = &runtimeStore{rt: cfg.Runtime(), buf: buf, restart: restart, setMirror: displayMirrorFunc(display)}
 
 	sup := capture.New(capture.Options{
 		Open: func(ctx context.Context) (capture.Source, error) {
@@ -150,7 +161,15 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv := &http.Server{Addr: cfg.Bind, Handler: handler}
+	srv := &http.Server{
+		Addr:    cfg.Bind,
+		Handler: handler,
+		// The appliance serves an open AP (NFR-6): bound header reads and
+		// idle keep-alives so a stuck client cannot pin connections forever.
+		// No WriteTimeout — preview streams and clip downloads are long-lived.
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
 
@@ -182,13 +201,19 @@ func run() error {
 	// sdl-tagged file locks it in init). Headless builds idle here.
 	var runErr error
 	if display != nil {
-		logger.Info("display loop starting", "fps", cfg.FPS(), "mirror", cfg.MirrorFlip, "windowed", *windowed)
+		logger.Info("display loop starting", "tick_fps", displayTickFPS, "mirror", cfg.MirrorFlip, "windowed", *windowed)
 		pump := displayEvents(display)
 		setDelay := displayDelayFunc(display)
 		splash := displaySplashFunc(display)
-		tick := time.NewTicker(time.Duration(float64(time.Second) / cfg.FPS()))
+		// Tick at the highest nominal profile rate regardless of the boot
+		// profile: a runtime profile change (PATCH /config) can raise the
+		// capture rate to 60 fps and this ticker is created once. Extra
+		// ticks are nearly free — the engine renders only when the selected
+		// frame changed.
+		tick := time.NewTicker(time.Second / displayTickFPS)
 		defer tick.Stop()
 		var firstFrameDone bool
+		var lastSelErr string
 	loop:
 		for {
 			select {
@@ -206,7 +231,14 @@ func run() error {
 				if setDelay != nil {
 					setDelay(eng.Delay())
 				}
-				if sel := eng.Tick(time.Now()); sel.Render {
+				sel := eng.Tick(time.Now())
+				if sel.Err != nil && sel.Err.Error() != lastSelErr {
+					lastSelErr = sel.Err.Error() // log once per distinct error, not per tick
+					logger.Error("frame selection", "err", sel.Err)
+				} else if sel.Err == nil {
+					lastSelErr = ""
+				}
+				if sel.Render {
 					if err := display.Render(sel.Frame); err != nil {
 						logger.Error("render", "seq", sel.Frame.Seq, "err", err)
 					} else if !firstFrameDone {
@@ -287,7 +319,9 @@ type restartable struct {
 
 func (r *restartable) ReadFrame(ctx context.Context) (frame.Frame, error) {
 	if r.restart.CompareAndSwap(true, false) {
-		return frame.Frame{}, errors.New("config changed: pipeline restart")
+		// capture.ErrRestart: the supervisor reopens immediately — no
+		// backoff, no error report, health stays green.
+		return frame.Frame{}, capture.ErrRestart
 	}
 	return r.Source.ReadFrame(ctx)
 }

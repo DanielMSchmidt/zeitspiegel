@@ -87,7 +87,9 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   past once, decrease jumps forward); warm-up (delay > buffered ⇒ show oldest,
   report `warming_up`).
 - **Display renderer** (`internal/screen`): per tick `buf.At(now − delay)`;
-  if `Seq` unchanged → no-op; else decode (SDL2_image/libjpeg-turbo), render
+  if the selected frame is unchanged (identity = seq + capture timestamp;
+  seq alone restarts at 0 on a source reconnect) → no-op; else decode
+  (SDL2_image/libjpeg-turbo), render
   with `RenderCopyEx(..., FLIP_HORIZONTAL)`. Budget @60 fps = 16.7 ms;
   expected on Pi 5: 720p decode 4–8 ms + present 2–4 ms (validate in spike
   S-1). Fallbacks: decode in worker goroutine (+1 tick latency, irrelevant
@@ -107,6 +109,11 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   render loop each tick → "effective ≤ 1 tick" by construction (FR-3).
 - source channel capacity 4; on overflow drop oldest + increment
   `dropped_frames`; capture never blocks.
+- render loop ticks at a fixed 60 Hz (the highest nominal profile rate):
+  the ticker is created once but the profile can change at runtime; extra
+  ticks are nearly free because the engine renders only when the selected
+  frame changed. The exporter reads the nominal fps from the runtime
+  profile per export for the same reason.
 - shutdown: `signal.NotifyContext`; clean close matters for dev/tests (in
   production the plug is pulled, which NFR-9 makes safe).
 

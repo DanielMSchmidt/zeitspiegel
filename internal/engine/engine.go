@@ -33,8 +33,12 @@ type FrameBuffer interface {
 // Selection is the outcome of one tick.
 type Selection struct {
 	Frame     frame.Frame
-	Render    bool // false when the selected Seq did not change or nothing is buffered
+	Render    bool // false when the selected frame did not change or nothing is buffered
 	WarmingUp bool // delay exceeds buffered history (FR-10)
+	// Err carries an unexpected buffer error (never ErrEmpty/ErrTooEarly,
+	// which are normal warm-up states) so the render loop can log it
+	// instead of it hiding behind WarmingUp.
+	Err error
 }
 
 // Engine selects the frame for each display tick. The delay is an atomic
@@ -42,9 +46,13 @@ type Selection struct {
 // which makes delay changes effective within one tick by construction
 // (FR-3, hard rule 5).
 type Engine struct {
-	buf      FrameBuffer
-	delayNS  atomic.Int64
+	buf     FrameBuffer
+	delayNS atomic.Int64
+	// Frame identity for the skip rule is (Seq, CaptureTS): a source
+	// reconnect restarts Seq at 0 (NFR-5), so Seq alone could suppress a
+	// genuinely new frame after a reopen.
 	lastSeq  uint64
+	lastTS   time.Time
 	rendered bool // false until the first frame was selected for render
 }
 
@@ -82,12 +90,12 @@ func (e *Engine) Tick(now time.Time) Selection {
 	case errors.Is(err, ringbuf.ErrEmpty):
 		return Selection{WarmingUp: true}
 	default:
-		return Selection{WarmingUp: true}
+		return Selection{WarmingUp: true, Err: err}
 	}
-	if e.rendered && f.Seq == e.lastSeq {
+	if e.rendered && f.Seq == e.lastSeq && f.CaptureTS.Equal(e.lastTS) {
 		return Selection{Frame: f, Render: false, WarmingUp: warming}
 	}
-	e.lastSeq = f.Seq
+	e.lastSeq, e.lastTS = f.Seq, f.CaptureTS
 	e.rendered = true
 	return Selection{Frame: f, Render: true, WarmingUp: warming}
 }

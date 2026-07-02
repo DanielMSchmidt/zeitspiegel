@@ -33,6 +33,14 @@ func (s *sysStatus) Status() httpapi.Status {
 	rt := s.store.Current()
 	w, h := profileResolution(rt.Profile)
 	filled := st.Span.Seconds()
+
+	// Warm-up mirrors the engine's FR-10 semantics exactly: warming when
+	// nothing is buffered or the delay target precedes the oldest frame.
+	warming := true
+	if oldest, err := s.buf.Oldest(); err == nil {
+		warming = time.Now().Add(-s.eng.Delay()).Before(oldest.CaptureTS)
+	}
+
 	return httpapi.Status{
 		DelayS:        s.eng.Delay().Seconds(),
 		FPS:           profileFPS(rt.Profile),
@@ -40,7 +48,7 @@ func (s *sysStatus) Status() httpapi.Status {
 		Buffer:        httpapi.BufferStatus{CapacityS: rt.BufferMaxS, FilledS: filled, Bytes: st.Bytes},
 		DroppedFrames: s.sup.Dropped(),
 		MinLatencyMS:  minLatencyMS,
-		WarmingUp:     s.eng.Delay().Seconds() > filled,
+		WarmingUp:     warming,
 		UptimeS:       time.Since(s.start).Seconds(),
 	}
 }

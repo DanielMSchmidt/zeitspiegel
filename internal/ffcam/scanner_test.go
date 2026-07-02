@@ -79,6 +79,21 @@ func TestScannerSkipsLeadingJunk(t *testing.T) {
 	}
 }
 
+// After an oversized corrupt frame (SOI whose EOI never arrives) the scanner
+// must resync and still deliver the next valid frame.
+func TestScannerResyncsAfterOversizedFrame(t *testing.T) {
+	f := encode(t, 50)
+	corrupt := append([]byte{0xff, 0xd8}, make([]byte, 40<<20)...) // > cap, no EOI
+	s := ffcam.NewScanner(bytes.NewReader(append(corrupt, f...)))
+	got, err := s.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, f) {
+		t.Errorf("frame after oversized corrupt frame not recovered (%d bytes)", len(got))
+	}
+}
+
 func TestScannerTruncatedTail(t *testing.T) {
 	f := encode(t, 50)
 	s := ffcam.NewScanner(bytes.NewReader(append(f, f[:len(f)/2]...)))

@@ -203,15 +203,16 @@
   setInterval(pollStatus, 1000);
 
   // ---------- clip download ----------
-  // Parse `filename="..."` out of a Content-Disposition header. Best-effort;
-  // returns null on miss so the caller can fall back to a default.
-  function filenameFromCD(cd) {
-    if (!cd) return null;
-    var m = /filename\s*=\s*"([^"]+)"/.exec(cd) ||
-            /filename\s*=\s*([^;]+)/.exec(cd);
-    return m ? m[1].trim() : null;
-  }
+  // The clip is downloaded via a hidden iframe so the browser's download
+  // manager streams it straight to disk. The old fetch()+Blob approach
+  // buffered the whole clip in RAM first — an MJPEG export of a full buffer
+  // is hundreds of MB, enough to kill the tab on a phone.
+  var dlFrame = document.createElement("iframe");
+  dlFrame.hidden = true;
+  dlFrame.setAttribute("aria-hidden", "true");
+  document.body.appendChild(dlFrame);
 
+  var preparingTimer = null;
   function setDownloadPreparing(on) {
     dlBtn.disabled = on;
     dlBtn.textContent = on ? "Preparing…" : "Download";
@@ -221,6 +222,20 @@
       dlBtn.removeAttribute("aria-busy");
     }
   }
+
+  // A successful attachment download never fires "load" on the iframe; an
+  // error response (problem+json) renders into it and does. Best effort:
+  // surface the message and re-enable the button.
+  dlFrame.addEventListener("load", function () {
+    if (preparingTimer) clearTimeout(preparingTimer);
+    setDownloadPreparing(false);
+    var msg = "Could not export clip";
+    try {
+      var body = JSON.parse(dlFrame.contentDocument.body.textContent);
+      msg = problemDetail(body, msg);
+    } catch (e) { /* not JSON we can read — keep the fallback */ }
+    showToast(msg);
+  });
 
   dlBtn.addEventListener("click", function () {
     var secs = parseInt(dlSeconds.value, 10);
@@ -232,30 +247,13 @@
               "&format=" + encodeURIComponent(dlFormat.value);
 
     setDownloadPreparing(true);
-    fetch(url).then(function (res) {
-      if (!res.ok) {
-        return res.json().catch(function () { return null; }).then(function (body) {
-          showToast(problemDetail(body, "Could not start download"));
-          setDownloadPreparing(false);
-        });
-      }
-      var filename = filenameFromCD(res.headers.get("Content-Disposition"))
-                  || "zeitspiegel-clip.mp4";
-      return res.blob().then(function (blob) {
-        var objectURL = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = objectURL;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(function () { URL.revokeObjectURL(objectURL); }, 0);
-        setDownloadPreparing(false);
-      });
-    }).catch(function () {
-      showToast("Could not reach server");
+    dlFrame.src = url;
+    // The browser gives no signal when the attachment download starts, so
+    // free the button after a grace period covering a slow export.
+    if (preparingTimer) clearTimeout(preparingTimer);
+    preparingTimer = setTimeout(function () {
       setDownloadPreparing(false);
-    });
+    }, 10000);
   });
 
   // ---------- preview ----------

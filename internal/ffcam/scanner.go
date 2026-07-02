@@ -30,6 +30,13 @@ func NewScanner(r io.Reader) *Scanner {
 	return &Scanner{r: r}
 }
 
+// maxBuffered bounds the scan buffer so a corrupt stream — an SOI whose EOI
+// never arrives, or endless garbage with no SOI at all — cannot grow it
+// without bound (NFR-2). No sane MJPEG frame approaches this size; on
+// overflow the buffered data is discarded and scanning resyncs at the next
+// SOI in the stream.
+const maxBuffered = 32 << 20
+
 // Next returns the next complete JPEG (its own copy). io.EOF after the last
 // complete frame; a truncated trailing frame is discarded.
 func (s *Scanner) Next() ([]byte, error) {
@@ -43,6 +50,13 @@ func (s *Scanner) Next() ([]byte, error) {
 				s.buf = append(s.buf[:0:0], s.buf[end:]...) // fresh backing array
 				return frame, nil
 			}
+			if len(s.buf) > maxBuffered {
+				s.discardKeepingTail() // unterminated frame: drop and resync
+			}
+		} else if len(s.buf) > 1 {
+			// no frame start anywhere: keep only the last byte (an SOI could
+			// straddle two reads) so garbage cannot accumulate
+			s.buf = append(s.buf[:0], s.buf[len(s.buf)-1:]...)
 		}
 		n, err := s.r.Read(chunk)
 		s.buf = append(s.buf, chunk[:n]...)
@@ -53,4 +67,11 @@ func (s *Scanner) Next() ([]byte, error) {
 			return nil, err
 		}
 	}
+}
+
+// discardKeepingTail drops the buffer down to its last byte (a possible
+// split marker) with a fresh small backing array, releasing the oversized
+// one to the GC.
+func (s *Scanner) discardKeepingTail() {
+	s.buf = bytes.Clone(s.buf[len(s.buf)-1:])
 }

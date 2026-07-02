@@ -21,13 +21,21 @@ type ClipBuffer interface {
 	Oldest() (frame.Frame, error)
 }
 
+// FrameExporter encodes a frame window into a clip file (export.Exporter
+// satisfies it; tests fake it).
+type FrameExporter interface {
+	Export(ctx context.Context, frames []frame.Frame, fps float64, format export.Format) (path string, cleanup func(), err error)
+}
+
 // Clipper is the production ClipExporter: cut the window ending now, pipe it
 // through ffmpeg (FR-5).
 type Clipper struct {
 	Buffer   ClipBuffer
-	Exporter *export.Exporter
+	Exporter FrameExporter
 	Clock    Clock
-	FPS      float64
+	// FPS is consulted per export: the profile — and with it the nominal
+	// frame rate — can change at runtime (PATCH /config, E-2).
+	FPS func() float64
 }
 
 // ExportClip implements ClipExporter. window.ErrNoFrames and export.ErrBusy
@@ -37,7 +45,7 @@ func (c *Clipper) ExportClip(ctx context.Context, n time.Duration, format string
 	if err != nil {
 		return Clip{}, err
 	}
-	path, cleanup, err := c.Exporter.Export(ctx, w.Frames, c.FPS, export.Format(format))
+	path, cleanup, err := c.Exporter.Export(ctx, w.Frames, c.FPS(), export.Format(format))
 	if err != nil {
 		return Clip{}, err
 	}

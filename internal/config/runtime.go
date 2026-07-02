@@ -58,8 +58,8 @@ func (r Runtime) WithPatch(p Patch) (Runtime, error) {
 		}
 	}
 	if p.BufferMaxS != nil {
-		if *p.BufferMaxS <= 0 {
-			return Runtime{}, fmt.Errorf("buffer_max_s %v: %w (must be > 0)", *p.BufferMaxS, ErrInvalid)
+		if *p.BufferMaxS <= 0 || *p.BufferMaxS > MaxBufferSeconds {
+			return Runtime{}, fmt.Errorf("buffer_max_s %v: %w (must be > 0 and ≤ %d)", *p.BufferMaxS, ErrInvalid, MaxBufferSeconds)
 		}
 		r.BufferMaxS = *p.BufferMaxS
 	}
