@@ -97,24 +97,19 @@ chroot "$ROOT" systemctl enable zeitspiegel-boot-profile.timer >/dev/null
 # disable it so we don't double-fire.
 chroot "$ROOT" systemctl disable zeitspiegel-boot-profile.service >/dev/null 2>&1 || true
 
-echo "==> install + enable boot-time diagnostic capture (3 stages → /boot/firmware/zeitspiegel-debug.log)"
-# Until the AP is reliably coming up on first boot, every appliance image
-# self-instruments and dumps rfkill / NM / kernel state to the FAT32 boot
-# partition. The user pulls the SD card and reads the log directly.
+echo "==> install boot-time diagnostic capture (3 stages, on-demand → /boot/firmware/zeitspiegel-debug.log)"
+# The rfkill investigation is closed: AP bring-up verified 2026-04-21,
+# root cause fixed deterministically at bake (NetworkManager.state +
+# rfkill-unblock oneshot below). All three debug stages stay installed
+# for field debugging but are NOT enabled — pre/post-rfkill cost ≈150 ms
+# plus two synced FAT32 writes on every boot, and -late adds 20 s via
+# its ExecStartPre=/bin/sleep 20. Run on demand (SSH escape hatch):
+# `systemctl start zeitspiegel-debug-<stage>.service`.
 install -D -m0755 "$PAYLOAD/zeitspiegel-debug.sh" "$ROOT/usr/local/sbin/zeitspiegel-debug"
-# pre-rfkill + post-rfkill are cheap (≈150 ms total, run before NM) and
-# capture the kernel/userland rfkill state that's only meaningful early
-# in boot — kept enabled. zeitspiegel-debug-late has done its job (AP
-# bring-up is verified 2026-04-21) and adds 20 s to FinishTimestamp via
-# its ExecStartPre=/bin/sleep 20 — installed but NOT enabled. Run on
-# demand: `systemctl start zeitspiegel-debug-late.service`.
-for u in zeitspiegel-debug-pre-rfkill zeitspiegel-debug-post-rfkill; do
+for u in zeitspiegel-debug-pre-rfkill zeitspiegel-debug-post-rfkill zeitspiegel-debug-late; do
     install -D -m0644 "$PAYLOAD/${u}.service" "$ROOT/etc/systemd/system/${u}.service"
-    chroot "$ROOT" systemctl enable "${u}.service" >/dev/null
+    chroot "$ROOT" systemctl disable "${u}.service" >/dev/null 2>&1 || true
 done
-install -D -m0644 "$PAYLOAD/zeitspiegel-debug-late.service" \
-    "$ROOT/etc/systemd/system/zeitspiegel-debug-late.service"
-chroot "$ROOT" systemctl disable zeitspiegel-debug-late.service >/dev/null 2>&1 || true
 
 echo "==> hostname + mDNS (zeitspiegel.local)"
 echo zeitspiegel > "$ROOT/etc/hostname"
@@ -269,14 +264,28 @@ echo "==> kiosk: silent boot, no login prompt (FR-12)"
 chroot "$ROOT" systemctl mask getty@tty1.service >/dev/null 2>&1 || true
 chroot "$ROOT" systemctl disable getty@tty1.service >/dev/null 2>&1 || true
 # Quiet the boot text and hide the console cursor (idempotent, single line).
+# loglevel=0: with the old loglevel=3, err-level kernel chatter (brcmfmac,
+# vc4) still flashed on the HDMI console during boot. The persistent
+# journal keeps every message (journald reads /dev/kmsg regardless of the
+# console loglevel), so nothing is lost for post-mortems.
+# systemd.show_status=0: `quiet` alone leaves show-status on "auto",
+# which still paints [FAILED]/degraded lines on the console.
 read -r KLINE < "$CMD"
-for t in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0 fastboot; do
+KLINE="${KLINE// loglevel=3/}"
+for t in quiet loglevel=0 systemd.show_status=0 udev.log_level=3 logo.nologo vt.global_cursor_default=0 consoleblank=0 fastboot; do
     case " $KLINE " in *" $t "*) ;; *) KLINE="$KLINE $t" ;; esac
 done
 printf '%s\n' "$KLINE" > "$CMD"
-# Disable the rainbow splash screen.
 CFG="$ROOT/boot/firmware/config.txt"
+# Disable the rainbow splash screen.
 grep -q '^disable_splash=1' "$CFG" 2>/dev/null || echo 'disable_splash=1' >> "$CFG"
+# Skip firmware probing for hardware this appliance never has: CSI
+# cameras (ours is USB), DSI displays (ours is HDMI), analog audio.
+sed -i 's/^camera_auto_detect=1/camera_auto_detect=0/; s/^display_auto_detect=1/display_auto_detect=0/; s/^dtparam=audio=on/dtparam=audio=off/' "$CFG"
+# Drop the Bluetooth node from the device tree entirely — bluetooth.service
+# and hciuart are already masked, but without the overlay the kernel still
+# initializes the radio during boot.
+grep -q '^dtoverlay=disable-bt' "$CFG" 2>/dev/null || echo 'dtoverlay=disable-bt' >> "$CFG"
 
 echo "==> reclaim space + restore resolv.conf"
 chroot "$ROOT" apt-get clean

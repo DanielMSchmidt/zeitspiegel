@@ -102,13 +102,27 @@ systemctl mask getty@tty1.service 2>/dev/null || true
 CMD=/boot/firmware/cmdline.txt; [[ -f "$CMD" ]] || CMD=/boot/cmdline.txt
 if [[ -f "$CMD" ]]; then
     read -r KLINE < "$CMD"
-    for t in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0 fastboot; do
+    # Previous revisions used loglevel=3, which still let err-level kernel
+    # chatter flash on the HDMI console; drop it in favour of loglevel=0
+    # (journald keeps every message via /dev/kmsg). systemd.show_status=0:
+    # `quiet` alone leaves show-status on "auto", which still paints
+    # [FAILED]/degraded lines on the console.
+    KLINE="${KLINE// loglevel=3/}"
+    for t in quiet loglevel=0 systemd.show_status=0 udev.log_level=3 logo.nologo vt.global_cursor_default=0 consoleblank=0 fastboot; do
         case " $KLINE " in *" $t "*) ;; *) KLINE="$KLINE $t" ;; esac
     done
     printf '%s\n' "$KLINE" > "$CMD"
 fi
 CFG=/boot/firmware/config.txt; [[ -f "$CFG" ]] || CFG=/boot/config.txt
-[[ -f "$CFG" ]] && { grep -q '^disable_splash=1' "$CFG" || echo 'disable_splash=1' >> "$CFG"; }
+if [[ -f "$CFG" ]]; then
+    grep -q '^disable_splash=1' "$CFG" || echo 'disable_splash=1' >> "$CFG"
+    # Skip firmware probing for hardware this appliance never has: CSI
+    # cameras (ours is USB), DSI displays (ours is HDMI), analog audio —
+    # and drop the Bluetooth device-tree node (the services are masked
+    # above, but the kernel would still initialize the radio).
+    sed -i 's/^camera_auto_detect=1/camera_auto_detect=0/; s/^display_auto_detect=1/display_auto_detect=0/; s/^dtparam=audio=on/dtparam=audio=off/' "$CFG"
+    grep -q '^dtoverlay=disable-bt' "$CFG" || echo 'dtoverlay=disable-bt' >> "$CFG"
+fi
 
 # --- Wi-Fi access point (E-7): the appliance hosts its own OPEN network -----
 # No password: guests just pick "$AP_SSID" and connect. The AP is an isolated,

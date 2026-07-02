@@ -10,11 +10,24 @@ Documentation=https://github.com/danielmschmidt/zeitspiegel/tree/main/docs
 # needed. Take ownership of the HDMI console so no getty shares it.
 After=local-fs.target
 Conflicts=getty@tty1.service
+# Restart=always below is defeated by systemd's default start-rate limit
+# (5 starts / 10 s): a burst of early-boot failures (GPU/camera not yet
+# enumerated) would flip the unit into a permanent 'failed' state and
+# leave the screen black until a power cycle. An appliance never stops
+# retrying.
+StartLimitIntervalSec=0
 
 [Service]
+# SDL's KMSDRM backend needs a DRM card node, but this unit starts while
+# udev may still be cold-plugging vc4. Rather than failing SDL init and
+# burning restart cycles (each one a visible [FAILED] flash on the
+# console), wait up to 5 s for /dev/dri/card* to appear. The '-' prefix
+# makes a timeout non-fatal so the binary still surfaces the real error
+# if DRM never comes.
+ExecStartPre=-/bin/sh -c 'timeout 5 sh -c "until ls /dev/dri/card* >/dev/null 2>&1; do sleep 0.1; done"'
 ExecStart=/usr/local/bin/zeitspiegel --config /etc/zeitspiegel/config.toml
 Restart=always
-RestartSec=2
+RestartSec=1
 # tmpfs working dir at /run/zeitspiegel; exported clips land here and
 # vanish on power loss — no persistent writes on the read-only root (NFR-9).
 RuntimeDirectory=zeitspiegel
