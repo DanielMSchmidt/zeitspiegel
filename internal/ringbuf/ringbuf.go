@@ -102,15 +102,7 @@ func (b *Buffer) SetMaxDuration(d time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.maxDur = d
-	for len(b.frames) > 1 {
-		span := b.frames[len(b.frames)-1].CaptureTS.Sub(b.frames[0].CaptureTS)
-		if span <= b.maxDur && b.bytes <= b.maxBytes {
-			break
-		}
-		b.bytes -= b.frames[0].Bytes()
-		b.frames[0] = frame.Frame{}
-		b.frames = b.frames[1:]
-	}
+	b.evictLocked()
 }
 
 // Range returns all frames with from ≤ CaptureTS ≤ to, in capture order.

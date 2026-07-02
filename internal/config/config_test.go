@@ -99,7 +99,9 @@ func TestLoadErrors(t *testing.T) {
 		{"bad profile", `profile = "4k120"`, "profile"},
 		{"bad source", `source = "dvd"`, "source"},
 		{"negative buffer", `buffer_max_s = -5.0`, "buffer_max_s"},
+		{"huge buffer", `buffer_max_s = 1e18`, "buffer_max_s"},
 		{"negative delay", `default_delay_s = -1.0`, "default_delay_s"},
+		{"huge delay", `default_delay_s = 1e18`, "default_delay_s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

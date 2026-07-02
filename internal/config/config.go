@@ -56,6 +56,13 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 
+// MaxBufferSeconds bounds buffer_max_s and default_delay_s (boot config and
+// runtime PATCH): far above any real deployment, low enough that
+// seconds→time.Duration conversions can never overflow int64 nanoseconds —
+// an overflowed (negative) duration budget silently evicts the ring buffer
+// down to a single frame.
+const MaxBufferSeconds = 86400
+
 // Validate checks value ranges and enums.
 func (c Config) Validate() error {
 	switch c.Profile {
@@ -68,8 +75,8 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("source %q: must be camera or synth", c.Source)
 	}
-	if c.BufferMaxS <= 0 {
-		return fmt.Errorf("buffer_max_s %v: must be > 0", c.BufferMaxS)
+	if c.BufferMaxS <= 0 || c.BufferMaxS > MaxBufferSeconds {
+		return fmt.Errorf("buffer_max_s %v: must be > 0 and ≤ %d", c.BufferMaxS, MaxBufferSeconds)
 	}
 	if c.BufferMaxBytes <= 0 {
 		return fmt.Errorf("buffer_max_bytes %v: must be > 0", c.BufferMaxBytes)
@@ -77,8 +84,8 @@ func (c Config) Validate() error {
 	if c.Bind == "" {
 		return fmt.Errorf("bind: must not be empty")
 	}
-	if c.DefaultDelayS < 0 {
-		return fmt.Errorf("default_delay_s %v: must be ≥ 0", c.DefaultDelayS)
+	if c.DefaultDelayS < 0 || c.DefaultDelayS > MaxBufferSeconds {
+		return fmt.Errorf("default_delay_s %v: must be ≥ 0 and ≤ %d", c.DefaultDelayS, MaxBufferSeconds)
 	}
 	return nil
 }

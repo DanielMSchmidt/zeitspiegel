@@ -7,6 +7,7 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,11 @@ type Source interface {
 	ReadFrame(ctx context.Context) (frame.Frame, error)
 	Close() error
 }
+
+// ErrRestart is returned by a Source's ReadFrame to request a deliberate
+// reopen (config change, FR-9): the supervisor closes and reopens the source
+// immediately — no backoff pause, no OnError report, never degraded.
+var ErrRestart = errors.New("capture: source restart requested")
 
 // DefaultBackoff doubles from 100 ms, capped at 3 s.
 func DefaultBackoff(attempt int) time.Duration {
@@ -108,13 +114,15 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			continue
 		}
 		s.degraded.Store(false)
-		attempt = 0
 		for {
 			f, err := src.ReadFrame(ctx)
 			if err != nil {
 				src.Close()
 				if ctx.Err() != nil {
 					return nil
+				}
+				if errors.Is(err, ErrRestart) {
+					break // deliberate reopen with fresh config: stay healthy
 				}
 				s.report(err)
 				s.degraded.Store(true)
@@ -124,10 +132,27 @@ func (s *Supervisor) Run(ctx context.Context) error {
 				attempt++
 				break
 			}
+			// Reset the backoff only once a frame actually arrived: a
+			// device that opens fine but never delivers (half-dead USB,
+			// metadata-only node) must keep backing off, not churn at the
+			// initial pause forever.
+			attempt = 0
 			select {
 			case queue <- f:
 			default:
-				s.dropped.Add(1) // never block the read side (FR-6/NFR-1)
+				// Full: drop the oldest queued frame so the mirror stays as
+				// fresh as possible, then queue the new one (ARCHITECTURE
+				// §4). Never blocks the read side (FR-6/NFR-1).
+				select {
+				case <-queue:
+					s.dropped.Add(1)
+				default:
+				}
+				select {
+				case queue <- f:
+				default:
+					s.dropped.Add(1) // sole producer: unreachable, but never block
+				}
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -102,6 +103,45 @@ func TestHardCutSemantics(t *testing.T) {
 	}
 	if rendered[0] != 25 {
 		t.Errorf("first frame after decrease = %d, want 25 (hard jump)", rendered[0])
+	}
+}
+
+// NFR-5: a source reconnect restarts Seq at 0, so a freshly selected frame
+// can collide with lastSeq. Frame identity is (Seq, CaptureTS) — a colliding
+// Seq with a new capture timestamp is a different frame and must render.
+func TestRendersAfterSeqRestart(t *testing.T) {
+	b := ringbuf.New(time.Hour, 1<<30)
+	e := engine.New(b)
+
+	b.Push(frame.Frame{Seq: 5, CaptureTS: t0})
+	if sel := e.Tick(t0); !sel.Render {
+		t.Fatal("first tick should render")
+	}
+
+	// the source reconnected and its seq counter restarted
+	b.Push(frame.Frame{Seq: 5, CaptureTS: t0.Add(100 * time.Millisecond)})
+	sel := e.Tick(t0.Add(100 * time.Millisecond))
+	if !sel.Render {
+		t.Error("frame with colliding Seq but new CaptureTS must render")
+	}
+}
+
+// An unexpected buffer error must surface in the selection instead of being
+// silently reported as warm-up.
+type failBuffer struct{ err error }
+
+func (f failBuffer) At(time.Time) (frame.Frame, error) { return frame.Frame{}, f.err }
+func (f failBuffer) Oldest() (frame.Frame, error)      { return frame.Frame{}, f.err }
+
+func TestUnknownBufferErrorSurfaces(t *testing.T) {
+	boom := errors.New("boom")
+	e := engine.New(failBuffer{err: boom})
+	sel := e.Tick(t0)
+	if sel.Render {
+		t.Error("must not render on a buffer error")
+	}
+	if !errors.Is(sel.Err, boom) {
+		t.Errorf("Selection.Err = %v, want the buffer error", sel.Err)
 	}
 }
 

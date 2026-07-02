@@ -36,4 +36,16 @@ func TestRuntimeWithPatch(t *testing.T) {
 	if _, err := r.WithPatch(config.Patch{BufferMaxS: ptr(-1.0)}); !errors.Is(err, config.ErrInvalid) {
 		t.Errorf("negative buffer: err = %v, want ErrInvalid", err)
 	}
+
+	// The upper bound keeps seconds→time.Duration conversions from
+	// overflowing (a huge value silently evicts the buffer down to one frame).
+	if _, err := r.WithPatch(config.Patch{BufferMaxS: ptr(1e18)}); !errors.Is(err, config.ErrInvalid) {
+		t.Errorf("huge buffer: err = %v, want ErrInvalid", err)
+	}
+	if _, err := r.WithPatch(config.Patch{BufferMaxS: ptr(config.MaxBufferSeconds + 1.0)}); !errors.Is(err, config.ErrInvalid) {
+		t.Errorf("just above cap: err = %v, want ErrInvalid", err)
+	}
+	if _, err := r.WithPatch(config.Patch{BufferMaxS: ptr(float64(config.MaxBufferSeconds))}); err != nil {
+		t.Errorf("at cap: err = %v, want ok", err)
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,6 +156,10 @@ func TestValidation(t *testing.T) {
 		{"clip negative", "GET", "/api/v1/clip?seconds=-3", "", 422},
 		{"clip over capacity", "GET", "/api/v1/clip?seconds=500", "", 422},
 		{"clip not a number", "GET", "/api/v1/clip?seconds=ten", "", 422},
+		{"clip NaN", "GET", "/api/v1/clip?seconds=NaN", "", 422},
+		{"clip lowercase nan", "GET", "/api/v1/clip?seconds=nan", "", 422},
+		{"clip infinity", "GET", "/api/v1/clip?seconds=Inf", "", 422},
+		{"clip trailing garbage", "GET", "/api/v1/clip?seconds=5abc", "", 422},
 		{"clip bad format", "GET", "/api/v1/clip?seconds=10&format=avi", "", 422},
 		{"config get", "GET", "/api/v1/config", "", 200},
 		{"config patch ok", "PATCH", "/api/v1/config", `{"mirror_flip": false}`, 200},
@@ -190,6 +195,19 @@ func TestValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// UT-9 / FR-11: control-plane request bodies are bounded — a huge body must
+// be rejected instead of buffered into RAM (the Pi serves an open AP, NFR-6).
+func TestBodySizeLimit(t *testing.T) {
+	srv := newServer(t, nil)
+	pad := strings.Repeat("x", 2<<20) // 2 MiB, above the 1 MiB body cap
+	if resp := do(t, srv, "PUT", "/api/v1/delay", `{"padding": "`+pad+`", "seconds": 4}`); resp.StatusCode != 422 {
+		t.Errorf("oversized delay body: status = %d, want 422", resp.StatusCode)
+	}
+	if resp := do(t, srv, "PATCH", "/api/v1/config", `{"padding": "`+pad+`"}`); resp.StatusCode != 422 {
+		t.Errorf("oversized config body: status = %d, want 422", resp.StatusCode)
 	}
 }
 
@@ -316,6 +334,25 @@ type fakeFrames struct{ f frame.Frame }
 
 func (f *fakeFrames) Newest() (frame.Frame, error) { return f.f, nil }
 
+// mutableFrames lets a test swap the newest frame while the preview handler
+// is reading it concurrently.
+type mutableFrames struct {
+	mu sync.Mutex
+	f  frame.Frame
+}
+
+func (m *mutableFrames) Newest() (frame.Frame, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.f, nil
+}
+
+func (m *mutableFrames) set(f frame.Frame) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.f = f
+}
+
 // The preview supports view=live (default) and view=delayed so the delayed
 // mirror is manually testable without the SDL display (REQUIREMENTS §3).
 func TestPreviewDelayedView(t *testing.T) {
@@ -360,6 +397,44 @@ func TestPreviewDelayedView(t *testing.T) {
 	resp := do(t, srv, "GET", "/api/v1/preview?view=bogus", "")
 	if resp.StatusCode != 422 {
 		t.Errorf("view=bogus: status %d, want 422", resp.StatusCode)
+	}
+}
+
+// A source reconnect restarts Seq at 0 (NFR-5); a frame whose Seq collides
+// with the last streamed one but carries a new capture timestamp is a
+// different frame and must still be sent.
+func TestPreviewStreamsAfterSeqRestart(t *testing.T) {
+	tick := make(chan time.Time)
+	ff := &mutableFrames{f: frame.Frame{Seq: 7, CaptureTS: time.Unix(100, 0), JPEG: []byte("\xff\xd8FIRST\xff\xd9")}}
+	srv := newServer(t, func(d *httpapi.Deps) {
+		d.Frames = ff
+		d.Ticker = func(time.Duration) (<-chan time.Time, func()) { return tick, func() {} }
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/v1/preview", nil)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	tick <- time.Time{}
+	buf := make([]byte, 256)
+	if _, err := io.ReadAtLeast(resp.Body, buf, 30); err != nil {
+		t.Fatal(err)
+	}
+
+	// same Seq, later capture time: the source restarted
+	ff.set(frame.Frame{Seq: 7, CaptureTS: time.Unix(200, 0), JPEG: []byte("\xff\xd8SECOND\xff\xd9")})
+	tick <- time.Time{}
+	n, err := io.ReadAtLeast(resp.Body, buf, 30)
+	if err != nil {
+		t.Fatalf("frame after seq restart not streamed: %v", err)
+	}
+	if !strings.Contains(string(buf[:n]), "SECOND") {
+		t.Errorf("streamed part = %q, want the post-restart frame", buf[:n])
 	}
 }
 

@@ -48,7 +48,7 @@ func fullServer(t *testing.T, buf *ringbuf.Buffer, clk httpapi.Clock, slots int)
 			Buffer:   buf,
 			Exporter: ex,
 			Clock:    clk,
-			FPS:      itFPS,
+			FPS:      func() float64 { return itFPS },
 		},
 		Config: &fakeStore{r: config.Default().Runtime()},
 	}

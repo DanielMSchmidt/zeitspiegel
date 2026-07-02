@@ -11,7 +11,9 @@ import (
 	"expvar"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/danielmschmidt/zeitspiegel/internal/config"
@@ -97,6 +99,11 @@ type Deps struct {
 // PreviewInterval is the preview frame pacing (~10 fps, REQUIREMENTS §3).
 const PreviewInterval = 100 * time.Millisecond
 
+// maxBodyBytes bounds control-plane request bodies (PUT /delay, PATCH
+// /config are tiny). Without it a client on the open AP (NFR-6) could
+// stream an arbitrarily large JSON value into the decoder's memory.
+const maxBodyBytes = 1 << 20
+
 // New assembles the ServeMux (stdlib patterns; no router framework).
 func New(d Deps) http.Handler {
 	s := &server{d: d}
@@ -156,6 +163,7 @@ func (s *server) putDelay(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Seconds *float64 `json:"seconds"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Seconds == nil {
 		s.problem(w, http.StatusUnprocessableEntity, "invalid delay request",
 			`body must be {"seconds": <number>}`, limits)
@@ -174,8 +182,11 @@ func (s *server) putDelay(w http.ResponseWriter, r *http.Request) {
 func (s *server) getClip(w http.ResponseWriter, r *http.Request) {
 	capS := s.d.Status.Status().Buffer.CapacityS
 	q := r.URL.Query()
-	var sec float64
-	if _, err := fmt.Sscanf(q.Get("seconds"), "%g", &sec); err != nil || sec <= 0 || sec > capS {
+	// Strict parse: Sscanf-style scanning would accept trailing garbage
+	// ("5abc") and NaN — and NaN passes every range comparison, turning the
+	// request into a full-buffer export (FR-11).
+	sec, err := strconv.ParseFloat(q.Get("seconds"), 64)
+	if err != nil || math.IsNaN(sec) || math.IsInf(sec, 0) || sec <= 0 || sec > capS {
 		s.problem(w, http.StatusUnprocessableEntity, "invalid clip request",
 			fmt.Sprintf("seconds %q must be a number in 0…%g", q.Get("seconds"), capS),
 			map[string]any{"max_seconds": capS})
@@ -220,6 +231,7 @@ func (s *server) getConfig(w http.ResponseWriter, _ *http.Request) {
 
 func (s *server) patchConfig(w http.ResponseWriter, r *http.Request) {
 	var p config.Patch
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		s.problem(w, http.StatusUnprocessableEntity, "invalid config patch", err.Error(), nil)
 		return
@@ -274,6 +286,7 @@ func (s *server) getPreview(w http.ResponseWriter, r *http.Request) {
 	tick, stop := s.d.Ticker(PreviewInterval)
 	defer stop()
 	var lastSeq uint64
+	var lastTS time.Time
 	var sent bool
 	for {
 		select {
@@ -282,10 +295,12 @@ func (s *server) getPreview(w http.ResponseWriter, r *http.Request) {
 		case <-tick:
 		}
 		f, err := frames.Newest()
-		if err != nil || (sent && f.Seq == lastSeq) {
+		// Frame identity is (Seq, CaptureTS): a source reconnect restarts
+		// Seq at 0, so Seq alone could suppress a genuinely new frame.
+		if err != nil || (sent && f.Seq == lastSeq && f.CaptureTS.Equal(lastTS)) {
 			continue
 		}
-		lastSeq, sent = f.Seq, true
+		lastSeq, lastTS, sent = f.Seq, f.CaptureTS, true
 		if _, err := fmt.Fprintf(w, "--%s\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n",
 			previewBoundary, len(f.JPEG)); err != nil {
 			return
