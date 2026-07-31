@@ -24,6 +24,12 @@ cross build.
 | UT-9 | httpapi | Table-driven validation ⇒ 200/422 (FR-11) |
 | UT-10 | config | Parse, defaults, invalid file ⇒ clear startup error |
 | UT-11 | screen | `formatDelay` table: 0⇒"0s delay", 2s⇒"2s delay", 30s⇒"30s delay", 90s⇒"90s delay", 999ms⇒"0s delay" (truncate), -5s⇒"0s delay" (clamp), 4h⇒"9999s delay" (clamp); plus sdl-tagged smoke that `Render` after `SetDelay` succeeds and the glyph texture loads (FR-13) |
+| UT-12 | engine | `Selection.Miss`: `MissEmpty` on empty buffer; `MissTooEarly` when the target precedes the oldest frame (oldest still shown, `WarmingUp` unchanged); `MissNone` on a hit; `Err` stays nil for both miss kinds |
+| UT-13 | cmd | `renderLoop.step`: the tick timestamp (not wall clock) reaches `Engine.Tick`; tick overrun counted when the tick-to-tick delta exceeds 1.5× budget; over-budget render counted; miss kinds and held-frame streaks counted (NFR-3 observability) |
+| UT-14 | capture | CaptureTS delta > injected `GapThreshold` ⇒ `Gaps()` increments and `OnGap` fires; no gap counted across a source reopen; `MaxFrameBytes()` tracks the largest payload |
+| UT-15 | screen | sdl-tagged: streaming frame texture reused across same-size frames (`TextureRecreates()` stays 1), recreated on dimension change (⇒ 2); `Info()` reports a non-empty renderer name (`make test-hw` lane only) |
+| UT-16 | export | `applyNice` lowers a child process's priority (getpriority == nice); `Exporter.Nice` is applied in `Export` |
+| UT-17 | config | `deploy/config.toml` loads cleanly via `config.Load`; `buffer_max_s == 60` (production capacity guard) |
 
 ## 2. Tier 2 — integration (SyntheticSource, seconds, every PR)
 
@@ -55,6 +61,7 @@ ARCHITECTURE.md §7.
 | 5 | httpapi + config | UT-9,10; IT-2,5,8 |
 | 6 | camera + screen adapters (thin), reconnect supervisor | UT-11; IT-7; ST-1 |
 | 7 | wiring, web UI, deploy artifacts, soak | ST-2..6 |
+| 8 | observability + stutter hardening (render metrics, capture gaps, streaming texture, export nice, 60 s capacity) | UT-12..17; ST-4 |
 
 ## 4. Tier 3 — system/E2E (real binary, nightly) & milestones
 
@@ -63,7 +70,7 @@ ARCHITECTURE.md §7.
 | ST-1 | API contract suite vs running process with v4l2loopback (CI, no camera) |
 | ST-2 | UI smoke (Playwright): slider ⇒ PUT /delay; download ⇒ MP4 |
 | ST-3 | 24 h soak (synth): RSS growth < 5 %, drops < 0.1 % (NFR-1/2) |
-| ST-4 | Load: export loop + preview client ⇒ NFR-3/4 held (metrics assertions) |
+| ST-4 | Load: export loop + preview client ⇒ NFR-3/4 held: `zeitspiegel_render.render_over_budget/ticks < 1 %`, `tick_overruns ≈ 0`, `miss_too_early = miss_empty = 0`, `held_streak_max ≤ 2` |
 | ST-5 | systemd kill -9 ⇒ restart, /healthz green < 10 s |
 | ST-6 | Power cycle mid-operation ⇒ clean boot to mirror, FS intact (NFR-9, FR-12) |
 
