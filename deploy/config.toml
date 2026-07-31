@@ -7,8 +7,8 @@ source = "camera"                 # real capture; "synth" only for development
 device = "auto"                   # first node that streams (the Kiyo also exposes a metadata-only node)
 clip_dir = "/run/zeitspiegel"     # tmpfs (RuntimeDirectory) — clips never touch the read-only root (NFR-9)
 profile = "auto"                  # probe the camera's highest MJPEG mode, capped at 1080p (E-2 rev); or "720p60"/"1080p30"
-buffer_max_s = 120.0              # ring buffer length in seconds
-buffer_max_bytes = 1610612736     # 1.5 GiB hard cap; 720p60 MJPEG ≈ 5 MB/s ⇒ 120 s ≈ 600 MB
+buffer_max_s = 60.0               # ring buffer length; delay in practice ≤ 30 s — a longer buffer only inflates heap + GC pauses
+buffer_max_bytes = 1073741824     # 1 GiB hard cap; bright-scene 1080p30 MJPEG can spike to ~15 MB/s ⇒ 60 s ≈ 900 MB worst case (§7)
 mirror_flip = true                # horizontal flip — it is a mirror (FR-2)
 default_delay_s = 15.0            # FR-3 boot delay; runtime slider overrides via PUT /api/v1/delay
 

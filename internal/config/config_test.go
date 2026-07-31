@@ -146,3 +146,22 @@ func TestAutoProfile(t *testing.T) {
 		t.Errorf("auto nominal = %dx%d@%v, want 1920x1080@30", w, h, c.FPS())
 	}
 }
+
+// UT-17: the checked-in production config must load, validate, and pin the
+// 60 s buffer capacity (the delay slider never exceeds 30 s in practice;
+// a longer buffer only inflates heap and GC pause times — see D2/§7).
+func TestDeployConfigLoadsWith60sBuffer(t *testing.T) {
+	cfg, err := config.Load("../../deploy/config.toml")
+	if err != nil {
+		t.Fatalf("load deploy/config.toml: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate deploy/config.toml: %v", err)
+	}
+	if cfg.BufferMaxS != 60 {
+		t.Errorf("buffer_max_s = %v, want 60", cfg.BufferMaxS)
+	}
+	if cfg.BufferMaxBytes != 1<<30 {
+		t.Errorf("buffer_max_bytes = %d, want 1 GiB", cfg.BufferMaxBytes)
+	}
+}
