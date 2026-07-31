@@ -209,3 +209,39 @@ func TestCoreDelayProperty(t *testing.T) {
 		t.Fatalf("only %d frames measured, want ≥ %d", measured, fps)
 	}
 }
+
+// UT-12: Selection.Miss classifies why the target frame was unavailable so
+// the render loop can count warm-up vs. eviction-overrun misses without the
+// engine logging (pure package). Err stays nil for both miss kinds.
+func TestSelectionMissKinds(t *testing.T) {
+	t.Run("empty buffer", func(t *testing.T) {
+		e := engine.New(ringbuf.New(time.Hour, 1<<30))
+		sel := e.Tick(t0)
+		if sel.Miss != engine.MissEmpty || !sel.WarmingUp || sel.Render || sel.Err != nil {
+			t.Fatalf("empty: got (miss=%v warming=%v render=%v err=%v), want (MissEmpty true false nil)",
+				sel.Miss, sel.WarmingUp, sel.Render, sel.Err)
+		}
+	})
+
+	t.Run("too early falls back to oldest", func(t *testing.T) {
+		e := engine.New(bufEvery(11, 100*time.Millisecond)) // 0..1 s
+		e.SetDelay(time.Minute)                             // target far before oldest
+		sel := e.Tick(t0.Add(time.Second))
+		if sel.Miss != engine.MissTooEarly || !sel.WarmingUp || sel.Err != nil {
+			t.Fatalf("too early: got (miss=%v warming=%v err=%v), want (MissTooEarly true nil)",
+				sel.Miss, sel.WarmingUp, sel.Err)
+		}
+		if !sel.Render || sel.Frame.Seq != 0 {
+			t.Fatalf("too early: got (render=%v seq=%d), want oldest frame rendered (true 0)", sel.Render, sel.Frame.Seq)
+		}
+	})
+
+	t.Run("hit", func(t *testing.T) {
+		e := engine.New(bufEvery(11, 100*time.Millisecond))
+		e.SetDelay(100 * time.Millisecond)
+		sel := e.Tick(t0.Add(500 * time.Millisecond))
+		if sel.Miss != engine.MissNone || sel.WarmingUp || !sel.Render {
+			t.Fatalf("hit: got (miss=%v warming=%v render=%v), want (MissNone false true)", sel.Miss, sel.WarmingUp, sel.Render)
+		}
+	})
+}
