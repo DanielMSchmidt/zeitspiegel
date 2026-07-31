@@ -63,3 +63,22 @@ func displaySplashFunc(d engine.Display) func() error {
 	}
 	return nil
 }
+
+// displayDiagFunc snapshots renderer diagnostics for the startup log and
+// expvar: which renderer SDL actually negotiated (the software fallback is
+// otherwise silent), the display's refresh rate, and the frame-texture
+// recreate count (steady state 1).
+func displayDiagFunc(d engine.Display) func() map[string]any {
+	if s, ok := d.(*screen.Screen); ok {
+		return func() map[string]any {
+			i := s.Info()
+			return map[string]any{
+				"renderer":          i.Renderer,
+				"software":          i.Software,
+				"refresh_hz":        i.RefreshHz,
+				"texture_recreates": s.TextureRecreates(),
+			}
+		}
+	}
+	return nil
+}

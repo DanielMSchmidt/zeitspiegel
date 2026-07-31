@@ -20,7 +20,7 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 | File | Content |
 |---|---|
 | `zeitspiegel.service` | `Restart=always` with `StartLimitIntervalSec=0` (an appliance never stops retrying), `RestartSec=1`, `RuntimeDirectory=zeitspiegel` (tmpfs for clips), journal logging; ordered after `local-fs.target` only — no network ordering, the mirror must work with Wi-Fi down and the web UI appears when the network does. An `ExecStartPre` waits ≤5 s for `/dev/dri/card*` so early boot doesn't race udev's DRM cold-plug |
-| `config.toml` | profile=720p60, buffer 120 s / 1.5 GB cap, mirror_flip=true, focus pinning, bind `:80` |
+| `config.toml` | profile=auto (E-2: highest MJPEG mode capped at 1080p), buffer 60 s / 1 GiB cap, mirror_flip=true, focus pinning, bind `:80` |
 | `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the open Wi-Fi AP (`AP_SSID`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
 | `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg + SDL2 + NetworkManager + dnsmasq-base/iptables (needed by `ipv4.method=shared`) + rfkill/iw (for in-place debug), writes the binary, AP keyfile, user, regdomain, NOPASSWD sudo for the admin, persistent journal, and clears the stock rfkill soft-block — produces a finished, network-free image |
 | `sd/seal.sh` + `zeitspiegel-seal.service` | one-time first-boot finisher baked into the image: stages `authorized_keys` for the SSH escape hatch, enables the read-only overlay, reboots; self-disables (offline). SSH itself stays masked. |
@@ -63,5 +63,24 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 - Config change / update: re-flash via `make sd`. If you must edit
   in place, unseal first (`raspi-config nonint disable_overlayfs` +
   reboot), apply, re-enable + reboot — full procedure in PROVISIONING.md §5.
-- RAM budget: buffer cap 1.5 GB default; 720p60 MJPEG ≈ 5 MB/s ⇒ 120 s ≈
-  600 MB (1080p30 ≈ 6 MB/s ⇒ 720 MB).
+- RAM budget: buffer cap 1 GiB (deploy/config.toml); typical 1080p30 MJPEG
+  ≈ 6 MB/s ⇒ 60 s ≈ 360 MB, bright/high-motion scenes can spike toward the
+  cap. The unit sets `GOMEMLIMIT=1400MiB`: buffer cap + one pinned export
+  (a running clip holds its frames past eviction, hard rule 4) + ~200 MB
+  process overhead. Without the limit, GOGC=100 lets the heap grow toward
+  2× live between collections — long GC marks whose assist pauses hit the
+  render loop as visible stutter. This accounting intentionally reads
+  NFR-2's "byte budget + 200 MB" as excluding the export pin, which is
+  bounded by the single export slot.
+- Watching stutter diagnostics: `curl -s zeitspiegel.local/debug/vars`.
+  Key fields — `zeitspiegel_render` (`tick_overruns`, `render_over_budget`,
+  `render_max_us`, `held_streak_max` ≥ 3 = visible judder, `miss_*` ≠ 0
+  after warm-up = delay outran the buffer), `zeitspiegel_capture` (`gaps`
+  — a capture hole replays on screen `delay` seconds later,
+  `max_frame_bytes`), `zeitspiegel_buffer` (`bytes_per_s` — live MJPEG
+  bitrate, the bright-scene signal), `zeitspiegel_display`
+  (`software` must be false, `refresh_hz` should be 60,
+  `texture_recreates` steady at 1), and the stdlib `memstats`
+  (`NumGC`, `PauseNs`, `HeapAlloc`). The startup journal logs the
+  negotiated renderer: `software=true` there means SDL silently fell back
+  to software rendering, which cannot hold the budget at 1080p.

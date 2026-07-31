@@ -30,11 +30,23 @@ type FrameBuffer interface {
 	Oldest() (frame.Frame, error)
 }
 
+// MissKind classifies why the target frame was unavailable, as data rather
+// than a log line (no logging in pure packages). The render loop counts
+// these: MissTooEarly outside warm-up means eviction overran the delay.
+type MissKind uint8
+
+const (
+	MissNone     MissKind = iota // target frame found
+	MissTooEarly                 // target precedes the oldest buffered frame
+	MissEmpty                    // nothing buffered
+)
+
 // Selection is the outcome of one tick.
 type Selection struct {
 	Frame     frame.Frame
 	Render    bool // false when the selected frame did not change or nothing is buffered
 	WarmingUp bool // delay exceeds buffered history (FR-10)
+	Miss      MissKind
 	// Err carries an unexpected buffer error (never ErrEmpty/ErrTooEarly,
 	// which are normal warm-up states) so the render loop can log it
 	// instead of it hiding behind WarmingUp.
@@ -80,22 +92,24 @@ func (e *Engine) Tick(now time.Time) Selection {
 	target := now.Add(-e.Delay())
 	f, err := e.buf.At(target)
 	var warming bool
+	var miss MissKind
 	switch {
 	case err == nil:
 	case errors.Is(err, ringbuf.ErrTooEarly): // delay > buffered: show oldest
 		warming = true
+		miss = MissTooEarly
 		if f, err = e.buf.Oldest(); err != nil {
-			return Selection{WarmingUp: true}
+			return Selection{WarmingUp: true, Miss: MissEmpty}
 		}
 	case errors.Is(err, ringbuf.ErrEmpty):
-		return Selection{WarmingUp: true}
+		return Selection{WarmingUp: true, Miss: MissEmpty}
 	default:
 		return Selection{WarmingUp: true, Err: err}
 	}
 	if e.rendered && f.Seq == e.lastSeq && f.CaptureTS.Equal(e.lastTS) {
-		return Selection{Frame: f, Render: false, WarmingUp: warming}
+		return Selection{Frame: f, Render: false, WarmingUp: warming, Miss: miss}
 	}
 	e.lastSeq, e.lastTS = f.Seq, f.CaptureTS
 	e.rendered = true
-	return Selection{Frame: f, Render: true, WarmingUp: warming}
+	return Selection{Frame: f, Render: true, WarmingUp: warming, Miss: miss}
 }

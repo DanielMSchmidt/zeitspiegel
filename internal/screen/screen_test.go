@@ -8,6 +8,9 @@ package screen_test
 // the TV/HDMI output on the appliance.
 
 import (
+	"bytes"
+	"image"
+	"image/jpeg"
 	"testing"
 	"time"
 
@@ -90,5 +93,45 @@ func TestRenderWithDelayBadge(t *testing.T) {
 	s.SetDelay(-1 * time.Second) // clamp path
 	if err := s.Render(src.Next()); err != nil {
 		t.Fatalf("render at negative delay: %v", err)
+	}
+}
+
+// encodeJPEG produces a solid-colour JPEG at the given size (stdlib only).
+func encodeJPEG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	im := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i := range im.Pix {
+		im.Pix[i] = 0x80
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, im, nil); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// UT-15: the frame texture is created once and reused across same-size
+// frames; a dimension change recreates it exactly once; Info reports the
+// renderer that Open actually got (the silent software fallback must be
+// visible to the caller).
+func TestFrameTextureReuseAndInfo(t *testing.T) {
+	s := openDummy(t)
+	src := synth.NewSource(30, time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC))
+	for i := 0; i < 3; i++ {
+		if err := s.Render(src.Next()); err != nil {
+			t.Fatalf("frame %d: %v", i, err)
+		}
+	}
+	if got := s.TextureRecreates(); got != 1 {
+		t.Fatalf("after 3 same-size frames: TextureRecreates() = %d, want 1", got)
+	}
+	if err := s.Render(frame.Frame{Seq: 100, JPEG: encodeJPEG(t, 640, 480)}); err != nil {
+		t.Fatalf("render 640x480: %v", err)
+	}
+	if got := s.TextureRecreates(); got != 2 {
+		t.Fatalf("after size change: TextureRecreates() = %d, want 2", got)
+	}
+	if info := s.Info(); info.Renderer == "" {
+		t.Error("Info().Renderer is empty, want the SDL renderer name")
 	}
 }

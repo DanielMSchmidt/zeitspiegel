@@ -83,8 +83,13 @@ func run() error {
 	restart := &atomic.Bool{}
 	var store *runtimeStore // assigned below, after the display exists
 
-	// 3 export slots (ARCHITECTURE §3, IT-8)
-	exporter := export.New(clipDir, 3)
+	// One export slot, niced: x264 ultrafast is multi-threaded and the Pi 5
+	// has no hardware encoder (§D4) — a second concurrent export competes
+	// with the render loop's decode budget exactly when frames are biggest.
+	// A rejected guest gets 503 + Retry-After for the few seconds a clip
+	// takes (NFR-4).
+	exporter := export.New(clipDir, 1)
+	exporter.Nice = 10
 	exportSeconds := expvar.NewFloat("zeitspiegel_export_seconds")
 	clipper := &meteredClipper{
 		inner: &httpapi.Clipper{Buffer: buf, Exporter: exporter, Clock: sysClock{},
@@ -101,6 +106,12 @@ func run() error {
 		return err
 	}
 	logger.Info("display opened", "took", time.Since(displayStart).Round(time.Millisecond))
+	if diag := displayDiagFunc(display); diag != nil {
+		d := diag()
+		// software=true or refresh_hz≠60 each explain judder on their own.
+		logger.Info("renderer", "name", d["renderer"], "software", d["software"], "refresh_hz", d["refresh_hz"])
+		expvar.Publish("zeitspiegel_display", expvar.Func(func() any { return diag() }))
+	}
 	if *windowed && display == nil {
 		return errors.New("--windowed needs a display build (go build -tags sdl, see make build-tv)")
 	}
@@ -118,6 +129,7 @@ func run() error {
 
 	store = &runtimeStore{rt: cfg.Runtime(), buf: buf, restart: restart, setMirror: displayMirrorFunc(display)}
 
+	var lastGapLog atomic.Int64 // unix ns of the last gap log line
 	sup := capture.New(capture.Options{
 		Open: func(ctx context.Context) (capture.Source, error) {
 			t := time.Now()
@@ -133,14 +145,39 @@ func run() error {
 		Push:    buf.Push,
 		Sleep:   ctxSleep,
 		OnError: func(err error) { logger.Error("capture source", "err", err) },
+		// A hole wider than two nominal frame intervals means capture lost
+		// frames — it will replay on screen `delay` seconds later (FR-1).
+		GapThreshold: func() time.Duration {
+			return 2 * time.Duration(float64(time.Second)/profileFPS(store.Current().Profile))
+		},
+		OnGap: func(delta time.Duration) { // rate-limited: ≥ 1 s between lines
+			now := time.Now().UnixNano()
+			if last := lastGapLog.Load(); now-last >= int64(time.Second) && lastGapLog.CompareAndSwap(last, now) {
+				logger.Warn("capture gap", "delta", delta.Round(time.Millisecond))
+			}
+		},
 	})
 
 	status := &sysStatus{start: start, cfg: cfg, store: store, buf: buf, eng: eng, sup: sup}
+	loopM := &loopMetrics{}
 	expvar.Publish("zeitspiegel_dropped_frames", expvar.Func(func() any { return sup.Dropped() }))
 	expvar.Publish("zeitspiegel_buffer", expvar.Func(func() any {
 		st := buf.Stats()
-		return map[string]any{"len": st.Len, "bytes": st.Bytes, "filled_s": st.Span.Seconds()}
+		m := map[string]any{"len": st.Len, "bytes": st.Bytes, "filled_s": st.Span.Seconds()}
+		// Derived bitrate figures: bright/high-motion scenes inflate MJPEG
+		// frames, so bytes_per_s is the live bitrate-spike signal (D2, §7).
+		if st.Len > 0 {
+			m["avg_frame_bytes"] = st.Bytes / int64(st.Len)
+		}
+		if s := st.Span.Seconds(); s > 0 {
+			m["bytes_per_s"] = int64(float64(st.Bytes) / s)
+		}
+		return m
 	}))
+	expvar.Publish("zeitspiegel_capture", expvar.Func(func() any {
+		return map[string]any{"gaps": sup.Gaps(), "max_frame_bytes": sup.MaxFrameBytes()}
+	}))
+	expvar.Publish("zeitspiegel_render", expvar.Func(loopM.snapshot))
 
 	handler := httpapi.New(httpapi.Deps{
 		Logger:        logger,
@@ -202,9 +239,18 @@ func run() error {
 	var runErr error
 	if display != nil {
 		logger.Info("display loop starting", "tick_fps", displayTickFPS, "mirror", cfg.MirrorFlip, "windowed", *windowed)
-		pump := displayEvents(display)
-		setDelay := displayDelayFunc(display)
-		splash := displaySplashFunc(display)
+		rl := &renderLoop{
+			eng:      eng,
+			display:  display,
+			logger:   logger,
+			metrics:  loopM,
+			now:      time.Now,
+			budget:   time.Second / displayTickFPS,
+			start:    start,
+			pump:     displayEvents(display),
+			setDelay: displayDelayFunc(display),
+			splash:   displaySplashFunc(display),
+		}
 		// Tick at the highest nominal profile rate regardless of the boot
 		// profile: a runtime profile change (PATCH /config) can raise the
 		// capture rate to 60 fps and this ticker is created once. Extra
@@ -212,8 +258,6 @@ func run() error {
 		// frame changed.
 		tick := time.NewTicker(time.Second / displayTickFPS)
 		defer tick.Stop()
-		var firstFrameDone bool
-		var lastSelErr string
 	loop:
 		for {
 			select {
@@ -223,37 +267,13 @@ func run() error {
 				runErr = err
 				stop()
 				break loop
-			case <-tick.C:
-				if pump != nil && pump() { // window closed (dev mode)
+			case t := <-tick.C:
+				// The tick's fire time drives frame selection: a tick that
+				// starts late (previous render overran) must not also shift
+				// which frame is chosen.
+				if rl.step(t) {
 					stop()
 					break loop
-				}
-				if setDelay != nil {
-					setDelay(eng.Delay())
-				}
-				sel := eng.Tick(time.Now())
-				if sel.Err != nil && sel.Err.Error() != lastSelErr {
-					lastSelErr = sel.Err.Error() // log once per distinct error, not per tick
-					logger.Error("frame selection", "err", sel.Err)
-				} else if sel.Err == nil {
-					lastSelErr = ""
-				}
-				if sel.Render {
-					if err := display.Render(sel.Frame); err != nil {
-						logger.Error("render", "seq", sel.Frame.Seq, "err", err)
-					} else if !firstFrameDone {
-						firstFrameDone = true
-						logger.Info("first frame presented",
-							"since_start", time.Since(start).Round(time.Millisecond),
-							"uptime", procUptime())
-					}
-				} else if !firstFrameDone && splash != nil {
-					// Camera is still enumerating / buffer is empty.
-					// Repaint the splash each tick so the screen
-					// shows our colour instead of SDL's default.
-					if err := splash(); err != nil {
-						logger.Error("splash", "err", err)
-					}
 				}
 			}
 		}

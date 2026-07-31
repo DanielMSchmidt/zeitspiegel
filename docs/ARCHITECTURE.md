@@ -22,9 +22,12 @@ Picamera2's `CircularOutput` issues (#226/#323/#815) show the GOP problem:
 clips must start at keyframes, raw H.264 needs muxing, frame counts drift.
 MJPEG makes every frame independently decodable → frame-accurate delay AND
 export with zero special cases, no live encoder (the camera emits MJPEG
-natively over UVC). Cost: ~5× RAM vs H.264 (~5 MB/s at 720p60; 120 s ≈
-600 MB) — acceptable. A second GOP-aligned H.264 ring for very long history
-is a possible v2, not v1.
+natively over UVC). Cost: ~5× RAM vs H.264 (~5 MB/s at 720p60; MJPEG
+bitrate is scene-dependent — bright/high-motion scenes spike it, watch
+`zeitspiegel_buffer.bytes_per_s`). Production runs 60 s / 1 GiB
+(deploy/config.toml): the delay slider stays ≤ 30 s in practice and a
+longer buffer only inflates heap and GC pause times. A second GOP-aligned
+H.264 ring for very long history is a possible v2, not v1.
 
 ### D3 — Native full-screen display, not a browser
 SDL2 via KMSDRM renders directly to HDMI without X11. A browser display would
@@ -86,17 +89,24 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   belongs to tick t; delay-change semantics (hard cut: increase replays the
   past once, decrease jumps forward); warm-up (delay > buffered ⇒ show oldest,
   report `warming_up`).
-- **Display renderer** (`internal/screen`): per tick `buf.At(now − delay)`;
-  if the selected frame is unchanged (identity = seq + capture timestamp;
-  seq alone restarts at 0 on a source reconnect) → no-op; else decode
-  (SDL2_image/libjpeg-turbo), render
-  with `RenderCopyEx(..., FLIP_HORIZONTAL)`. Budget @60 fps = 16.7 ms;
-  expected on Pi 5: 720p decode 4–8 ms + present 2–4 ms (validate in spike
-  S-1). Fallbacks: decode in worker goroutine (+1 tick latency, irrelevant
-  for a mirror) or a 30 fps profile.
+- **Display renderer** (`internal/screen`): per tick `buf.At(t − delay)`
+  where t is the ticker's fire time; if the selected frame is unchanged
+  (identity = seq + capture timestamp; seq alone restarts at 0 on a source
+  reconnect) → no-op; else decode (SDL2_image/libjpeg-turbo) into a
+  persistent `SDL_TEXTUREACCESS_STREAMING` texture (recreated only on a
+  dimension/format change — per-frame texture create/destroy causes
+  periodic driver hitches on KMSDRM/GLES), render with
+  `RenderCopyEx(..., FLIP_HORIZONTAL)`. The negotiated renderer (name,
+  software fallback, display refresh rate) is logged at startup and
+  published via expvar. Budget @60 fps = 16.7 ms; expected on Pi 5: 720p
+  decode 4–8 ms + present 2–4 ms (validate in spike S-1). Fallbacks:
+  decode in worker goroutine (+1 tick latency, irrelevant for a mirror) or
+  a 30 fps profile.
 - **Exporter** (`internal/window` + `internal/export`): window [t−n, t] →
-  ffmpeg stdin → tmpfs file → `http.ServeFile` → cleanup. Max 3 concurrent
-  exports (semaphore), then 503 + Retry-After.
+  ffmpeg stdin → tmpfs file → `http.ServeFile` → cleanup. One export slot
+  in production (semaphore), then 503 + Retry-After; the ffmpeg child is
+  reniced (+10) so x264 on the Pi's four cores cannot starve the render
+  loop's tick budget.
 - **HTTP layer** (`internal/httpapi`): stdlib ServeMux patterns; handlers
   depend on small interfaces (StatusProvider, DelaySetter, ClipExporter).
 
@@ -113,7 +123,13 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   the ticker is created once but the profile can change at runtime; extra
   ticks are nearly free because the engine renders only when the selected
   frame changed. The exporter reads the nominal fps from the runtime
-  profile per export for the same reason.
+  profile per export for the same reason. Frame selection uses each tick's
+  fire time (the value delivered on the ticker channel), not the wall
+  clock at processing time, so a render that overruns does not also skew
+  which frame the next tick picks; tick overruns, over-budget renders,
+  selection misses, and held-frame streaks are counted into
+  `zeitspiegel_render` (expvar), capture-timeline holes into
+  `zeitspiegel_capture` (a hole replays on screen `delay` seconds later).
 - shutdown: `signal.NotifyContext`; clean close matters for dev/tests (in
   production the plug is pulled, which NFR-9 makes safe).
 
@@ -145,3 +161,5 @@ Exposure + USB + decode + render + vsync ≈ 60–120 ms. `delay = 0` means
 | Kiyo MJPEG bitrate @720p60 / @1080p30 | S-2 | _tbd_ |
 | 720p JPEG decode+render per frame (Pi 5) | S-1 | _tbd_ |
 | x264 ultrafast export speed, 30 s clip (Pi 5) | M3 | _tbd_ |
+| Bright-scene MJPEG bitrate @1080p30 (`zeitspiegel_buffer.bytes_per_s` peak) | prod | _tbd_ |
+| Render over-budget tick ratio under bright-scene stress (`zeitspiegel_render`) | prod | _tbd_ |

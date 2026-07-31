@@ -26,3 +26,6 @@ func displayDelayFunc(engine.Display) func(time.Duration) { return nil }
 
 // displaySplashFunc: no screen to paint headless.
 func displaySplashFunc(engine.Display) func() error { return nil }
+
+// displayDiagFunc: no renderer diagnostics headless.
+func displayDiagFunc(engine.Display) func() map[string]any { return nil }

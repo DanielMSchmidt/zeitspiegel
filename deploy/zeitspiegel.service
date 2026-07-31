@@ -26,6 +26,12 @@ StartLimitIntervalSec=0
 # if DRM never comes.
 ExecStartPre=-/bin/sh -c 'timeout 5 sh -c "until ls /dev/dri/card* >/dev/null 2>&1; do sleep 0.1; done"'
 ExecStart=/usr/local/bin/zeitspiegel --config /etc/zeitspiegel/config.toml
+# GC ceiling: max live heap ≈ buffer cap (1 GiB) + one pinned export +
+# process overhead. Without it GOGC=100 lets the heap balloon toward 2×
+# live between collections — multi-GB of JPEG slices and long marks whose
+# assist pauses hit the render loop as visible stutter (NFR-2/NFR-3;
+# accounting in docs/DEPLOYMENT.md).
+Environment=GOMEMLIMIT=1400MiB
 Restart=always
 RestartSec=1
 # tmpfs working dir at /run/zeitspiegel; exported clips land here and

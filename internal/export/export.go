@@ -29,12 +29,17 @@ const (
 	FormatMJPEG Format = "mjpeg"
 )
 
-// Exporter runs at most `slots` concurrent ffmpeg exports (3 in production,
-// TESTPLAN IT-8).
+// Exporter runs at most `slots` concurrent ffmpeg exports (1 in production —
+// x264 on the Pi's four cores must not starve the render loop; the slot
+// semaphore itself is exercised with 3 in TESTPLAN IT-8).
 type Exporter struct {
 	dir    string
 	ffmpeg string
 	sem    chan struct{}
+	// Nice is the Unix niceness applied to each ffmpeg process right after
+	// start (0 = inherit). Exports are guest-facing bulk work; the render
+	// loop's 16.7 ms tick budget is not.
+	Nice int
 }
 
 // New creates an exporter writing temp files to dir (tmpfs on the Pi).
@@ -102,6 +107,9 @@ func (e *Exporter) Export(ctx context.Context, frames []frame.Frame, fps float64
 		cleanup()
 		return "", nil, fmt.Errorf("export: start ffmpeg: %w", err)
 	}
+	// Best-effort: a failed renice leaves the export at normal priority,
+	// which is no worse than not trying.
+	_ = applyNice(cmd.Process.Pid, e.Nice)
 
 	writeErr := func() error {
 		defer stdin.Close()
