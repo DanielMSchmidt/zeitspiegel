@@ -24,7 +24,36 @@ type Screen struct {
 	mirror   atomic.Bool
 	delayNS  atomic.Int64
 	glyphTex *sdl.Texture
+	info     Info
+
+	// frameTex is the persistent streaming texture frames decode into.
+	// Creating and destroying a GPU texture per frame causes driver-side
+	// allocation churn and periodic hitches on KMSDRM/GLES; reusing one
+	// texture and Update()ing its pixels is the steady-state path. It is
+	// recreated only when the frame dimensions or pixel format change
+	// (profile switch).
+	frameTex     *sdl.Texture
+	texW, texH   int32
+	texFmt       uint32
+	texRecreates atomic.Uint64
 }
+
+// Info describes what Open actually negotiated with SDL. The render loop
+// logs it: a software renderer or a non-60 Hz display each explain visible
+// judder on their own.
+type Info struct {
+	Renderer  string // SDL renderer backend name (e.g. "opengles2", "software")
+	Software  bool   // true = software fallback; blows the render budget on the Pi
+	RefreshHz int    // current display refresh rate; 0 = unknown
+}
+
+// Info reports the negotiated renderer and display mode.
+func (s *Screen) Info() Info { return s.info }
+
+// TextureRecreates counts frame-texture (re)creations. Steady state is 1;
+// it climbing with every frame means the streaming path is unavailable and
+// rendering fell back to per-frame texture uploads.
+func (s *Screen) TextureRecreates() uint64 { return s.texRecreates.Load() }
 
 // SetDelay stores the delay shown by the on-screen badge. Called from the
 // render loop each tick; no locking needed (single writer in practice).
@@ -80,6 +109,15 @@ func Open(o Options) (*Screen, error) {
 	}
 	s := &Screen{win: win, ren: ren}
 	s.mirror.Store(o.Mirror)
+	if ri, err := ren.GetInfo(); err == nil {
+		s.info.Renderer = ri.Name
+		s.info.Software = ri.Flags&sdl.RENDERER_SOFTWARE != 0
+	}
+	if idx, err := win.GetDisplayIndex(); err == nil {
+		if mode, err := sdl.GetCurrentDisplayMode(idx); err == nil {
+			s.info.RefreshHz = int(mode.RefreshRate)
+		}
+	}
 	tex, err := loadGlyphAtlas(ren)
 	if err != nil {
 		ren.Destroy()
@@ -123,11 +161,19 @@ func (s *Screen) Render(f frame.Frame) error {
 		return fmt.Errorf("screen: decode jpeg (seq %d): %w", f.Seq, err)
 	}
 	defer surf.Free()
-	tex, err := s.ren.CreateTextureFromSurface(surf)
+	tex, err := s.frameTexture(surf)
 	if err != nil {
-		return fmt.Errorf("screen: texture: %w", err)
+		// Renderer-dependent: a driver may reject the surface's pixel
+		// format for streaming textures. A one-shot upload keeps frames on
+		// screen; the per-frame recreate count makes the fallback visible.
+		oneShot, err := s.ren.CreateTextureFromSurface(surf)
+		if err != nil {
+			return fmt.Errorf("screen: texture: %w", err)
+		}
+		defer oneShot.Destroy()
+		s.texRecreates.Add(1)
+		tex = oneShot
 	}
-	defer tex.Destroy()
 
 	flip := sdl.FLIP_NONE
 	if s.mirror.Load() {
@@ -167,8 +213,32 @@ func (s *Screen) Splash() error {
 	return nil
 }
 
+// frameTexture returns the persistent streaming texture, updated with
+// surf's pixels; it is (re)created only when the frame geometry changes.
+func (s *Screen) frameTexture(surf *sdl.Surface) (*sdl.Texture, error) {
+	if s.frameTex == nil || surf.W != s.texW || surf.H != s.texH || surf.Format.Format != s.texFmt {
+		if s.frameTex != nil {
+			s.frameTex.Destroy()
+			s.frameTex = nil
+		}
+		tex, err := s.ren.CreateTexture(surf.Format.Format, sdl.TEXTUREACCESS_STREAMING, surf.W, surf.H)
+		if err != nil {
+			return nil, fmt.Errorf("screen: streaming texture: %w", err)
+		}
+		s.frameTex, s.texW, s.texH, s.texFmt = tex, surf.W, surf.H, surf.Format.Format
+		s.texRecreates.Add(1)
+	}
+	if err := s.frameTex.Update(nil, surf.Data(), int(surf.Pitch)); err != nil {
+		return nil, fmt.Errorf("screen: texture update: %w", err)
+	}
+	return s.frameTex, nil
+}
+
 // Close tears down SDL.
 func (s *Screen) Close() error {
+	if s.frameTex != nil {
+		s.frameTex.Destroy()
+	}
 	if s.glyphTex != nil {
 		s.glyphTex.Destroy()
 	}

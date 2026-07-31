@@ -101,6 +101,12 @@ func run() error {
 		return err
 	}
 	logger.Info("display opened", "took", time.Since(displayStart).Round(time.Millisecond))
+	if diag := displayDiagFunc(display); diag != nil {
+		d := diag()
+		// software=true or refresh_hz≠60 each explain judder on their own.
+		logger.Info("renderer", "name", d["renderer"], "software", d["software"], "refresh_hz", d["refresh_hz"])
+		expvar.Publish("zeitspiegel_display", expvar.Func(func() any { return diag() }))
+	}
 	if *windowed && display == nil {
 		return errors.New("--windowed needs a display build (go build -tags sdl, see make build-tv)")
 	}
