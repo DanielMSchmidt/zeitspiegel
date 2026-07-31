@@ -351,3 +351,86 @@ func (s *slowDrain) ReadFrame(ctx context.Context) (frame.Frame, error) {
 }
 
 func (s *slowDrain) Close() error { return nil }
+
+// scriptSource emits a fixed list of frames, then fails (triggering a reopen).
+type scriptSource struct {
+	frames []frame.Frame
+	i      int
+}
+
+func (s *scriptSource) ReadFrame(ctx context.Context) (frame.Frame, error) {
+	if err := ctx.Err(); err != nil {
+		return frame.Frame{}, err
+	}
+	if s.i == len(s.frames) {
+		return frame.Frame{}, errors.New("usb device gone")
+	}
+	f := s.frames[s.i]
+	s.i++
+	return f, nil
+}
+
+func (s *scriptSource) Close() error { return nil }
+
+// UT-14: a CaptureTS delta above GapThreshold increments Gaps() and fires
+// OnGap; a source reopen does not count as a gap (it is already reported via
+// OnError); MaxFrameBytes tracks the largest payload seen.
+func TestGapDetectionAndMaxFrameBytes(t *testing.T) {
+	const interval = 33 * time.Millisecond
+	mk := func(seq uint64, ts time.Duration, size int) frame.Frame {
+		return frame.Frame{Seq: seq, CaptureTS: t0.Add(ts), JPEG: make([]byte, size)}
+	}
+	sources := []*scriptSource{
+		{frames: []frame.Frame{
+			mk(0, 0, 100),
+			mk(1, interval, 300),
+			mk(2, 8*interval, 200), // hole: 7 intervals missing
+			mk(3, 9*interval, 100),
+		}},
+		// reopen lands far in the future: must NOT count as a gap
+		{frames: []frame.Frame{
+			mk(0, 10*time.Second, 100),
+			mk(1, 10*time.Second+interval, 100),
+		}},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var gapDeltas []time.Duration
+	var pushed atomic.Int64
+	opens := 0
+	sup := capture.New(capture.Options{
+		Open: func(ctx context.Context) (capture.Source, error) {
+			if opens == len(sources) {
+				<-ctx.Done() // script exhausted: park until the test cancels
+				return nil, ctx.Err()
+			}
+			s := sources[opens]
+			opens++
+			return s, nil
+		},
+		Push: func(f frame.Frame) {
+			if pushed.Add(1) == 6 {
+				cancel()
+			}
+		},
+		Sleep:        func(ctx context.Context, d time.Duration) error { return nil },
+		GapThreshold: func() time.Duration { return 2 * interval },
+		OnGap:        func(delta time.Duration) { gapDeltas = append(gapDeltas, delta) },
+	})
+
+	if err := sup.Run(ctx); err != nil {
+		t.Fatalf("Run returned %v, want nil on cancel", err)
+	}
+
+	if got := sup.Gaps(); got != 1 {
+		t.Errorf("Gaps() = %d, want 1 (the in-stream hole; not the reopen jump)", got)
+	}
+	if len(gapDeltas) != 1 || gapDeltas[0] != 7*interval {
+		t.Errorf("OnGap deltas = %v, want [%v]", gapDeltas, 7*interval)
+	}
+	if got := sup.MaxFrameBytes(); got != 300 {
+		t.Errorf("MaxFrameBytes() = %d, want 300", got)
+	}
+}

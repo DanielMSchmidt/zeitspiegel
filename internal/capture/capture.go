@@ -51,15 +51,25 @@ type Options struct {
 	// OnError observes every open/read failure before the reconnect pause
 	// (cmd wires it to slog — this package stays logging-free). May be nil.
 	OnError func(error)
+	// GapThreshold returns the CaptureTS delta between consecutive frames
+	// above which a gap is counted. A func, not a value, because the profile
+	// (nominal frame rate) can change at runtime. Compares frame timestamps
+	// only — no wall clock here (hard rule 6). nil or ≤ 0 disables.
+	GapThreshold func() time.Duration
+	// OnGap observes each detected gap (cmd wires slog with rate limiting).
+	// May be nil.
+	OnGap func(delta time.Duration)
 	// QueueLen is the read→push channel depth; 0 = 4 (ARCHITECTURE §4).
 	QueueLen int
 }
 
 // Supervisor runs the capture loop and republishes its health.
 type Supervisor struct {
-	o        Options
-	degraded atomic.Bool
-	dropped  atomic.Uint64
+	o             Options
+	degraded      atomic.Bool
+	dropped       atomic.Uint64
+	gaps          atomic.Uint64
+	maxFrameBytes atomic.Int64
 }
 
 // New validates nothing fancy — zero-value options fields get defaults.
@@ -84,6 +94,16 @@ func (s *Supervisor) Degraded() bool { return s.degraded.Load() }
 
 // Dropped counts frames discarded because the push side stalled.
 func (s *Supervisor) Dropped() uint64 { return s.dropped.Load() }
+
+// Gaps counts CaptureTS holes exceeding GapThreshold. A hole is invisible on
+// screen until `delay` seconds later, so the counter is the only live signal
+// that a stutter was captured, not rendered.
+func (s *Supervisor) Gaps() uint64 { return s.gaps.Load() }
+
+// MaxFrameBytes reports the largest JPEG payload seen since start — a
+// high-water mark for scene-dependent MJPEG bitrate (bright/high-motion
+// scenes produce much larger frames).
+func (s *Supervisor) MaxFrameBytes() int64 { return s.maxFrameBytes.Load() }
 
 // Run captures until ctx is done; that is the only nil return. Source
 // errors never propagate — they degrade and reconnect.
@@ -114,6 +134,10 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			continue
 		}
 		s.degraded.Store(false)
+		// Gap detection state is per source instance: a reopen jumps the
+		// timeline, but that outage is already visible via OnError/degraded —
+		// counting it again as a gap would double-report.
+		var lastTS time.Time
 		for {
 			f, err := src.ReadFrame(ctx)
 			if err != nil {
@@ -137,6 +161,23 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			// metadata-only node) must keep backing off, not churn at the
 			// initial pause forever.
 			attempt = 0
+			if s.o.GapThreshold != nil {
+				if th := s.o.GapThreshold(); th > 0 && !lastTS.IsZero() {
+					if delta := f.CaptureTS.Sub(lastTS); delta > th {
+						s.gaps.Add(1)
+						if s.o.OnGap != nil {
+							s.o.OnGap(delta)
+						}
+					}
+				}
+				lastTS = f.CaptureTS
+			}
+			for {
+				cur := s.maxFrameBytes.Load()
+				if n := f.Bytes(); n <= cur || s.maxFrameBytes.CompareAndSwap(cur, n) {
+					break
+				}
+			}
 			select {
 			case queue <- f:
 			default:
