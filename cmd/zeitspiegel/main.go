@@ -83,8 +83,13 @@ func run() error {
 	restart := &atomic.Bool{}
 	var store *runtimeStore // assigned below, after the display exists
 
-	// 3 export slots (ARCHITECTURE §3, IT-8)
-	exporter := export.New(clipDir, 3)
+	// One export slot, niced: x264 ultrafast is multi-threaded and the Pi 5
+	// has no hardware encoder (§D4) — a second concurrent export competes
+	// with the render loop's decode budget exactly when frames are biggest.
+	// A rejected guest gets 503 + Retry-After for the few seconds a clip
+	// takes (NFR-4).
+	exporter := export.New(clipDir, 1)
+	exporter.Nice = 10
 	exportSeconds := expvar.NewFloat("zeitspiegel_export_seconds")
 	clipper := &meteredClipper{
 		inner: &httpapi.Clipper{Buffer: buf, Exporter: exporter, Clock: sysClock{},
