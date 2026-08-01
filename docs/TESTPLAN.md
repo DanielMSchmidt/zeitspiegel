@@ -28,8 +28,9 @@ cross build.
 | UT-13 | cmd | `renderLoop.step`: the tick timestamp (not wall clock) reaches `Engine.Tick`; tick overrun counted when the tick-to-tick delta exceeds 1.5× budget; over-budget render counted; miss kinds and held-frame streaks counted (NFR-3 observability) |
 | UT-14 | capture | CaptureTS delta > injected `GapThreshold` ⇒ `Gaps()` increments and `OnGap` fires; no gap counted across a source reopen; `MaxFrameBytes()` tracks the largest payload |
 | UT-15 | screen | sdl-tagged: streaming frame texture reused across same-size frames (`TextureRecreates()` stays 1), recreated on dimension change (⇒ 2); `Info()` reports a non-empty renderer name (`make test-hw` lane only) |
-| UT-16 | export | `applyNice` lowers a child process's priority (getpriority == nice); `Exporter.Nice` is applied in `Export` |
+| UT-16 | export | `applyNice` lowers a child process's priority (getpriority == nice); `Exporter.Nice` is applied to the ffmpeg child in `Stream.WriteTo` |
 | UT-17 | config | `deploy/config.toml` loads cleanly via `config.Load`; `buffer_max_s == 60` (production capacity guard) |
+| UT-18 | httpapi | Streaming clip handler: headers (`X-Clip-Duration`, no `Content-Length`) precede the chunked body; pre-flight busy/empty still 503; exporter failing before the first body byte ⇒ 500 problem+json; failure mid-stream ⇒ truncated body, no second response; the stream is Closed exactly once |
 
 ## 2. Tier 2 — integration (SyntheticSource, seconds, every PR)
 
@@ -37,12 +38,13 @@ cross build.
 |---|---|
 | IT-1 | Core property: @60 fps, delay 2.0 s ⇒ every rendered frame has `capture_ts = render_ts − 2.0 s ± 17 ms` (FR-1) |
 | IT-2 | Delay change via real HTTP (httptest) effective ≤ 1 frame interval (FR-3) |
-| IT-3 | `/clip?seconds=10` ⇒ ffprobe: mp4, duration 10 s ± 1 frame, 600 ± 1 frames (FR-5) |
+| IT-3 | `/clip?seconds=10` ⇒ save the streamed body, then ffprobe: fragmented mp4, duration 10 s ± 1 frame, 600 ± 1 packets via `-count_packets`/`nb_read_packets` (`empty_moov` files carry no `nb_frames` sample table) (FR-5) |
 | IT-4 | Clip first/last frames carry expected seq numbers (window frame-accurate) |
 | IT-5 | Export during display ⇒ drop counter stays 0 (FR-6) |
 | IT-6 | Warm-up: delay 10 s, 3 s buffered ⇒ oldest frame + `warming_up` (FR-10) |
 | IT-7 | Source error ⇒ reconnect with backoff, status degraded, no crash (NFR-5) |
-| IT-8 | 3 parallel clips all valid, no interleaving; 4th ⇒ 503 + Retry-After |
+| IT-8 | 3 parallel clips all valid, no interleaving; 4th ⇒ 503 + Retry-After (slots are held for the whole download, so this also proves 3 concurrent streamed downloads) |
+| IT-9 | Clip body streams: first container bytes readable while the encode is still running; client disconnect kills ffmpeg and frees the slot promptly |
 
 ## 3. TDD build order (follow strictly)
 
@@ -57,8 +59,8 @@ ARCHITECTURE.md §7.
 | 1 | frame + ringbuf | UT-1..5 |
 | 2 | synth (source/clock/display) — test infra, itself tested | — |
 | 3 | engine: tick logic, hard-cut semantics, warm-up | UT-6,7; IT-1, IT-6 |
-| 4 | window + export vs real ffmpeg (`integration` tag) | UT-8; IT-3,4 |
-| 5 | httpapi + config | UT-9,10; IT-2,5,8 |
+| 4 | window + export vs real ffmpeg (`integration` tag) | UT-8; IT-3,4,9 |
+| 5 | httpapi + config | UT-9,10,18; IT-2,5,8 |
 | 6 | camera + screen adapters (thin), reconnect supervisor | UT-11; IT-7; ST-1 |
 | 7 | wiring, web UI, deploy artifacts, soak | ST-2..6 |
 | 8 | observability + stutter hardening (render metrics, capture gaps, streaming texture, export nice, 60 s capacity) | UT-12..17; ST-4 |
