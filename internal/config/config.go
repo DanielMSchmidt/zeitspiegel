@@ -14,8 +14,7 @@ type Config struct {
 	Bind           string  `toml:"bind"`
 	Source         string  `toml:"source"` // "camera" | "synth"
 	Device         string  `toml:"device"`
-	ClipDir        string  `toml:"clip_dir"` // empty = system temp dir
-	Profile        string  `toml:"profile"`  // "720p60" | "1080p30" (E-2)
+	Profile        string  `toml:"profile"` // "720p60" | "1080p30" (E-2)
 	BufferMaxS     float64 `toml:"buffer_max_s"`
 	BufferMaxBytes int64   `toml:"buffer_max_bytes"`
 	MirrorFlip     bool    `toml:"mirror_flip"`     // FR-2, default on

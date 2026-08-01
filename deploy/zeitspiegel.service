@@ -30,12 +30,14 @@ ExecStart=/usr/local/bin/zeitspiegel --config /etc/zeitspiegel/config.toml
 # process overhead. Without it GOGC=100 lets the heap balloon toward 2×
 # live between collections — multi-GB of JPEG slices and long marks whose
 # assist pauses hit the render loop as visible stutter (NFR-2/NFR-3;
-# accounting in docs/DEPLOYMENT.md).
+# accounting in docs/DEPLOYMENT.md). Clips are streamed to the client, so
+# the export pin lasts for the download, bounded by the single slot and
+# the handler's rolling write deadline.
 Environment=GOMEMLIMIT=1400MiB
 Restart=always
 RestartSec=1
-# tmpfs working dir at /run/zeitspiegel; exported clips land here and
-# vanish on power loss — no persistent writes on the read-only root (NFR-9).
+# tmpfs working dir at /run/zeitspiegel — nothing else may write on the
+# read-only root (NFR-9). Clips are streamed, never written to disk.
 RuntimeDirectory=zeitspiegel
 # Needs direct DRM/KMS (SDL KMSDRM, no X/Wayland) plus /dev/video0. Either
 # root or a user in the video+render groups works; we keep User=root for v1
