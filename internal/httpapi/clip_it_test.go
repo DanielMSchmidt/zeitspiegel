@@ -39,14 +39,14 @@ func (c stampClock) Now() time.Time { return c.end }
 func fullServer(t *testing.T, buf *ringbuf.Buffer, clk httpapi.Clock, slots int) (*httptest.Server, *export.Exporter) {
 	t.Helper()
 	e := engine.New(buf)
-	ex := export.New(t.TempDir(), slots)
+	ex := export.New(slots)
 	deps := httpapi.Deps{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Status: &fakeStatus{st: defaultStatus()},
 		Delay:  e,
 		Clip: &httpapi.Clipper{
 			Buffer:   buf,
-			Exporter: ex,
+			Exporter: httpapi.StreamExporter{E: ex},
 			Clock:    clk,
 			FPS:      func() float64 { return itFPS },
 		},

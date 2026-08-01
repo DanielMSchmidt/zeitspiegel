@@ -3,12 +3,11 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -37,15 +36,75 @@ func defaultStatus() httpapi.Status {
 	}
 }
 
+// fakeStream is a canned ClipStream: writes data, then optionally fails.
+// The handler's deferred Close runs on the server goroutine after the client
+// already has the response, so the counters are mutex-guarded and asserted
+// via waitClosed.
+type fakeStream struct {
+	data   []byte
+	failat int   // byte offset to fail at; < 0 = never
+	err    error // error returned once failat is reached
+
+	mu      sync.Mutex
+	wroteTo int
+	closed  int
+}
+
+func (s *fakeStream) WriteTo(w io.Writer) (int64, error) {
+	s.mu.Lock()
+	s.wroteTo++
+	s.mu.Unlock()
+	data := s.data
+	if s.failat >= 0 && s.failat < len(data) {
+		data = data[:s.failat]
+	}
+	// like io.Copy from ffmpeg stdout: no zero-length writes
+	var n int
+	var err error
+	if len(data) > 0 {
+		n, err = w.Write(data)
+	}
+	if err == nil && s.failat >= 0 {
+		err = s.err
+	}
+	return int64(n), err
+}
+
+func (s *fakeStream) Close() error {
+	s.mu.Lock()
+	s.closed++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *fakeStream) counts() (wroteTo, closed int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.wroteTo, s.closed
+}
+
+// waitClosed waits until the handler's deferred Close ran, then returns the
+// (wroteTo, closed) counters.
+func waitClosed(t *testing.T, s *fakeStream) (wroteTo, closed int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		wroteTo, closed = s.counts()
+		if closed > 0 || time.Now().After(deadline) {
+			return wroteTo, closed
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 type fakeClip struct {
-	err  error
-	path string
-	dur  time.Duration
-	got  struct {
+	err    error
+	stream *fakeStream
+	dur    time.Duration
+	got    struct {
 		n      time.Duration
 		format string
 	}
-	cleaned bool
 }
 
 func (f *fakeClip) ExportClip(_ context.Context, n time.Duration, format string) (httpapi.Clip, error) {
@@ -53,7 +112,11 @@ func (f *fakeClip) ExportClip(_ context.Context, n time.Duration, format string)
 	if f.err != nil {
 		return httpapi.Clip{}, f.err
 	}
-	return httpapi.Clip{Path: f.path, Duration: f.dur, Cleanup: func() { f.cleaned = true }}, nil
+	return httpapi.Clip{Duration: f.dur, Stream: f.stream}, nil
+}
+
+func newFakeClip(dur time.Duration, data string) *fakeClip {
+	return &fakeClip{dur: dur, stream: &fakeStream{data: []byte(data), failat: -1}}
 }
 
 type fakeStore struct{ r config.Runtime }
@@ -76,7 +139,7 @@ func newServer(t *testing.T, mod func(*httpapi.Deps)) *httptest.Server {
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Status: &fakeStatus{st: defaultStatus()},
 		Delay:  e,
-		Clip:   &fakeClip{path: "unused", dur: 10 * time.Second},
+		Clip:   newFakeClip(10*time.Second, "fake-mp4"),
 		Config: &fakeStore{r: config.Default().Runtime()},
 	}
 	if mod != nil {
@@ -169,14 +232,7 @@ func TestValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := newServer(t, func(d *httpapi.Deps) {
-				if strings.HasPrefix(tc.path, "/api/v1/clip") {
-					// serve a real temp file for the 200 cases
-					p := filepath.Join(t.TempDir(), "clip.mp4")
-					os.WriteFile(p, []byte("fake-mp4"), 0o644)
-					d.Clip = &fakeClip{path: p, dur: 10 * time.Second}
-				}
-			})
+			srv := newServer(t, nil)
 			resp := do(t, srv, tc.method, tc.path, tc.body)
 			if resp.StatusCode != tc.want {
 				b, _ := io.ReadAll(resp.Body)
@@ -245,12 +301,8 @@ func TestDelayApplies(t *testing.T) {
 // ---- clip success + error mapping (FR-5, REQUIREMENTS §3) -------------------
 
 func TestClipSuccessHeaders(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "clip.mp4")
 	content := "fake-mp4-bytes"
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	fc := &fakeClip{path: p, dur: 9983 * time.Millisecond}
+	fc := newFakeClip(9983*time.Millisecond, content)
 	srv := newServer(t, func(d *httpapi.Deps) { d.Clip = fc })
 
 	resp := do(t, srv, "GET", "/api/v1/clip?seconds=10&format=mjpeg", "")
@@ -266,6 +318,10 @@ func TestClipSuccessHeaders(t *testing.T) {
 	if xd := resp.Header.Get("X-Clip-Duration"); xd != "9.983" {
 		t.Errorf("X-Clip-Duration = %q, want 9.983", xd)
 	}
+	// UT-18: the body is streamed — chunked transfer, no Content-Length.
+	if resp.ContentLength != -1 {
+		t.Errorf("ContentLength = %d, want -1 (chunked)", resp.ContentLength)
+	}
 	b, _ := io.ReadAll(resp.Body)
 	if string(b) != content {
 		t.Errorf("body = %q", b)
@@ -273,8 +329,59 @@ func TestClipSuccessHeaders(t *testing.T) {
 	if fc.got.format != "mjpeg" || fc.got.n != 10*time.Second {
 		t.Errorf("exporter called with (%v, %q)", fc.got.n, fc.got.format)
 	}
-	if !fc.cleaned {
-		t.Error("clip temp file not cleaned up after serving")
+	if wroteTo, closed := waitClosed(t, fc.stream); wroteTo != 1 || closed != 1 {
+		t.Errorf("stream WriteTo/Close = %d/%d, want 1/1", wroteTo, closed)
+	}
+}
+
+// UT-18: the exporter failing before the first body byte must still produce
+// a clean 500 problem+json — no video headers, no half response.
+func TestClipStreamFailsAtByteZero(t *testing.T) {
+	fc := newFakeClip(10*time.Second, "never-sent")
+	fc.stream.failat = 0
+	fc.stream.err = errors.New("ffmpeg exploded")
+	srv := newServer(t, func(d *httpapi.Deps) { d.Clip = fc })
+
+	resp := do(t, srv, "GET", "/api/v1/clip?seconds=10", "")
+	if resp.StatusCode != 500 {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+		t.Errorf("content-type = %q, want application/problem+json", ct)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		t.Errorf("content-disposition = %q, want unset", cd)
+	}
+	if xd := resp.Header.Get("X-Clip-Duration"); xd != "" {
+		t.Errorf("X-Clip-Duration = %q, want unset", xd)
+	}
+	if _, closed := waitClosed(t, fc.stream); closed != 1 {
+		t.Errorf("stream closed %d times, want 1", closed)
+	}
+}
+
+// UT-18: a failure mid-stream cannot be turned into an error response — the
+// connection must be aborted so the client sees a truncated download, and no
+// second response (problem+json) may trail the partial body.
+func TestClipStreamFailsMidStream(t *testing.T) {
+	fc := newFakeClip(10*time.Second, "0123456789")
+	fc.stream.failat = 4
+	fc.stream.err = errors.New("ffmpeg died mid-encode")
+	srv := newServer(t, func(d *httpapi.Deps) { d.Clip = fc })
+
+	resp := do(t, srv, "GET", "/api/v1/clip?seconds=10", "")
+	if resp.StatusCode != 200 { // headers were already out
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err == nil {
+		t.Errorf("body read succeeded (%q) — connection must be aborted so the download is marked failed", b)
+	}
+	if strings.Contains(string(b), "problem") {
+		t.Errorf("partial body contains a trailing error document: %q", b)
+	}
+	if _, closed := waitClosed(t, fc.stream); closed != 1 {
+		t.Errorf("stream closed %d times, want 1", closed)
 	}
 }
 
