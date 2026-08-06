@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
@@ -15,9 +16,14 @@ import (
 // export without running ffmpeg.
 type recordExporter struct{ fps []float64 }
 
-func (r *recordExporter) Export(_ context.Context, _ []frame.Frame, fps float64, _ export.Format) (string, func(), error) {
+type nopStream struct{}
+
+func (nopStream) WriteTo(io.Writer) (int64, error) { return 0, nil }
+func (nopStream) Close() error                     { return nil }
+
+func (r *recordExporter) Prepare(_ context.Context, _ []frame.Frame, fps float64, _ export.Format) (httpapi.ClipStream, error) {
 	r.fps = append(r.fps, fps)
-	return "unused", func() {}, nil
+	return nopStream{}, nil
 }
 
 type fixedClock struct{ t time.Time }

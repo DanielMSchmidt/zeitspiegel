@@ -34,18 +34,26 @@ SDL2 via KMSDRM renders directly to HDMI without X11. A browser display would
 add network jitter and uncontrolled latency; the web UI is control-only
 (plus an optional throttled MJPEG preview).
 
-### D4 — Export via ffmpeg subprocess
+### D4 — Export via ffmpeg subprocess, streamed as fragmented MP4
 JPEG frames of the requested window are piped to ffmpeg. Default output is
 H.264 (`libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p
 -vf scale='min(1280,iw)':-2`) because MJPEG-in-MP4 is effectively unplayable
 on phones/browsers and the use case is "watch on the phone, share in a
-chat". `?format=mjpeg` remains as a CPU-free stream-copy option. Note: Pi 5
+chat". `?format=mjpeg` remains as a CPU-free stream-copy option (same
+container, compatibility unchanged-poor — VLC-class players). Note: Pi 5
 has NO hardware H.264 encoder; x264 ultrafast on its A76 cores keeps the
 export comfortably faster than realtime (benchmark in M3). The 720p long-
 edge cap halves x264 work on 1080p sources at no visible cost for phone
-playback. `+faststart` is intentionally omitted: clips are downloaded then
-played locally, so the second-pass moov rewrite is wasted work. Subprocess
-isolation > libav bindings (crash isolation, no binding maintenance).
+playback. ffmpeg muxes **fragmented MP4 to stdout**
+(`-movflags empty_moov+default_base_moof -frag_duration 500000`) and the
+HTTP handler streams it chunked as it is produced: the download starts
+within ~1 s of the request while the encode runs behind it, instead of
+after the whole encode. fMP4 needs no trailing (or rewritten) moov at all —
+this supersedes the earlier "+faststart intentionally omitted" note — and
+clips never touch storage. 0.5 s fragments rather than `frag_keyframe`
+because x264's default 250-frame GOP would hold the first fragment for
+~8 s of media. Subprocess isolation > libav bindings (crash isolation, no
+binding maintenance).
 
 ### D5 — REST API + thin static frontend
 Versioned HTTP API is the testable contract; the UI is one embedded
@@ -60,8 +68,8 @@ testable without hardware.
 
 ### D7 — Appliance model
 Pi OS Lite, systemd (`Restart=always`), read-only root via overlayfs, clips
-on tmpfs, volatile journal logs → pulling the plug is the supported off
-switch. Discovery via Avahi/mDNS (`zeitspiegel.local`). Details in
+streamed straight to the client (never written to storage), volatile journal
+logs → pulling the plug is the supported off switch. Discovery via Avahi/mDNS (`zeitspiegel.local`). Details in
 docs/DEPLOYMENT.md.
 
 ## 3. Components
@@ -103,10 +111,14 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   decode in worker goroutine (+1 tick latency, irrelevant for a mirror) or
   a 30 fps profile.
 - **Exporter** (`internal/window` + `internal/export`): window [t−n, t] →
-  ffmpeg stdin → tmpfs file → `http.ServeFile` → cleanup. One export slot
-  in production (semaphore), then 503 + Retry-After; the ffmpeg child is
-  reniced (+10) so x264 on the Pi's four cores cannot starve the render
-  loop's tick budget.
+  ffmpeg stdin → fragmented MP4 on stdout → streamed into the chunked HTTP
+  response (headers, including `X-Clip-Duration`, go out first — the
+  duration is known from the window cut before ffmpeg starts). One export
+  slot in production (semaphore), then 503 + Retry-After; the slot is held
+  for the whole download, and a stalled client is cut by a rolling 30 s
+  per-write deadline so it cannot pin the slot and its frames. The ffmpeg
+  child is reniced (+10) so x264 on the Pi's four cores cannot starve the
+  render loop's tick budget.
 - **HTTP layer** (`internal/httpapi`): stdlib ServeMux patterns; handlers
   depend on small interfaces (StatusProvider, DelaySetter, ClipExporter).
 
@@ -160,6 +172,6 @@ Exposure + USB + decode + render + vsync ≈ 60–120 ms. `delay = 0` means
 |---|---|---|
 | Kiyo MJPEG bitrate @720p60 / @1080p30 | S-2 | _tbd_ |
 | 720p JPEG decode+render per frame (Pi 5) | S-1 | _tbd_ |
-| x264 ultrafast export speed, 30 s clip (Pi 5) | M3 | _tbd_ |
+| x264 ultrafast export speed, 30 s clip (Pi 5) — encode wall time (`zeitspiegel_export_seconds` to a fast client) + time to first byte (`zeitspiegel_export_ttfb_seconds`) | M3 | _tbd_ |
 | Bright-scene MJPEG bitrate @1080p30 (`zeitspiegel_buffer.bytes_per_s` peak) | prod | _tbd_ |
 | Render over-budget tick ratio under bright-scene stress (`zeitspiegel_render`) | prod | _tbd_ |

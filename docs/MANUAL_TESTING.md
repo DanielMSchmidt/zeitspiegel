@@ -70,10 +70,10 @@ still come from spike S-1 on real hardware.
 | MT-2 | Drag the delay slider to 5 s, watch the delayed view | The view jumps *back* — recent past replays once; no freeze | FR-3, FR-4 |
 | MT-3 | Drag the delay down to 1 s | The view jumps *forward*; nothing shows twice | FR-4 |
 | MT-4 | Right after a fresh start: set delay 60 s | "warming up" badge in the status panel; delayed view shows the oldest frame and crawls forward | FR-10 |
-| MT-5 | Download a 10 s clip (mp4) | File plays (QuickTime/browser/phone), ~10 s long, content matches what the delayed view showed | FR-5 |
-| MT-6 | Download with seconds = 0 (type it manually) | Clean error from the UI, no download; API answers 422 problem+json | FR-11 |
-| MT-7 | Start a 60 s clip download; while it runs, watch "dropped frames" in the status panel | Stays 0 during the export | FR-6 |
-| MT-11 | Click Download; while the export runs, try to click again | Button reads "Preparing…" and is unclickable while the export runs (it re-enables after a ~10 s grace period — the browser gives no signal when the download starts streaming). A 503 (buffer empty / busy) surfaces as a toast and re-enables the button immediately | FR-5 |
+| MT-5 | Click "Download last 60 s" (mp4) | Download appears in the browser within ~1 s and keeps growing while the encode runs (the clip streams); the finished file plays (QuickTime/browser/phone), duration = what was buffered, content matches what the delayed view showed | FR-5 |
+| MT-6 | `curl -i "…/api/v1/clip?seconds=0"` (the UI no longer offers a length) | 422 problem+json with the limits | FR-11 |
+| MT-7 | Start a full-buffer download; while it runs, watch "dropped frames" in the status panel | Stays 0 during the export | FR-6 |
+| MT-11 | Click Download; immediately try to click again | Button reads "Preparing…" and is unclickable for a ~2 s grace period (the browser gives no signal when the download starts streaming, and streamed bytes arrive within ~1 s). A 503 (buffer empty / busy) surfaces as a toast and re-enables the button immediately | FR-5 |
 
 Notes:
 - **Mirror flip (FR-2)** is applied by the SDL display renderer, *not* by the

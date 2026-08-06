@@ -32,18 +32,16 @@
   <section>
     <h2>Save clip</h2>
     <div class="row">
-      <label for="download-seconds">Last</label>
-      <input type="number" id="download-seconds" value="30" min="1" step="1"
-             inputmode="numeric">
-      <label for="download-format">s as</label>
+      <label for="download-format">Save as</label>
       <select id="download-format">
         <option value="mp4" selected>MP4</option>
         <option value="mjpeg">MJPEG</option>
       </select>
-      <button type="button" id="download-btn">Download</button>
+      <button type="button" id="download-btn">Download last 60 s</button>
     </div>
-    <p class="hint">If nothing downloads, an export may already be running or
-    the buffer is still filling &mdash; try again in a moment.</p>
+    <p class="hint">Downloads everything in the buffer. If nothing downloads,
+    an export may already be running or the buffer is still filling &mdash;
+    try again in a moment.</p>
   </section>
 
   <!-- Preview -->
@@ -97,7 +95,6 @@
   var delayValue = $("delay-value");
   var warmBadge  = $("warming-badge");
   var offBadge   = $("offline-badge");
-  var dlSeconds  = $("download-seconds");
   var dlFormat   = $("download-format");
   var dlBtn      = $("download-btn");
   var preview    = $("preview");
@@ -183,6 +180,13 @@
     if (cap > 0 && parseFloat(slider.max) !== cap) {
       slider.max = cap;
     }
+    // The download button always grabs the full buffer; keep its label and
+    // request length in sync with the server's actual capacity.
+    if (cap > 0 && cap !== dlCapS) {
+      dlCapS = cap;
+      dlLabel = "Download last " + Math.round(cap) + " s";
+      if (!dlBtn.disabled) dlBtn.textContent = dlLabel;
+    }
     // Reflect server-side delay unless the user changed it very recently.
     if (!sliderActive && !debounceTimer && Date.now() > holdOff) {
       slider.value = st.delay_s;
@@ -212,10 +216,15 @@
   dlFrame.setAttribute("aria-hidden", "true");
   document.body.appendChild(dlFrame);
 
+  // The clip is always the full buffer (60 s in production); the exact
+  // capacity — and with it the button label — follows /status.
+  var dlCapS = 60;
+  var dlLabel = "Download last 60 s";
+
   var preparingTimer = null;
   function setDownloadPreparing(on) {
     dlBtn.disabled = on;
-    dlBtn.textContent = on ? "Preparing…" : "Download";
+    dlBtn.textContent = on ? "Preparing…" : dlLabel;
     if (on) {
       dlBtn.setAttribute("aria-busy", "true");
     } else {
@@ -238,22 +247,20 @@
   });
 
   dlBtn.addEventListener("click", function () {
-    var secs = parseInt(dlSeconds.value, 10);
-    if (!isFinite(secs) || secs < 1) {
-      showToast("Clip length must be at least 1 second");
-      return;
-    }
-    var url = "/api/v1/clip?seconds=" + encodeURIComponent(secs) +
+    // Full-buffer clip; the server clamps to what is actually buffered
+    // (FR-5: duration = min(n, buffered)).
+    var url = "/api/v1/clip?seconds=" + encodeURIComponent(dlCapS) +
               "&format=" + encodeURIComponent(dlFormat.value);
 
     setDownloadPreparing(true);
     dlFrame.src = url;
     // The browser gives no signal when the attachment download starts, so
-    // free the button after a grace period covering a slow export.
+    // free the button after a short grace period. The export streams, so
+    // the download begins within ~1 s — 2 s covers a slow phone.
     if (preparingTimer) clearTimeout(preparingTimer);
     preparingTimer = setTimeout(function () {
       setDownloadPreparing(false);
-    }, 10000);
+    }, 2000);
   });
 
   // ---------- preview ----------

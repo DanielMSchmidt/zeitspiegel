@@ -10,6 +10,7 @@ import (
 	"expvar"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -76,10 +77,6 @@ func run() error {
 	eng := engine.New(buf)
 	eng.SetDelay(time.Duration(cfg.DefaultDelayS * float64(time.Second)))
 
-	clipDir := cfg.ClipDir
-	if clipDir == "" {
-		clipDir = os.TempDir()
-	}
 	restart := &atomic.Bool{}
 	var store *runtimeStore // assigned below, after the display exists
 
@@ -88,16 +85,16 @@ func run() error {
 	// with the render loop's decode budget exactly when frames are biggest.
 	// A rejected guest gets 503 + Retry-After for the few seconds a clip
 	// takes (NFR-4).
-	exporter := export.New(clipDir, 1)
+	exporter := export.New(1)
 	exporter.Nice = 10
-	exportSeconds := expvar.NewFloat("zeitspiegel_export_seconds")
 	clipper := &meteredClipper{
-		inner: &httpapi.Clipper{Buffer: buf, Exporter: exporter, Clock: sysClock{},
+		inner: &httpapi.Clipper{Buffer: buf, Exporter: httpapi.StreamExporter{E: exporter}, Clock: sysClock{},
 			// per export: a runtime profile change (PATCH /config) changes
 			// the nominal rate, and a stale fps makes clips play at the
 			// wrong speed (FR-5)
 			FPS: func() float64 { return profileFPS(store.Current().Profile) }},
-		gauge: exportSeconds,
+		total: expvar.NewFloat("zeitspiegel_export_seconds"),
+		ttfb:  expvar.NewFloat("zeitspiegel_export_ttfb_seconds"),
 	}
 
 	displayStart := time.Now()
@@ -193,6 +190,7 @@ func run() error {
 		},
 		UI:      web.Handler(),
 		Healthy: func() bool { return !sup.Degraded() },
+		Now:     time.Now,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -363,17 +361,55 @@ func (d *delayedFrames) Newest() (frame.Frame, error) {
 	return f, err
 }
 
-// meteredClipper records export wall time in expvar (NFR-8).
+// meteredClipper records export timing in expvar (NFR-8). Exports stream, so
+// zeitspiegel_export_seconds covers prepare → stream complete (download-
+// inclusive); zeitspiegel_export_ttfb_seconds is prepare → first body byte,
+// the "how fast does the download start" number.
 type meteredClipper struct {
 	inner httpapi.ClipExporter
-	gauge *expvar.Float
+	total *expvar.Float
+	ttfb  *expvar.Float
 }
 
 func (m *meteredClipper) ExportClip(ctx context.Context, n time.Duration, format string) (httpapi.Clip, error) {
 	t0 := time.Now()
 	c, err := m.inner.ExportClip(ctx, n, format)
-	if err == nil {
-		m.gauge.Set(time.Since(t0).Seconds())
+	if err != nil {
+		return c, err
 	}
-	return c, err
+	c.Stream = &meteredStream{inner: c.Stream, t0: t0, total: m.total, ttfb: m.ttfb}
+	return c, nil
+}
+
+type meteredStream struct {
+	inner httpapi.ClipStream
+	t0    time.Time
+	total *expvar.Float
+	ttfb  *expvar.Float
+}
+
+func (s *meteredStream) WriteTo(w io.Writer) (int64, error) {
+	n, err := s.inner.WriteTo(&ttfbWriter{w: w, t0: s.t0, gauge: s.ttfb})
+	if err == nil {
+		s.total.Set(time.Since(s.t0).Seconds())
+	}
+	return n, err
+}
+
+func (s *meteredStream) Close() error { return s.inner.Close() }
+
+// ttfbWriter stamps the time-to-first-byte gauge on the first write.
+type ttfbWriter struct {
+	w     io.Writer
+	t0    time.Time
+	gauge *expvar.Float
+	fired bool
+}
+
+func (t *ttfbWriter) Write(p []byte) (int, error) {
+	if !t.fired {
+		t.fired = true
+		t.gauge.Set(time.Since(t.t0).Seconds())
+	}
+	return t.w.Write(p)
 }

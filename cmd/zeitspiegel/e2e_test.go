@@ -152,6 +152,9 @@ func TestBinaryAPIContract(t *testing.T) {
 		if xd := resp.Header.Get("X-Clip-Duration"); xd == "" {
 			t.Error("missing X-Clip-Duration")
 		}
+		if resp.ContentLength != -1 {
+			t.Errorf("ContentLength = %d, want -1 (clip is streamed, chunked)", resp.ContentLength)
+		}
 		clip := filepath.Join(t.TempDir(), "clip.mp4")
 		f, _ := os.Create(clip)
 		io.Copy(f, resp.Body)

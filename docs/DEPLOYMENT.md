@@ -19,7 +19,7 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 
 | File | Content |
 |---|---|
-| `zeitspiegel.service` | `Restart=always` with `StartLimitIntervalSec=0` (an appliance never stops retrying), `RestartSec=1`, `RuntimeDirectory=zeitspiegel` (tmpfs for clips), journal logging; ordered after `local-fs.target` only — no network ordering, the mirror must work with Wi-Fi down and the web UI appears when the network does. An `ExecStartPre` waits ≤5 s for `/dev/dri/card*` so early boot doesn't race udev's DRM cold-plug |
+| `zeitspiegel.service` | `Restart=always` with `StartLimitIntervalSec=0` (an appliance never stops retrying), `RestartSec=1`, `RuntimeDirectory=zeitspiegel` (tmpfs scratch dir; clips are streamed to the client and never written to disk), journal logging; ordered after `local-fs.target` only — no network ordering, the mirror must work with Wi-Fi down and the web UI appears when the network does. An `ExecStartPre` waits ≤5 s for `/dev/dri/card*` so early boot doesn't race udev's DRM cold-plug |
 | `config.toml` | profile=auto (E-2: highest MJPEG mode capped at 1080p), buffer 60 s / 1 GiB cap, mirror_flip=true, focus pinning, bind `:80` |
 | `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the open Wi-Fi AP (`AP_SSID`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
 | `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg + SDL2 + NetworkManager + dnsmasq-base/iptables (needed by `ipv4.method=shared`) + rfkill/iw (for in-place debug), writes the binary, AP keyfile, user, regdomain, NOPASSWD sudo for the admin, persistent journal, and clears the stock rfkill soft-block — produces a finished, network-free image |
@@ -66,7 +66,9 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 - RAM budget: buffer cap 1 GiB (deploy/config.toml); typical 1080p30 MJPEG
   ≈ 6 MB/s ⇒ 60 s ≈ 360 MB, bright/high-motion scenes can spike toward the
   cap. The unit sets `GOMEMLIMIT=1400MiB`: buffer cap + one pinned export
-  (a running clip holds its frames past eviction, hard rule 4) + ~200 MB
+  (a running clip holds its frames past eviction, hard rule 4; clips
+  stream, so the pin lasts for the whole download — bounded by the single
+  export slot and the handler's rolling 30 s write deadline) + ~200 MB
   process overhead. Without the limit, GOGC=100 lets the heap grow toward
   2× live between collections — long GC marks whose assist pauses hit the
   render loop as visible stutter. This accounting intentionally reads

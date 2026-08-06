@@ -2,15 +2,19 @@
 
 package export_test
 
-// IT-3 / IT-4: real ffmpeg + ffprobe (TESTPLAN tier 2, `integration` tag).
+// IT-3 / IT-4 / IT-9: real ffmpeg + ffprobe (TESTPLAN tier 2, `integration`
+// tag). Exports are streamed fragmented MP4; tests capture the stream into a
+// file before probing (ffprobe duration is only reliable on seekable input).
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +66,26 @@ func cutLast10s(t *testing.T, b *ringbuf.Buffer) window.Window {
 	return w
 }
 
+// exportToFile streams a prepared export into a file and returns its path.
+func exportToFile(t *testing.T, ex *export.Exporter, frames []frame.Frame, format export.Format) string {
+	t.Helper()
+	st, err := ex.Prepare(context.Background(), frames, fps, format)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	path := filepath.Join(t.TempDir(), "clip.mp4")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := st.WriteTo(f); err != nil {
+		t.Fatalf("WriteTo: %v", err)
+	}
+	return path
+}
+
 type probe struct {
 	Format struct {
 		FormatName string `json:"format_name"`
@@ -69,14 +93,17 @@ type probe struct {
 	} `json:"format"`
 	Streams []struct {
 		CodecName string `json:"codec_name"`
-		NBFrames  string `json:"nb_frames"`
+		// empty_moov files carry no sample table, so nb_frames is empty;
+		// -count_packets fills nb_read_packets instead (TESTPLAN IT-3).
+		NBReadPackets string `json:"nb_read_packets"`
 	} `json:"streams"`
 }
 
 func ffprobe(t *testing.T, path string) probe {
 	t.Helper()
-	out, err := exec.Command("ffprobe", "-v", "error", "-show_entries",
-		"format=format_name,duration:stream=codec_name,nb_frames",
+	out, err := exec.Command("ffprobe", "-v", "error", "-count_packets",
+		"-show_entries",
+		"format=format_name,duration:stream=codec_name,nb_read_packets",
 		"-of", "json", path).Output()
 	if err != nil {
 		t.Fatalf("ffprobe: %v", err)
@@ -88,16 +115,12 @@ func ffprobe(t *testing.T, path string) probe {
 	return p
 }
 
-// IT-3: /clip semantics at the export layer — valid MP4, duration 10 s ± 1
-// frame, 600 ± 1 frames.
+// IT-3: /clip semantics at the export layer — valid fragmented MP4, duration
+// 10 s ± 1 frame, 600 ± 1 packets.
 func TestExportMP4(t *testing.T) {
 	w := cutLast10s(t, fillBuffer(t))
-	ex := export.New(t.TempDir(), 3)
-	path, cleanup, err := ex.Export(context.Background(), w.Frames, fps, export.FormatMP4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
+	ex := export.New(3)
+	path := exportToFile(t, ex, w.Frames, export.FormatMP4)
 
 	p := ffprobe(t, path)
 	if p.Format.FormatName != "mov,mp4,m4a,3gp,3g2,mj2" {
@@ -113,21 +136,13 @@ func TestExportMP4(t *testing.T) {
 	if d := dur - 10.0; d < -1.0/fps || d > 2.0/fps {
 		t.Errorf("duration = %v s, want 10 ± 1 frame", dur)
 	}
-	n, err := strconv.Atoi(p.Streams[0].NBFrames)
+	n, err := strconv.Atoi(p.Streams[0].NBReadPackets)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n < 600 || n > 601 {
-		t.Errorf("frames = %d, want 600 ± 1", n)
+		t.Errorf("packets = %d, want 600 ± 1", n)
 	}
-	if cleanup(); fileExists(path) {
-		t.Errorf("cleanup left %s behind", path)
-	}
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 // extractPNG pulls video frame index n out of the clip.
@@ -157,12 +172,8 @@ func extractPNG(t *testing.T, clip string, n int) image.Image {
 // numbers, read back from the lossy-codec-safe pixel pattern.
 func TestExportMP4FrameAccurate(t *testing.T) {
 	w := cutLast10s(t, fillBuffer(t))
-	ex := export.New(t.TempDir(), 3)
-	path, cleanup, err := ex.Export(context.Background(), w.Frames, fps, export.FormatMP4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
+	ex := export.New(3)
+	path := exportToFile(t, ex, w.Frames, export.FormatMP4)
 
 	wantFirst, wantLast := w.Frames[0].Seq, w.Frames[len(w.Frames)-1].Seq
 	if got := synth.DecodeSeqPixels(extractPNG(t, path, 0)); got != wantFirst {
@@ -174,15 +185,12 @@ func TestExportMP4FrameAccurate(t *testing.T) {
 }
 
 // IT-4 (MJPEG copy path): stream copy preserves the original JPEG bytes, so
-// the APP4 tags survive into the demuxed frames.
+// the APP4 tags survive into the demuxed frames — this is also the proof
+// that mjpeg-in-fragmented-MP4 muxes and demuxes cleanly.
 func TestExportMJPEGCopyFrameAccurate(t *testing.T) {
 	w := cutLast10s(t, fillBuffer(t))
-	ex := export.New(t.TempDir(), 3)
-	path, cleanup, err := ex.Export(context.Background(), w.Frames, fps, export.FormatMJPEG)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
+	ex := export.New(3)
+	path := exportToFile(t, ex, w.Frames, export.FormatMJPEG)
 
 	p := ffprobe(t, path)
 	if len(p.Streams) != 1 || p.Streams[0].CodecName != "mjpeg" {
@@ -219,13 +227,172 @@ func TestExportMJPEGCopyFrameAccurate(t *testing.T) {
 // All slots taken ⇒ ErrBusy immediately (maps to 503 + Retry-After).
 func TestExportSlotsBusy(t *testing.T) {
 	w := cutLast10s(t, fillBuffer(t))
-	ex := export.New(t.TempDir(), 1)
+	ex := export.New(1)
 	release, err := ex.Acquire()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	if _, _, err := ex.Export(context.Background(), w.Frames, fps, export.FormatMP4); err != export.ErrBusy {
+	if _, err := ex.Prepare(context.Background(), w.Frames, fps, export.FormatMP4); err != export.ErrBusy {
 		t.Errorf("err = %v, want ErrBusy", err)
 	}
+}
+
+// Close without WriteTo releases the slot (the handler's defer path when it
+// bails before streaming).
+func TestExportCloseReleasesSlot(t *testing.T) {
+	w := cutLast10s(t, fillBuffer(t))
+	ex := export.New(1)
+	st, err := ex.Prepare(context.Background(), w.Frames, fps, export.FormatMP4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil { // idempotent
+		t.Fatal(err)
+	}
+	release, err := ex.Acquire()
+	if err != nil {
+		t.Fatalf("slot not released after Close: %v", err)
+	}
+	release()
+}
+
+// IT-9: the container header reaches the consumer while the encode is still
+// running — the whole point of streaming. A buffer-then-dump implementation
+// would deliver the first byte only at the very end.
+func TestExportStreamsBeforeCompletion(t *testing.T) {
+	w := cutLast10s(t, fillBuffer(t))
+	ex := export.New(1)
+	st, err := ex.Prepare(context.Background(), w.Frames, fps, export.FormatMP4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	pr, pw := io.Pipe()
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		_, err := st.WriteTo(pw)
+		pw.CloseWithError(err)
+		done <- err
+	}()
+
+	head := make([]byte, 8)
+	if _, err := io.ReadFull(pr, head); err != nil {
+		t.Fatalf("reading stream head: %v", err)
+	}
+	tFirst := time.Since(start)
+	if got := string(head[4:8]); got != "ftyp" {
+		t.Errorf("stream head box = %q, want ftyp", got)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("WriteTo returned before the body was drained (err=%v)", err)
+	default:
+	}
+
+	if _, err := io.Copy(io.Discard, pr); err != nil {
+		t.Fatalf("draining stream: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("WriteTo: %v", err)
+	}
+	total := time.Since(start)
+	if tFirst > total/2 && tFirst > 500*time.Millisecond {
+		t.Errorf("first byte after %v of %v total — output is not streamed", tFirst, total)
+	}
+}
+
+// IT-9: cancelling the request context (client disconnect) kills ffmpeg,
+// unblocks WriteTo promptly, and frees the export slot.
+func TestExportAbortKillsFFmpeg(t *testing.T) {
+	w := cutLast10s(t, fillBuffer(t))
+	ex := export.New(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := ex.Prepare(ctx, w.Frames, fps, export.FormatMP4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		_, err := st.WriteTo(pw)
+		pw.CloseWithError(err)
+		done <- err
+	}()
+	go io.Copy(io.Discard, pr) // keep the consumer draining, like a browser
+
+	head := make([]byte, 8)
+	if _, err := io.ReadFull(pr, head); err != nil {
+		t.Fatalf("reading stream head: %v", err)
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("WriteTo did not return within 2 s of cancellation")
+	}
+	release, err := ex.Acquire()
+	if err != nil {
+		t.Fatalf("slot not released after abort: %v", err)
+	}
+	release()
+}
+
+// IT-9 (writer failure flavor): a failing destination — the HTTP write
+// deadline path — aborts the encode and surfaces the write error.
+func TestExportWriterErrorAborts(t *testing.T) {
+	w := cutLast10s(t, fillBuffer(t))
+	ex := export.New(1)
+	st, err := ex.Prepare(context.Background(), w.Frames, fps, export.FormatMP4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	errBoom := errors.New("boom")
+	done := make(chan error, 1)
+	go func() {
+		_, err := st.WriteTo(&failAfter{n: 4096, err: errBoom})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errBoom) {
+			t.Errorf("err = %v, want errBoom", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WriteTo did not return after writer failure")
+	}
+	release, err := ex.Acquire()
+	if err != nil {
+		t.Fatalf("slot not released after writer failure: %v", err)
+	}
+	release()
+}
+
+// failAfter accepts n bytes, then fails every Write with err.
+type failAfter struct {
+	n    int
+	got  int
+	err  error
+}
+
+func (f *failAfter) Write(p []byte) (int, error) {
+	if f.got >= f.n {
+		return 0, f.err
+	}
+	f.got += len(p)
+	return len(p), nil
 }

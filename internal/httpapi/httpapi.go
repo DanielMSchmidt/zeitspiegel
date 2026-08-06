@@ -10,6 +10,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -53,14 +54,22 @@ type DelaySetter interface {
 	SetDelay(time.Duration)
 }
 
-// Clip is one exported clip ready to serve.
-type Clip struct {
-	Path     string
-	Duration time.Duration
-	Cleanup  func()
+// ClipStream is a prepared clip body: WriteTo streams the encode as it is
+// produced, Close releases the export slot if WriteTo never ran
+// (export.Stream satisfies it).
+type ClipStream interface {
+	io.WriterTo
+	io.Closer
 }
 
-// ClipExporter cuts and encodes the last n seconds (FR-5).
+// Clip is a prepared clip: duration known up front, export slot held,
+// ffmpeg not started until Stream.WriteTo runs.
+type Clip struct {
+	Duration time.Duration
+	Stream   ClipStream
+}
+
+// ClipExporter cuts and prepares the last n seconds for streaming (FR-5).
 type ClipExporter interface {
 	ExportClip(ctx context.Context, n time.Duration, format string) (Clip, error)
 }
@@ -94,6 +103,9 @@ type Deps struct {
 	Ticker  func(time.Duration) (<-chan time.Time, func())
 	UI      http.Handler
 	Healthy func() bool
+	// Now supplies wall time for the clip stream's rolling write deadline
+	// (injected — hard rule 6). nil disables the deadline (tests).
+	Now func() time.Time
 }
 
 // PreviewInterval is the preview frame pacing (~10 fps, REQUIREMENTS §3).
@@ -217,12 +229,60 @@ func (s *server) getClip(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusInternalServerError, "export failed", err.Error(), nil)
 		return
 	}
-	defer clip.Cleanup()
+	defer clip.Stream.Close()
 
+	// Duration is known before the encode runs (window.Cut), so headers go
+	// out first and the fragmented-MP4 body streams behind them. No
+	// Content-Length ⇒ chunked transfer.
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Content-Disposition", `attachment; filename="zeitspiegel-clip.mp4"`)
 	w.Header().Set("X-Clip-Duration", fmt.Sprintf("%.3f", clip.Duration.Seconds()))
-	http.ServeFile(w, r, clip.Path)
+
+	n, err := clip.Stream.WriteTo(&clipWriter{w: w, rc: http.NewResponseController(w), now: s.d.Now})
+	switch {
+	case err == nil:
+	case errors.Is(err, context.Canceled) || r.Context().Err() != nil:
+		s.d.Logger.Info("clip download aborted by client", "bytes", n)
+	case n == 0:
+		// Nothing written or flushed yet, so the 200 and video headers are
+		// still unsent — replace them with a real error response.
+		w.Header().Del("Content-Disposition")
+		w.Header().Del("X-Clip-Duration")
+		s.d.Logger.Error("clip export", "err", err)
+		s.problem(w, http.StatusInternalServerError, "export failed", err.Error(), nil)
+	default:
+		// Mid-stream failure: headers are long gone. Abort the connection
+		// without a terminating chunk so the client marks the download
+		// failed instead of keeping a silently truncated file.
+		s.d.Logger.Error("clip stream failed mid-transfer", "err", err, "bytes", n)
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// clipWriteTimeout is the rolling per-write deadline for clip downloads: the
+// server has no global WriteTimeout (preview streams are unbounded), but a
+// stalled clip client must not pin the export slot and its frames forever.
+const clipWriteTimeout = 30 * time.Second
+
+// clipWriter forwards the export stream to the response, flushing each chunk
+// (first fragment reaches the browser immediately) and refreshing the write
+// deadline (stalled client ⇒ write error ⇒ ffmpeg killed upstream).
+type clipWriter struct {
+	w   http.ResponseWriter
+	rc  *http.ResponseController
+	now func() time.Time
+}
+
+func (c *clipWriter) Write(p []byte) (int, error) {
+	if c.now != nil {
+		// Best-effort: an unsupported deadline just leaves the old behavior.
+		_ = c.rc.SetWriteDeadline(c.now().Add(clipWriteTimeout))
+	}
+	n, err := c.w.Write(p)
+	if err == nil {
+		_ = c.rc.Flush()
+	}
+	return n, err
 }
 
 func (s *server) getConfig(w http.ResponseWriter, _ *http.Request) {

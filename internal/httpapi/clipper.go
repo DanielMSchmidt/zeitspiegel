@@ -21,10 +21,23 @@ type ClipBuffer interface {
 	Oldest() (frame.Frame, error)
 }
 
-// FrameExporter encodes a frame window into a clip file (export.Exporter
-// satisfies it; tests fake it).
+// FrameExporter prepares a frame window for streaming (StreamExporter
+// adapts export.Exporter; tests fake it).
 type FrameExporter interface {
-	Export(ctx context.Context, frames []frame.Frame, fps float64, format export.Format) (path string, cleanup func(), err error)
+	Prepare(ctx context.Context, frames []frame.Frame, fps float64, format export.Format) (ClipStream, error)
+}
+
+// StreamExporter lifts *export.Exporter's concrete Prepare into
+// FrameExporter (Go interfaces have no covariant returns).
+type StreamExporter struct{ E *export.Exporter }
+
+// Prepare implements FrameExporter.
+func (s StreamExporter) Prepare(ctx context.Context, frames []frame.Frame, fps float64, format export.Format) (ClipStream, error) {
+	st, err := s.E.Prepare(ctx, frames, fps, format)
+	if err != nil {
+		return nil, err
+	}
+	return st, nil
 }
 
 // Clipper is the production ClipExporter: cut the window ending now, pipe it
@@ -39,15 +52,16 @@ type Clipper struct {
 }
 
 // ExportClip implements ClipExporter. window.ErrNoFrames and export.ErrBusy
-// pass through for the handler's 503 mapping.
+// pass through for the handler's 503 mapping. The returned Clip holds an
+// export slot; the caller must run Stream.WriteTo or Stream.Close.
 func (c *Clipper) ExportClip(ctx context.Context, n time.Duration, format string) (Clip, error) {
 	w, err := window.Cut(c.Buffer, c.Clock.Now(), n)
 	if err != nil {
 		return Clip{}, err
 	}
-	path, cleanup, err := c.Exporter.Export(ctx, w.Frames, c.FPS(), export.Format(format))
+	st, err := c.Exporter.Prepare(ctx, w.Frames, c.FPS(), export.Format(format))
 	if err != nil {
 		return Clip{}, err
 	}
-	return Clip{Path: path, Duration: w.Duration, Cleanup: cleanup}, nil
+	return Clip{Duration: w.Duration, Stream: st}, nil
 }
