@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/danielmschmidt/zeitspiegel/internal/config"
 	"github.com/danielmschmidt/zeitspiegel/internal/export"
 	"github.com/danielmschmidt/zeitspiegel/internal/frame"
+	"github.com/danielmschmidt/zeitspiegel/internal/peers"
 	"github.com/danielmschmidt/zeitspiegel/internal/window"
 )
 
@@ -40,6 +42,14 @@ type Status struct {
 	MinLatencyMS  int64        `json:"min_latency_ms"`
 	WarmingUp     bool         `json:"warming_up"`
 	UptimeS       float64      `json:"uptime_s"`
+
+	// Fleet identity (FR-15, E-8). A single appliance reports its own id and
+	// name with role "primary" and fleet_size 1, so the shape is the same
+	// whether one unit is running or three.
+	UnitID    string `json:"unit_id"`
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	FleetSize int    `json:"fleet_size"`
 }
 
 // StatusProvider supplies the composed system status (wired in cmd).
@@ -85,6 +95,16 @@ type FrameProvider interface {
 	Newest() (frame.Frame, error)
 }
 
+// PeerStore is the fleet membership list kept by whichever unit currently
+// hosts the access point (peers.Registry satisfies it). Nil in Deps means
+// this build serves no fleet API at all — a plain single appliance.
+type PeerStore interface {
+	Register(peers.Peer) error
+	List() []peers.Peer
+	Roster() []string
+	Position(id string) int
+}
+
 // Deps wires the handlers. Logger, Status, Delay, Clip and Config are
 // required; Frames+Ticker enable /preview, UI serves /, Health overrides
 // the /healthz check.
@@ -95,6 +115,9 @@ type Deps struct {
 	Clip   ClipExporter
 	Config ConfigStore
 	Frames FrameProvider
+	// Peers enables the fleet API (POST/GET /api/v1/peers). Nil ⇒ the
+	// routes are not registered at all.
+	Peers PeerStore
 	// DelayedFrames serves the ?view=delayed preview: the frame at
 	// now − delay (manual delay testing without the SDL display).
 	DelayedFrames FrameProvider
@@ -130,10 +153,36 @@ func New(d Deps) http.Handler {
 	if d.Frames != nil && d.Ticker != nil {
 		mux.HandleFunc("GET /api/v1/preview", s.getPreview)
 	}
+	if d.Peers != nil {
+		mux.HandleFunc("POST /api/v1/peers", s.postPeer)
+		mux.HandleFunc("GET /api/v1/peers", s.getPeers)
+	}
 	if d.UI != nil {
 		mux.Handle("GET /", d.UI)
 	}
-	return mux
+	return withCORS(mux)
+}
+
+// withCORS lets the combined page, served by whichever unit is primary, talk
+// straight to every other unit's API instead of being proxied through the
+// primary — which keeps clip downloads off a second wireless hop.
+//
+// This widens nothing: the appliance is already unauthenticated on an
+// isolated, internet-less LAN with no route to the internet in either
+// direction (NFR-6). A JSON PUT is preflighted, so the OPTIONS answer is
+// what actually makes a peer's delay slider work.
+func withCORS(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Max-Age", "600")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 type server struct {
@@ -307,6 +356,68 @@ func (s *server) patchConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, rt)
+}
+
+// postPeer records a member's heartbeat. The announcement deliberately
+// carries no address: the member's address is taken from the connection it
+// arrived on, so a member never has to discover its own DHCP lease and every
+// card can ship the identical image (E-8).
+func (s *server) postPeer(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Port int    `json:"port"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.problem(w, http.StatusUnprocessableEntity, "invalid announcement",
+			`body must be {"id": "...", "name": "...", "port": n}`, nil)
+		return
+	}
+	if body.Port < 1 || body.Port > 65535 {
+		s.problem(w, http.StatusUnprocessableEntity, "invalid announcement",
+			fmt.Sprintf("port %d outside 1…65535", body.Port), nil)
+		return
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		// No port on RemoteAddr (some test transports); use it whole.
+		host = r.RemoteAddr
+	}
+	if host == "" {
+		s.problem(w, http.StatusUnprocessableEntity, "invalid announcement",
+			"could not determine the caller's address", nil)
+		return
+	}
+	base := "http://" + net.JoinHostPort(host, strconv.Itoa(body.Port))
+
+	if err := s.d.Peers.Register(peers.Peer{ID: body.ID, Name: body.Name, BaseURL: base}); err != nil {
+		if errors.Is(err, peers.ErrInvalid) {
+			s.problem(w, http.StatusUnprocessableEntity, "invalid announcement", err.Error(), nil)
+			return
+		}
+		s.d.Logger.Error("peer register", "err", err)
+		s.problem(w, http.StatusInternalServerError, "register failed", err.Error(), nil)
+		return
+	}
+
+	// The roster and position are what the member feeds back into its
+	// election machine, so it knows how long to wait before promoting if
+	// this unit disappears.
+	s.writeJSON(w, peers.RegisterResponse{
+		ID:       body.ID,
+		BaseURL:  base,
+		Roster:   s.d.Peers.Roster(),
+		Position: s.d.Peers.Position(body.ID),
+	})
+}
+
+func (s *server) getPeers(w http.ResponseWriter, _ *http.Request) {
+	list := s.d.Peers.List()
+	if list == nil {
+		list = []peers.Peer{}
+	}
+	s.writeJSON(w, map[string]any{"peers": list})
 }
 
 func (s *server) healthz(w http.ResponseWriter, _ *http.Request) {

@@ -51,6 +51,15 @@ func run() error {
 	sourceFlag := flag.String("source", "", "override frame source: camera | synth")
 	bindFlag := flag.String("bind", "", "override listen address")
 	windowed := flag.Bool("windowed", false, "render in a desktop window instead of fullscreen (dev TV view; needs the sdl build tag)")
+	// Fleet overrides. An appliance uses none of these: its identity comes
+	// from the hardware and the boot partition, and its role is elected.
+	// They exist for development and for the E2E lane, where several units
+	// share one machine and therefore one /proc/cpuinfo.
+	unitID := flag.String("unit-id", "", "override the unit id (dev/test; normally derived from the hardware)")
+	unitName := flag.String("unit-name", "", "override the display name (dev/test; normally read from the boot partition)")
+	fleetSize := flag.Int("fleet-size", 0, "override fleet_size (dev/test)")
+	netSim := flag.String("net-sim", "", "drive a virtual radio backed by this directory instead of nmcli (dev/test)")
+	netScale := flag.Float64("net-scale", 1, "divide every election timing by this, so a failover takes seconds (dev/test)")
 	flag.Parse()
 
 	cfg := config.Default()
@@ -72,6 +81,20 @@ func run() error {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	start := time.Now()
+
+	// Who this unit is and, when there is a fleet, how it finds its place on
+	// the network (FR-15, E-8). Resolved before anything else so the id is
+	// in the log from the first line.
+	fleetRT, err := newFleetRuntime(cfg, fleetOptions{
+		UnitID:    *unitID,
+		UnitName:  *unitName,
+		FleetSize: *fleetSize,
+		NetSim:    *netSim,
+		NetScale:  *netScale,
+	}, logger)
+	if err != nil {
+		return err
+	}
 
 	buf := ringbuf.New(time.Duration(cfg.BufferMaxS*float64(time.Second)), cfg.BufferMaxBytes)
 	eng := engine.New(buf)
@@ -155,7 +178,7 @@ func run() error {
 		},
 	})
 
-	status := &sysStatus{start: start, cfg: cfg, store: store, buf: buf, eng: eng, sup: sup}
+	status := &sysStatus{start: start, cfg: cfg, store: store, buf: buf, eng: eng, sup: sup, fleet: fleetRT}
 	loopM := &loopMetrics{}
 	expvar.Publish("zeitspiegel_dropped_frames", expvar.Func(func() any { return sup.Dropped() }))
 	expvar.Publish("zeitspiegel_buffer", expvar.Func(func() any {
@@ -183,6 +206,7 @@ func run() error {
 		Clip:          clipper,
 		Config:        store,
 		Frames:        buf,
+		Peers:         fleetRT.PeerStore(),
 		DelayedFrames: &delayedFrames{buf: buf, eng: eng},
 		Ticker: func(d time.Duration) (<-chan time.Time, func()) {
 			t := time.NewTicker(d)
@@ -221,6 +245,16 @@ func run() error {
 		defer wg.Done()
 		if err := sup.Run(ctx); err != nil {
 			errCh <- fmt.Errorf("capture: %w", err)
+		}
+	}()
+	wg.Add(1)
+	go func() { // role election (FR-15): find or host the shared network
+		defer wg.Done()
+		// Never fatal. A unit that cannot sort out its place on the network
+		// still mirrors perfectly — the display path does not touch it —
+		// so a radio problem must not take the appliance down.
+		if err := fleetRT.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Warn("fleet election stopped", "err", err)
 		}
 	}()
 	wg.Add(1)

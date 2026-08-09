@@ -129,8 +129,10 @@ fi
 # internet-less LAN (NFR-6, no auth in v1). NetworkManager's ipv4.method=shared
 # runs DHCP for clients (gateway 10.42.0.1) and mDNS works with no router in
 # between. The connection profile persists and autoconnects on boot.
-AP_SSID="${AP_SSID:-zeitspiegel}"
+AP_SSID="${SSID:-${AP_SSID:-zeitspiegel}}"
 WIFI_COUNTRY="${WIFI_COUNTRY:-DE}"
+AP_BAND="${AP_BAND:-bg}"
+AP_CHANNEL="${AP_CHANNEL:-6}"
 # Trim NM for an AP-only appliance: no captive-portal probe, no DNS
 # resolver. Mirrors the conf drop done in bake.sh.
 install -d -m 0755 /etc/NetworkManager/conf.d
@@ -147,15 +149,30 @@ chmod 0644 /etc/NetworkManager/conf.d/00-zeitspiegel.conf
 # Unblock the radio: a regulatory domain must be set before AP mode works.
 raspi-config nonint do_wifi_country "$WIFI_COUNTRY" || true
 rfkill unblock wifi || true
-# Recreate the profile so an SSID change on re-run takes effect.
-nmcli connection delete zeitspiegel-ap >/dev/null 2>&1 || true
+# Recreate both profiles so an SSID change on re-run takes effect.
+#
+# autoconnect is OFF on both on purpose: the appliance elects its own role at
+# boot — host the shared network or join it (E-8, FR-15) — and activates
+# whichever profile it decided on. Letting NetworkManager autoconnect as well
+# would race that decision, and a unit that lost the race would come up
+# beaconing a network somebody else is already hosting.
+nmcli connection delete zeitspiegel-ap  >/dev/null 2>&1 || true
+nmcli connection delete zeitspiegel-sta >/dev/null 2>&1 || true
 nmcli connection add type wifi ifname wlan0 con-name zeitspiegel-ap \
-    autoconnect yes connection.autoconnect-priority 100 \
+    autoconnect no \
     ssid "$AP_SSID" \
-    802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 6 \
+    802-11-wireless.mode ap 802-11-wireless.band "$AP_BAND" 802-11-wireless.channel "$AP_CHANNEL" \
     ipv4.method shared ipv6.method disabled
-nmcli connection up zeitspiegel-ap || \
-    echo "note: AP not up yet (radio may need a reboot) — autoconnect will bring it up"
+# An OPEN network gets no wifi-security settings at all — that is what nmcli
+# writes for one. key-mgmt=none is the ambiguous spelling NetworkManager
+# documents as "WEP or no password protection"; using it here makes the
+# association fail in a way that is tedious to diagnose.
+nmcli connection add type wifi ifname wlan0 con-name zeitspiegel-sta \
+    autoconnect no \
+    ssid "$AP_SSID" \
+    802-11-wireless.mode infrastructure \
+    ipv4.method auto ipv6.method disabled
+echo "note: both Wi-Fi profiles are inactive by design — zeitspiegel brings one up once it has elected its role"
 
 # --- LAST step: seal the appliance — read-only overlayfs (NFR-9) ---------
 # Must come last: after this, nothing above persists across reboots until

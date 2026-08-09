@@ -26,6 +26,7 @@ type sysStatus struct {
 	buf   *ringbuf.Buffer
 	eng   *engine.Engine
 	sup   *capture.Supervisor
+	fleet *fleetRuntime
 }
 
 func (s *sysStatus) Status() httpapi.Status {
@@ -41,7 +42,7 @@ func (s *sysStatus) Status() httpapi.Status {
 		warming = time.Now().Add(-s.eng.Delay()).Before(oldest.CaptureTS)
 	}
 
-	return httpapi.Status{
+	out := httpapi.Status{
 		DelayS:        s.eng.Delay().Seconds(),
 		FPS:           profileFPS(rt.Profile),
 		Resolution:    fmt.Sprintf("%dx%d", w, h),
@@ -51,6 +52,15 @@ func (s *sysStatus) Status() httpapi.Status {
 		WarmingUp:     warming,
 		UptimeS:       time.Since(s.start).Seconds(),
 	}
+	// Identity is what labels this unit's card on the combined page, and
+	// role is what marks which unit is currently hosting the network.
+	if s.fleet != nil {
+		out.UnitID = s.fleet.unit.ID
+		out.Name = s.fleet.unit.Name
+		out.Role = s.fleet.Role()
+		out.FleetSize = s.fleet.fleetSize
+	}
+	return out
 }
 
 func profileFPS(profile string) float64 {

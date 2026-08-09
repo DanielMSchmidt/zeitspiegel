@@ -34,6 +34,7 @@ silently pick one.
 ```
 make test              # pure unit tests, -race, runs anywhere   (every change)
 make test-integration  # adds -tags integration (needs ffmpeg + ffprobe)
+make test-e2e          # multi-unit: 3 real binaries elect a role (no ffmpeg/root)
 make test-hw           # -tags "v4l2 sdl" build + v4l2loopback tests (Linux)
 make build-pi          # arm64 binary with v4l2+sdl tags (on the Pi itself)
 make pi-binary         # same, cross-built in Docker (bookworm arm64)
@@ -76,3 +77,15 @@ numbers recorded in docs/ARCHITECTURE.md §7.
   renderer must skip.
 - Adding a router/web framework — stdlib `ServeMux` patterns are sufficient.
 - Copying frame slices out of the buffer "for safety" — see hard rule 4.
+- Letting NetworkManager autoconnect the Wi-Fi profiles "so the network comes
+  up sooner" — it races the role election and a unit that loses the race
+  beacons a network somebody else is already hosting. Both profiles are
+  `autoconnect=false` on purpose (E-8).
+- Treating a failed scan as "nobody is out there" — a radio in AP mode cannot
+  scan, and reading that as an empty network is exactly how a split brain is
+  made (ARCHITECTURE D8).
+- Making a returning ex-host take the network back — a handback costs the room
+  a second outage for no benefit. Promotion never preempts.
+- Baking a per-card role or address. Every card ships the identical image;
+  `fleet_size` is the same on all of them and the name comes off the boot
+  partition.

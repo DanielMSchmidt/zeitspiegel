@@ -11,6 +11,10 @@ movement training (dance, strength training, technique work).
   like a real mirror)
 - Delay adjustable at runtime from any phone/laptop via a web UI
 - Download the last *n* seconds as an MP4 from the web UI
+- Two or three mirrors share one Wi-Fi network and one page, each keeping its
+  own delay. Every card carries the identical image: whichever unit is on
+  first hosts the network, the rest join it, and if you unplug that one
+  another takes over on its own
 
 ## How it works (one paragraph)
 
@@ -30,7 +34,8 @@ any HDMI display. Runs as an unattended appliance: power on → mirror in ~20 s.
 The appliance hosts its own Wi-Fi (SSID `zeitspiegel`): join it and open
 `http://zeitspiegel.local` — no venue network needed. Power-off = pull the
 plug (root FS is read-only). Provisioning is one command: `make sd` writes a
-fully self-installing SD card.
+fully self-installing SD card; for several mirrors, `FLEET_SIZE=3 make sd`
+once and write the same image to every card.
 
 ## Repository layout
 
@@ -50,6 +55,14 @@ internal/capture/    capture worker + reconnect supervisor     (pure Go)
 internal/export/     ffmpeg invocation, temp files
 
 internal/httpapi/    REST handlers, validation, MJPEG preview
+
+internal/netrole/    role election: host the network or join it  (pure Go)
+
+internal/fleet/      drives the election against a radio
+
+internal/peers/      membership list + heartbeat announcer
+
+internal/identity/   unit id from the hardware, name from the card
 
 internal/config/     TOML config
 

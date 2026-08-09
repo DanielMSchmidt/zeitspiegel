@@ -20,6 +20,13 @@ type Config struct {
 	MirrorFlip     bool    `toml:"mirror_flip"`     // FR-2, default on
 	DefaultDelayS  float64 `toml:"default_delay_s"` // FR-3 boot delay; runtime override via API
 
+	// Fleet keys (FR-15, E-8). These are identical on every card — the unit's
+	// role is elected at boot, not baked, which is what lets one image serve
+	// the whole installation.
+	FleetSize     int    `toml:"fleet_size"`     // units expected on the network; 1 = classic single appliance
+	NetworkManage bool   `toml:"network_manage"` // let the binary drive the radio (true only on the appliance)
+	NameFile      string `toml:"name_file"`      // display-name file on the boot partition; empty = identity default
+
 	// camera controls (FR-9; values measured in spike S-2)
 	FocusAuto        bool `toml:"focus_auto"` // default off: pin focus
 	FocusAbsolute    int  `toml:"focus_absolute"`
@@ -39,8 +46,15 @@ func Default() Config {
 		MirrorFlip:     true,
 		DefaultDelayS:  15, // boot the mirror with a 15 s shift (FR-3 default)
 		ExposureAuto:   true,
+		FleetSize:      1, // a lone appliance: no election, no radio management (E-7 behaviour)
 	}
 }
+
+// MaxFleetSize bounds fleet_size. One open 2.4 GHz AP in one room is the
+// deployment this was designed for; a value far above that is a typo, and
+// accepting it would silently inflate the election's stagger and promotion
+// windows into minutes.
+const MaxFleetSize = 16
 
 // Load reads path over the defaults and validates. Errors are meant to be
 // clear startup errors (UT-10).
@@ -85,6 +99,9 @@ func (c Config) Validate() error {
 	}
 	if c.DefaultDelayS < 0 || c.DefaultDelayS > MaxBufferSeconds {
 		return fmt.Errorf("default_delay_s %v: must be ≥ 0 and ≤ %d", c.DefaultDelayS, MaxBufferSeconds)
+	}
+	if c.FleetSize < 1 || c.FleetSize > MaxFleetSize {
+		return fmt.Errorf("fleet_size %d: must be ≥ 1 and ≤ %d", c.FleetSize, MaxFleetSize)
 	}
 	return nil
 }
