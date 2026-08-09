@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-hw build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean poster poster-check
+.PHONY: test test-integration test-e2e test-hw build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean poster poster-check
 
 test: vet
 	$(GO) test -race ./...
@@ -9,6 +9,13 @@ test: vet
 test-integration:
 	$(GO) vet -tags integration ./...
 	$(GO) test -race -tags integration ./...
+
+# Multi-unit end-to-end (ST-7..ST-12): three real zeitspiegel processes elect
+# a role among themselves over real HTTP, with only the radio faked. Needs no
+# ffmpeg, no radios and no root, so it runs on a laptop.
+test-e2e:
+	$(GO) vet -tags e2e ./...
+	$(GO) test -race -tags e2e -run TestFleet ./cmd/zeitspiegel/
 
 # Linux only: needs SDL2/SDL2_image headers, V4L2 kernel headers, v4l2loopback for ST-1.
 test-hw:

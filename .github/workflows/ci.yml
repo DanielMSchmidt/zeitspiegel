@@ -44,6 +44,20 @@ jobs:
       # make test-integration = go vet ./... + go test -race -tags integration ./...
       - run: make test-integration
 
+  # Multi-unit election (ST-7..ST-12): three real binaries, real HTTP, only
+  # the radio faked. Its own job because it spawns processes and is timing
+  # sensitive; it needs neither ffmpeg nor root.
+  fleet-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - run: make test-e2e
+
   # Compile check of the cgo adapters (internal/camera, internal/screen).
   # V4L2 kernel headers come from linux-libc-dev, preinstalled on the runner.
   # No tests here -- there is no camera or display on the runner.
