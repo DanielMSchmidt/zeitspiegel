@@ -20,7 +20,7 @@
 <main>
   <!-- Delay -->
   <section>
-    <h2>Delay</h2>
+    <h2><span id="local-title">Delay</span></h2>
     <div class="delay-row">
       <input type="range" id="delay-slider" min="0" max="60" step="0.1" value="0"
              aria-label="Delay in seconds">
@@ -42,6 +42,15 @@
     <p class="hint">Downloads everything in the buffer. If nothing downloads,
     an export may already be running or the buffer is still filling &mdash;
     try again in a moment.</p>
+  </section>
+
+  <!-- Other mirrors on this network. Hidden unless there are any, so a
+       single Zeitspiegel looks exactly as it always has. -->
+  <section id="fleet" hidden>
+    <h2>Other mirrors</h2>
+    <p class="hint">Every mirror keeps its own delay &mdash; a slider here
+    only changes that mirror.</p>
+    <div id="fleet-list"></div>
   </section>
 
   <!-- Preview -->
@@ -93,6 +102,7 @@
 
   var slider     = $("delay-slider");
   var delayValue = $("delay-value");
+  var localTitle = $("local-title");
   var warmBadge  = $("warming-badge");
   var offBadge   = $("offline-badge");
   var dlFormat   = $("download-format");
@@ -100,6 +110,8 @@
   var preview    = $("preview");
   var prevToggle = $("preview-toggle");
   var toast      = $("toast");
+  var fleetBox   = $("fleet");
+  var fleetList  = $("fleet-list");
 
   // ---------- about dialog ----------
   var aboutDialog = $("about-dialog");
@@ -136,132 +148,318 @@
     }
     return fallback;
   }
-
-  // ---------- delay slider ----------
-  var debounceTimer = null;   // pending debounced PUT
-  var sliderActive = false;   // user is touching/dragging the slider
-  var holdOff = 0;            // do not let status polls overwrite the slider
-                              // until this timestamp (ms since epoch)
-
-  slider.addEventListener("pointerdown", function () { sliderActive = true; });
-  window.addEventListener("pointerup", function () { sliderActive = false; });
-  window.addEventListener("pointercancel", function () { sliderActive = false; });
-
-  slider.addEventListener("input", function () {
-    delayValue.textContent = fmtSecs(parseFloat(slider.value));
-    holdOff = Date.now() + 3000;
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(sendDelay, 150);
-  });
-
-  function sendDelay() {
-    debounceTimer = null;
-    var secs = parseFloat(slider.value);
-    fetch("/api/v1/delay", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seconds: secs })
-    }).then(function (res) {
-      if (res.ok) return;
-      return res.json().catch(function () { return null; }).then(function (body) {
-        showToast(problemDetail(body, "Delay rejected by server"));
-      });
-    }).catch(function () {
-      showToast("Could not reach server");
-    });
-  }
-
-  // ---------- status polling (slider range, warming/offline badges) ----------
-  function applyStatus(st) {
-    offBadge.hidden = true;
-    warmBadge.hidden = !st.warming_up;
-
-    var cap = (st.buffer && st.buffer.capacity_s) || 0;
-    if (cap > 0 && parseFloat(slider.max) !== cap) {
-      slider.max = cap;
-    }
-    // The download button always grabs the full buffer; keep its label and
-    // request length in sync with the server's actual capacity.
-    if (cap > 0 && cap !== dlCapS) {
-      dlCapS = cap;
-      dlLabel = "Download last " + Math.round(cap) + " s";
-      if (!dlBtn.disabled) dlBtn.textContent = dlLabel;
-    }
-    // Reflect server-side delay unless the user changed it very recently.
-    if (!sliderActive && !debounceTimer && Date.now() > holdOff) {
-      slider.value = st.delay_s;
-      delayValue.textContent = fmtSecs(st.delay_s);
-    }
-  }
-
-  function pollStatus() {
-    fetch("/api/v1/status").then(function (res) {
+  // Another mirror may be switched off mid-request. Without a deadline its
+  // card would hang the whole page's poll, so every cross-unit call gets
+  // one and a unit that misses it is simply drawn as offline.
+  function fetchJSON(url, ms) {
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, ms || 2500) : null;
+    var opts = ctl ? { signal: ctl.signal } : {};
+    return fetch(url, opts).then(function (res) {
+      if (timer) clearTimeout(timer);
       if (!res.ok) throw new Error("status " + res.status);
       return res.json();
-    }).then(applyStatus).catch(function () {
-      offBadge.hidden = false;
+    }, function (err) {
+      if (timer) clearTimeout(timer);
+      throw err;
     });
   }
 
-  pollStatus();
-  setInterval(pollStatus, 1000);
+  // ---------- delay control ----------
+  // One mirror's slider. Each unit owns its own delay, so each control keeps
+  // its own debounce and hold-off state and posts to its own base URL --
+  // "" for this unit, an absolute address for another one.
+  function makeDelayControl(sliderEl, valueEl, base) {
+    var debounceTimer = null;   // pending debounced PUT
+    var sliderActive = false;   // user is touching/dragging the slider
+    var holdOff = 0;            // do not let status polls overwrite the slider
+                                // until this timestamp (ms since epoch)
+
+    sliderEl.addEventListener("pointerdown", function () { sliderActive = true; });
+    window.addEventListener("pointerup", function () { sliderActive = false; });
+    window.addEventListener("pointercancel", function () { sliderActive = false; });
+
+    sliderEl.addEventListener("input", function () {
+      valueEl.textContent = fmtSecs(parseFloat(sliderEl.value));
+      holdOff = Date.now() + 3000;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(send, 150);
+    });
+
+    function send() {
+      debounceTimer = null;
+      var secs = parseFloat(sliderEl.value);
+      fetch(base + "/api/v1/delay", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds: secs })
+      }).then(function (res) {
+        if (res.ok) return;
+        return res.json().catch(function () { return null; }).then(function (body) {
+          showToast(problemDetail(body, "Delay rejected by server"));
+        });
+      }).catch(function () {
+        showToast("Could not reach mirror");
+      });
+    }
+
+    return {
+      // apply reflects the server's view, unless the user just moved the
+      // slider -- otherwise a poll would yank it back under their finger.
+      apply: function (st) {
+        var cap = (st.buffer && st.buffer.capacity_s) || 0;
+        if (cap > 0 && parseFloat(sliderEl.max) !== cap) {
+          sliderEl.max = cap;
+        }
+        if (!sliderActive && !debounceTimer && Date.now() > holdOff) {
+          sliderEl.value = st.delay_s;
+          valueEl.textContent = fmtSecs(st.delay_s);
+        }
+      }
+    };
+  }
 
   // ---------- clip download ----------
   // The clip is downloaded via a hidden iframe so the browser's download
   // manager streams it straight to disk. The old fetch()+Blob approach
-  // buffered the whole clip in RAM first — an MJPEG export of a full buffer
+  // buffered the whole clip in RAM first -- an MJPEG export of a full buffer
   // is hundreds of MB, enough to kill the tab on a phone.
   var dlFrame = document.createElement("iframe");
   dlFrame.hidden = true;
   dlFrame.setAttribute("aria-hidden", "true");
   document.body.appendChild(dlFrame);
 
-  // The clip is always the full buffer (60 s in production); the exact
-  // capacity — and with it the button label — follows /status.
-  var dlCapS = 60;
-  var dlLabel = "Download last 60 s";
-
+  // The button whose label is currently showing "Preparing...", so the load
+  // handler knows which one to release.
+  var preparingBtn = null;
   var preparingTimer = null;
-  function setDownloadPreparing(on) {
-    dlBtn.disabled = on;
-    dlBtn.textContent = on ? "Preparing…" : dlLabel;
+
+  function setPreparing(btn, label, on) {
+    btn.disabled = on;
+    btn.textContent = on ? "Preparing…" : label;
     if (on) {
-      dlBtn.setAttribute("aria-busy", "true");
+      btn.setAttribute("aria-busy", "true");
+      preparingBtn = btn;
     } else {
-      dlBtn.removeAttribute("aria-busy");
+      btn.removeAttribute("aria-busy");
+      if (preparingBtn === btn) preparingBtn = null;
     }
   }
 
   // A successful attachment download never fires "load" on the iframe; an
   // error response (problem+json) renders into it and does. Best effort:
-  // surface the message and re-enable the button.
+  // surface the message and re-enable the button. For another mirror the
+  // frame is cross-origin, so the body cannot be read and the generic
+  // message stands.
   dlFrame.addEventListener("load", function () {
     if (preparingTimer) clearTimeout(preparingTimer);
-    setDownloadPreparing(false);
+    var btn = preparingBtn;
+    if (btn) setPreparing(btn, btn.dataset.label || "Download", false);
     var msg = "Could not export clip";
     try {
       var body = JSON.parse(dlFrame.contentDocument.body.textContent);
       msg = problemDetail(body, msg);
-    } catch (e) { /* not JSON we can read — keep the fallback */ }
+    } catch (e) { /* not JSON we can read -- keep the fallback */ }
     showToast(msg);
   });
+
+  // download starts a clip from one mirror. The URL is that mirror's own
+  // address, so the video never makes a second hop through this one.
+  function download(btn, base, capS, format) {
+    var url = base + "/api/v1/clip?seconds=" + encodeURIComponent(capS) +
+              "&format=" + encodeURIComponent(format);
+    setPreparing(btn, btn.dataset.label || "Download", true);
+    dlFrame.src = url;
+    // The browser gives no signal when the attachment download starts, so
+    // free the button after a short grace period. The export streams, so
+    // the download begins within ~1 s -- 2 s covers a slow phone.
+    if (preparingTimer) clearTimeout(preparingTimer);
+    preparingTimer = setTimeout(function () {
+      if (preparingBtn) setPreparing(preparingBtn, preparingBtn.dataset.label || "Download", false);
+    }, 2000);
+  }
+
+  // ---------- this mirror ----------
+  var localDelay = makeDelayControl(slider, delayValue, "");
+  var localCapS = 60;
+  dlBtn.dataset.label = "Download last 60 s";
+
+  function applyStatus(st) {
+    offBadge.hidden = true;
+    warmBadge.hidden = !st.warming_up;
+
+    var cap = (st.buffer && st.buffer.capacity_s) || 0;
+    // The download button always grabs the full buffer; keep its label and
+    // request length in sync with the server's actual capacity.
+    if (cap > 0 && cap !== localCapS) {
+      localCapS = cap;
+      dlBtn.dataset.label = "Download last " + Math.round(cap) + " s";
+      if (!dlBtn.disabled) dlBtn.textContent = dlBtn.dataset.label;
+    }
+    // Once there is more than one mirror, say which one this page is, and
+    // start asking who else is here.
+    if (st.fleet_size > 1) {
+      peersEnabled = true;
+      if (st.name) {
+        localTitle.textContent = "Delay — " + st.name +
+          (st.role === "primary" ? " (this network)" : "");
+      }
+    }
+    localDelay.apply(st);
+  }
+
+  function pollStatus() {
+    fetchJSON("/api/v1/status").then(applyStatus).catch(function () {
+      offBadge.hidden = false;
+    });
+  }
 
   dlBtn.addEventListener("click", function () {
     // Full-buffer clip; the server clamps to what is actually buffered
     // (FR-5: duration = min(n, buffered)).
-    var url = "/api/v1/clip?seconds=" + encodeURIComponent(dlCapS) +
-              "&format=" + encodeURIComponent(dlFormat.value);
-
-    setDownloadPreparing(true);
-    dlFrame.src = url;
-    // The browser gives no signal when the attachment download starts, so
-    // free the button after a short grace period. The export streams, so
-    // the download begins within ~1 s — 2 s covers a slow phone.
-    if (preparingTimer) clearTimeout(preparingTimer);
-    preparingTimer = setTimeout(function () {
-      setDownloadPreparing(false);
-    }, 2000);
+    download(dlBtn, "", localCapS, dlFormat.value);
   });
+
+  // ---------- other mirrors ----------
+  // Cards are built once per mirror and then only updated, so a card's
+  // slider survives the 1 Hz poll and keeps its own hold-off state.
+  var cards = {}; // unit id -> card
+
+  function buildCard(peer) {
+    var wrap = document.createElement("div");
+    wrap.className = "unit-card";
+
+    var head = document.createElement("div");
+    head.className = "row";
+    var title = document.createElement("strong");
+    title.textContent = peer.name || peer.id;
+    var state = document.createElement("span");
+    state.className = "badge";
+    state.hidden = true;
+    head.appendChild(title);
+    head.appendChild(state);
+    wrap.appendChild(head);
+
+    var row = document.createElement("div");
+    row.className = "delay-row";
+    var sl = document.createElement("input");
+    sl.type = "range";
+    sl.min = "0";
+    sl.max = "60";
+    sl.step = "0.1";
+    sl.value = "0";
+    sl.setAttribute("aria-label", "Delay in seconds for " + (peer.name || peer.id));
+    var val = document.createElement("span");
+    var num = document.createElement("span");
+    num.textContent = "0.0";
+    var unit = document.createElement("span");
+    unit.className = "delay-unit";
+    unit.textContent = " s";
+    val.appendChild(num);
+    val.appendChild(unit);
+    row.appendChild(sl);
+    row.appendChild(val);
+    wrap.appendChild(row);
+
+    var actions = document.createElement("div");
+    actions.className = "row";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.label = "Download last 60 s";
+    btn.textContent = btn.dataset.label;
+    btn.addEventListener("click", function () {
+      download(btn, peer.base_url, card.capS, dlFormat.value);
+    });
+    actions.appendChild(btn);
+    wrap.appendChild(actions);
+
+    var card = {
+      el: wrap,
+      title: title,
+      state: state,
+      button: btn,
+      capS: 60,
+      base: peer.base_url,
+      delay: makeDelayControl(sl, num, peer.base_url)
+    };
+    return card;
+  }
+
+  function refreshCard(card, peer) {
+    card.title.textContent = peer.name || peer.id;
+    // A mirror that moved to a new address gets a rebuilt card, since the
+    // slider and the download button both close over the old one.
+    if (card.base !== peer.base_url) return false;
+    fetchJSON(peer.base_url + "/api/v1/status").then(function (st) {
+      card.state.hidden = !st.warming_up;
+      card.state.textContent = "Warming up";
+      card.el.classList.remove("offline");
+      var cap = (st.buffer && st.buffer.capacity_s) || 0;
+      if (cap > 0 && cap !== card.capS) {
+        card.capS = cap;
+        card.button.dataset.label = "Download last " + Math.round(cap) + " s";
+        if (!card.button.disabled) card.button.textContent = card.button.dataset.label;
+      }
+      card.delay.apply(st);
+    }).catch(function () {
+      card.el.classList.add("offline");
+      card.state.hidden = false;
+      card.state.textContent = "Offline";
+    });
+    return true;
+  }
+
+  function applyPeers(list) {
+    fleetBox.hidden = list.length === 0;
+
+    var seen = {};
+    list.forEach(function (peer) {
+      seen[peer.id] = true;
+      var card = cards[peer.id];
+      if (card && !refreshCard(card, peer)) {
+        fleetList.removeChild(card.el);
+        card = null;
+      }
+      if (!card) {
+        card = buildCard(peer);
+        cards[peer.id] = card;
+        fleetList.appendChild(card.el);
+        refreshCard(card, peer);
+      }
+    });
+
+    // A mirror that dropped off the network loses its card. The list is
+    // already sorted by the server, so cards do not reshuffle between polls.
+    Object.keys(cards).forEach(function (id) {
+      if (!seen[id]) {
+        fleetList.removeChild(cards[id].el);
+        delete cards[id];
+      }
+    });
+  }
+
+  // A lone Zeitspiegel serves no fleet API at all, so there is nothing to
+  // ask it for. Polling is gated on the fleet size this unit reports, and
+  // switched off for good on a 404 — otherwise a single mirror would spend
+  // the rest of its life issuing a request a second that can only fail.
+  var peersEnabled = false;
+
+  function pollPeers() {
+    if (!peersEnabled) return;
+    fetchJSON("/api/v1/peers").then(function (body) {
+      applyPeers((body && body.peers) || []);
+    }).catch(function (err) {
+      if (String(err.message).indexOf("404") >= 0) peersEnabled = false;
+    });
+  }
+
+  function poll() {
+    pollStatus();
+    pollPeers();
+  }
+
+  poll();
+  setInterval(poll, 1000);
 
   // ---------- preview ----------
   var previewOn = false;

@@ -262,3 +262,19 @@ footer a { color: var(--muted); }
 }
 #toast.show { opacity: 1; }
 .hint { color: var(--muted); font-size: 0.82rem; margin: 10px 0 0; }
+/* ---- other mirrors on this network (E-8) ---- */
+/* One card per mirror. Each keeps its own delay, so each gets its own
+   slider; the card is built once and then only updated, which is what lets
+   a slider survive the 1 Hz poll. */
+.unit-card {
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 12px 0 0;
+}
+.unit-card .row { margin: 0; }
+.unit-card .delay-row { margin: 10px 0; }
+.unit-card strong { flex: 1; }
+/* A mirror that stopped answering stays visible but obviously inert, rather
+   than vanishing and reshuffling the cards under someone's finger. */
+.unit-card.offline { opacity: 0.55; }
