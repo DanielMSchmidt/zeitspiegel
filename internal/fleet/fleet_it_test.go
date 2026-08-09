@@ -44,15 +44,30 @@ type airspace struct {
 
 func newAirspace() *airspace { return &airspace{aps: map[string]int{}} }
 
+// apIn returns a unit beaconing in the given partition. When more than one is
+// (a split brain), the lowest id is returned rather than a random map entry,
+// so a test that reaches that state is still deterministic.
 func (a *airspace) apIn(partition int, excluding string) (string, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	best, found := "", false
 	for id, p := range a.aps {
-		if p == partition && id != excluding {
-			return id, true
+		if p != partition || id == excluding {
+			continue
+		}
+		if !found || id < best {
+			best, found = id, true
 		}
 	}
-	return "", false
+	return best, found
+}
+
+// beaconing reports whether a specific unit is on the air in a partition.
+func (a *airspace) beaconing(id string, partition int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, ok := a.aps[id]
+	return ok && p == partition
 }
 
 func (a *airspace) count() int {
@@ -86,6 +101,12 @@ type fakeRadio struct {
 	id        string
 	partition int
 	mode      string // "off", "ap", "sta"
+	// assoc is the unit this radio associated with. A real station stays on
+	// the access point it joined; it does not re-pick one every scan. Without
+	// that stickiness a member would drift between two hosts during a split
+	// brain, which no real radio does and which would make the fleet's
+	// membership counts meaningless.
+	assoc string
 }
 
 func (r *fakeRadio) Scan(context.Context) ([]string, error) {
@@ -102,7 +123,7 @@ func (r *fakeRadio) ActivateAP(context.Context) error {
 	r.air.mu.Lock()
 	defer r.air.mu.Unlock()
 	r.air.aps[r.id] = r.partition
-	r.mode = "ap"
+	r.mode, r.assoc = "ap", ""
 	return nil
 }
 
@@ -111,6 +132,8 @@ func (r *fakeRadio) ActivateSTA(context.Context) error {
 	delete(r.air.aps, r.id)
 	r.air.mu.Unlock()
 	r.mode = "sta"
+	// Pick an access point now and stay on it.
+	r.assoc, _ = r.air.apIn(r.partition, r.id)
 	return nil
 }
 
@@ -118,24 +141,22 @@ func (r *fakeRadio) Down(context.Context) error {
 	r.air.mu.Lock()
 	delete(r.air.aps, r.id)
 	r.air.mu.Unlock()
-	r.mode = "off"
+	r.mode, r.assoc = "off", ""
 	return nil
 }
 
 func (r *fakeRadio) Associated(context.Context) (bool, error) {
-	if r.mode != "sta" {
+	if r.mode != "sta" || r.assoc == "" {
 		return false, nil
 	}
-	_, ok := r.air.apIn(r.partition, r.id)
-	return ok, nil
+	return r.air.beaconing(r.assoc, r.partition), nil
 }
 
 func (r *fakeRadio) Gateway(context.Context) (string, error) {
-	id, ok := r.air.apIn(r.partition, r.id)
-	if !ok {
+	if r.mode != "sta" || r.assoc == "" || !r.air.beaconing(r.assoc, r.partition) {
 		return "", errors.New("no gateway: not associated")
 	}
-	return "http://" + id, nil
+	return "http://" + r.assoc, nil
 }
 
 // --- harness -----------------------------------------------------------------
@@ -196,8 +217,10 @@ func (h *harness) build(id string, partition int) *unit {
 // hosting its network, and feeding the roster it gets back into its own
 // election machine — the same loop the real Announcer runs over HTTP.
 func (h *harness) announce(u *unit) error {
-	apID, ok := h.air.apIn(u.radio.partition, u.id)
-	if !ok {
+	// Announce to the access point this unit is actually associated with —
+	// its default route — not to whichever one happens to be on the air.
+	apID := u.radio.assoc
+	if apID == "" || !h.air.beaconing(apID, u.radio.partition) {
 		return errors.New("no primary to announce to")
 	}
 	ap := h.find(apID)
@@ -424,6 +447,62 @@ func TestSplitBrainSelfHeals(t *testing.T) {
 
 	h.settle(120)
 	h.requireOneAP("after the split brain healed")
+}
+
+// IT-11: the case that looks most like a lease expiring elsewhere. A host is
+// cut off from its members without ever restarting, so it keeps beaconing and
+// — being in AP mode — cannot see that the others have given up on it and
+// elected a new host. It has to work out from its own empty membership list
+// that it is the stale one, and rejoin.
+//
+// Crucially the unit that took over must NOT be the one that yields: it is
+// serving a mirror, and dropping its network would cost that mirror an outage
+// for nothing.
+func TestStrandedHostRejoinsTheNetworkThatReplacedIt(t *testing.T) {
+	h := newHarness(t, distinctSlotIDs(t, 3))
+	h.settle(20)
+	stranded := h.requireOneAP("cold start")
+
+	// Cut the old host off without restarting it: it keeps beaconing, blind
+	// to everything, while the other two lose their association.
+	h.find(stranded).radio.partition = 1
+	h.air.mu.Lock()
+	h.air.aps[stranded] = 1
+	h.air.mu.Unlock()
+
+	h.settle(40)
+
+	// One of the survivors is now hosting on the original stretch of air.
+	var replacement string
+	for _, u := range h.units {
+		if u.id != stranded && u.mach.Role() == netrole.RolePrimary {
+			replacement = u.id
+		}
+	}
+	if replacement == "" {
+		t.Fatalf("nobody took over after the host was cut off; roles %v", h.roles())
+	}
+
+	// Back on one stretch of air: two hosts, the same SSID, neither able to
+	// see the other.
+	h.find(stranded).radio.partition = 0
+	h.air.mu.Lock()
+	h.air.aps[stranded] = 0
+	h.air.mu.Unlock()
+	if h.air.count() != 2 {
+		t.Fatalf("setup: %d units beaconing, want 2", h.air.count())
+	}
+
+	h.settle(160)
+
+	winner := h.requireOneAP("after the stranded host rejoined")
+	if winner != replacement {
+		t.Fatalf("network changed hands to %q; the host serving members (%q) must not be the one that yields",
+			winner, replacement)
+	}
+	if role := h.find(stranded).mach.Role(); role != netrole.RoleMember {
+		t.Fatalf("stranded host is %v, want member", role)
+	}
 }
 
 // IT-11: a lone appliance in a fleet of one keeps its network up forever. It

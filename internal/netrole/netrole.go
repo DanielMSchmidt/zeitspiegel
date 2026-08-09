@@ -221,9 +221,35 @@ func (m *Machine) promoteDelay() time.Duration {
 	return time.Duration(m.slot()) * m.t.PromoteStep
 }
 
-// healDelay is how long a short-fleet primary waits before demoting. It backs
-// off on every fruitless heal and carries the unit's stagger offset so two
-// primaries in a split brain do not demote in lockstep.
+// mayYield reports whether a host is allowed to drop its network to check
+// whether it is half of a split brain.
+//
+// Only a host serving a minority of the fleet may. The alternative — letting
+// whichever host runs out of patience first yield — is a race between two
+// independent timers whose start times bear no relation to each other, so a
+// host that had been short for a while could yield ahead of a genuinely
+// stranded one and drop a working network for nothing. A majority is a
+// predicate, not a race, so it cannot be lost to a head start.
+//
+// For a fleet of two or three this always converges: the split is 0+0 or
+// 1+0 members, so at least one host is in the minority and yields. An exact
+// tie (a fleet of four splitting 1+1) leaves both willing, and they are
+// separated by the stagger and the backoff as before.
+//
+// A useful side effect: with one unit simply switched off, the host still
+// serving the other one holds a majority and never yields, so the room never
+// pays for an outage that could not have helped.
+func (m *Machine) mayYield(peers int) bool {
+	if peers < 0 {
+		peers = 0
+	}
+	return 2*peers < m.fleet-1
+}
+
+// healDelay is how long a short-fleet host waits before yielding. It backs off
+// on every fruitless attempt, so a peer that is simply switched off costs a
+// few brief interruptions rather than one every HealAfter forever, and carries
+// the unit's stagger offset so two hosts never yield in lockstep.
 func (m *Machine) healDelay() time.Duration {
 	mult := 1
 	for i := 0; i < m.healAttempt; i++ {
@@ -300,6 +326,12 @@ func (m *Machine) Step(o Observation) Action {
 		if m.fleet <= 1 || o.Peers >= m.fleet-1 {
 			m.shortSince = time.Time{}
 			m.healAttempt = 0
+			return ActionNone
+		}
+		// Short, but still serving most of the fleet: this network is the
+		// one worth keeping, whoever else may be beaconing.
+		if !m.mayYield(o.Peers) {
+			m.shortSince = time.Time{}
 			return ActionNone
 		}
 		if m.shortSince.IsZero() {

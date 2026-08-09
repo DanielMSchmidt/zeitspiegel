@@ -342,6 +342,45 @@ func demoteAndComeBack(t *testing.T, m *netrole.Machine, clk *synth.FakeClock) t
 	return 0
 }
 
+// UT-19: a host still serving most of its fleet never yields, however long it
+// runs short. Yielding is decided by majority rather than by whichever host
+// runs out of patience first, because those two timers start at unrelated
+// moments — a host that had been short for a while could otherwise yield
+// ahead of a genuinely stranded one and drop a working network for nothing.
+//
+// In a fleet of three this is also the "one unit is switched off" case: the
+// host serving the remaining mirror holds a majority, so the room never pays
+// for an outage that could not have helped.
+func TestHostServingAMajorityNeverYields(t *testing.T) {
+	m, clk := newMachine(t, "a1", 3)
+	m.Step(netrole.Observation{})
+	clk.Advance(m.StaggerDelay() + time.Second)
+	m.Step(netrole.Observation{})
+
+	// One of two expected members is gone: short, but still a majority.
+	for i := 0; i < 400; i++ {
+		if got := m.Step(netrole.Observation{Peers: 1}); got != netrole.ActionNone {
+			t.Fatalf("step %d = %v, want %v — a majority host must hold its network", i, got, netrole.ActionNone)
+		}
+		clk.Advance(10 * time.Second)
+	}
+	if m.Role() != netrole.RolePrimary {
+		t.Fatalf("role = %v, want primary", m.Role())
+	}
+
+	// Lose the last one too and it becomes a minority, so it may yield.
+	deadline := 0
+	for ; deadline < 400; deadline++ {
+		if m.Step(netrole.Observation{Peers: 0}) == netrole.ActionDemote {
+			break
+		}
+		clk.Advance(10 * time.Second)
+	}
+	if deadline == 400 {
+		t.Fatal("a host serving nobody never yielded")
+	}
+}
+
 // UT-19: after demoting, a primary that finds another network joins it —
 // this is the step that actually collapses a split brain back to one AP.
 func TestDemotedPrimaryJoinsTheOtherNetwork(t *testing.T) {

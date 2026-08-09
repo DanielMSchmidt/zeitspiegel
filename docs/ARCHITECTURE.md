@@ -91,6 +91,20 @@ a few brief interruptions rather than one every 90 s forever. A refused scan is
 never read as "nobody is out there" — that is exactly how a split brain gets
 made.
 
+**Only a host serving a minority of the fleet may yield** (`2·peers < fleet−1`).
+This is what makes it comparable to a lease system: membership *is* leased
+(members renew every 10 s, entries expire after 30 s), but leadership cannot
+be, because there is no arbiter — nothing can fence a stale host, which is why
+the recovery has to be a *self*-heal. Deciding who yields by majority rather
+than by whichever host's timer expires first matters because those timers start
+at unrelated moments: a host that had already been short for a while could
+otherwise yield ahead of a genuinely stranded one and drop a working network
+for nothing. A majority is a predicate, not a race, so it cannot be lost to a
+head start. For two or three units this always converges — the split is 0+0 or
+1+0 members, so someone is in the minority. It also means the common "one unit
+is switched off" case costs no interruption at all: the host still serving the
+other mirror holds a majority and never yields.
+
 Promotion generalises "the second one takes over" to "the lowest surviving id
 goes first, at position × PromoteStep", so the fleet cannot deadlock waiting
 for a designated successor that is also dead. A returning ex-host never
