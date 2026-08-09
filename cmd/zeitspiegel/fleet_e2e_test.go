@@ -80,6 +80,7 @@ type unit struct {
 	base    string
 	air     string
 	logPath string
+	size    int // fleet_size this unit is configured with
 	cmd     *exec.Cmd
 	log     *os.File
 }
@@ -96,10 +97,16 @@ func freeTCPPort(t *testing.T) int {
 
 // startUnit launches one real appliance and waits for it to serve.
 func startUnit(t *testing.T, id, name, air string) *unit {
+	return startUnitOfSize(t, id, name, air, fleetSize)
+}
+
+// startUnitOfSize is startUnit with an explicit fleet_size, so the
+// single-appliance case can be exercised through the same harness.
+func startUnitOfSize(t *testing.T, id, name, air string, size int) *unit {
 	t.Helper()
 	// t.TempDir() mints a fresh directory on every call, so the log path is
 	// fixed once here — a restarted unit must append to the same file.
-	u := &unit{t: t, id: id, name: name, port: freeTCPPort(t), air: air,
+	u := &unit{t: t, id: id, name: name, port: freeTCPPort(t), air: air, size: size,
 		logPath: filepath.Join(t.TempDir(), id+".log")}
 	u.base = fmt.Sprintf("http://127.0.0.1:%d", u.port)
 	u.start()
@@ -120,7 +127,7 @@ func (u *unit) start() {
 		"--bind", fmt.Sprintf("127.0.0.1:%d", u.port),
 		"--unit-id", u.id,
 		"--unit-name", u.name,
-		"--fleet-size", fmt.Sprint(fleetSize),
+		"--fleet-size", fmt.Sprint(u.size),
 		"--net-sim", u.air,
 		"--net-scale", fmt.Sprint(netScale),
 	)
@@ -328,6 +335,66 @@ func startFleet(t *testing.T, n int) ([]*unit, string) {
 		units = append(units, startUnit(t, fmt.Sprintf("unit-%d", i+1), names[i%len(names)], air))
 	}
 	return units, air
+}
+
+// beaconing reports the unit ids currently hosting a network in this
+// airspace, ignoring beacons that have gone stale because their process died.
+func beaconing(t *testing.T, air string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(air)
+	if err != nil {
+		t.Fatalf("read airspace: %v", err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".ap") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) > 2*time.Second {
+			continue
+		}
+		out = append(out, strings.TrimSuffix(e.Name(), ".ap"))
+	}
+	return out
+}
+
+// ST-7: a lone appliance still brings its own network up. Both NetworkManager
+// profiles ship with autoconnect=false so they cannot race the election, which
+// makes the binary the only thing that ever hosts a network — including when
+// there is no fleet at all. Skipping the election for fleet_size 1 would leave
+// a single appliance with no Wi-Fi and no way in.
+func TestLoneUnitStillHostsItsOwnNetwork(t *testing.T) {
+	air := filepath.Join(t.TempDir(), "air")
+	if err := os.MkdirAll(air, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	u := startUnitOfSize(t, "solo", "Solo", air, 1)
+
+	deadline := time.Now().Add(settleFor)
+	for {
+		if hosts := beaconing(t, air); len(hosts) == 1 && hosts[0] == "solo" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("lone unit never brought its network up; log:\n%s", u.tail())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	st := u.mustStatus()
+	if st.Role != "primary" || st.FleetSize != 1 {
+		t.Fatalf("lone unit reports %+v, want primary in a fleet of 1", st)
+	}
+	// And it serves no fleet API: there is no fleet to describe.
+	resp, err := http.Get(u.base + "/api/v1/peers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 404 {
+		t.Errorf("GET /api/v1/peers on a lone unit = %d, want 404", resp.StatusCode)
+	}
 }
 
 // --- ST-7 --------------------------------------------------------------------

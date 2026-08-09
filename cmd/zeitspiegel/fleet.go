@@ -72,30 +72,35 @@ func newFleetRuntime(cfg config.Config, opts fleetOptions, logger *slog.Logger) 
 	f.role.Store(netrole.RolePrimary.String())
 	logger.Info("unit identity", "unit_id", unit.ID, "name", unit.Name, "fleet_size", size)
 
-	if size <= 1 {
-		return f, nil
-	}
-
 	scale := opts.NetScale
 	if scale < 1 {
 		scale = 1
 	}
 	announceEvery := scaleDuration(peers.DefaultInterval, scale, 100*time.Millisecond)
-	// Three missed heartbeats before a unit is considered gone: one lost
-	// packet must never drop a card off the page.
-	f.registry = peers.NewRegistry(unit.ID, 3*announceEvery, sysClock{})
+	if size > 1 {
+		// Three missed heartbeats before a unit is considered gone: one lost
+		// packet must never drop a card off the page. A lone appliance keeps
+		// no membership list at all, so it serves no fleet API either.
+		f.registry = peers.NewRegistry(unit.ID, 3*announceEvery, sysClock{})
+	}
 
 	radio, err := f.newRadio(cfg, opts)
 	if err != nil {
 		return nil, err
 	}
 	if radio == nil {
-		// A fleet was configured but nothing can drive the radio (a dev box
-		// without --net-sim). Still serve the peer API so a unit pointed at
-		// this one can register.
-		logger.Info("fleet configured but the radio is not managed; no role election will run")
+		// Nothing can drive the radio here (a dev box, or `make run-synth`).
+		// With a fleet configured, still serve the peer API so a unit pointed
+		// at this one can register.
+		logger.Info("radio not managed; no role election will run")
 		return f, nil
 	}
+	// The supervisor runs even for a fleet of one. Both NetworkManager
+	// profiles ship with autoconnect=false so they cannot race the election
+	// (E-8), which means the binary is now the only thing that ever brings a
+	// network up — a lone appliance included. netrole with fleet_size 1
+	// claims the AP immediately and never self-heals, so the behaviour is
+	// exactly E-7's.
 
 	machine := netrole.New(unit.ID, size, scaledTimings(scale), sysClock{})
 	port, err := bindPort(cfg.Bind)

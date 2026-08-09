@@ -99,7 +99,7 @@ because it exercises the whole thing through real processes.
 | ST-4 | Load: export loop + preview client ⇒ NFR-3/4 held: `zeitspiegel_render.render_over_budget/ticks < 1 %`, `tick_overruns ≈ 0`, `miss_too_early = miss_empty = 0`, `held_streak_max ≤ 2` |
 | ST-5 | systemd kill -9 ⇒ restart, /healthz green < 10 s |
 | ST-6 | Power cycle mid-operation ⇒ clean boot to mirror, FS intact (NFR-9, FR-12) |
-| ST-7 | Three **real binaries** cold-start over a virtual airspace ⇒ exactly one reports `role=primary`, the other two register, and the host lists both with the right names and connection-derived addresses |
+| ST-7 | Three **real binaries** cold-start over a virtual airspace ⇒ exactly one reports `role=primary`, the other two register, and the host lists both with the right names and connection-derived addresses. Also: a **lone** unit (`fleet_size = 1`) still brings its own network up and serves no fleet API — since both Wi-Fi profiles ship with `autoconnect=false`, the binary is the only thing that ever hosts a network, and skipping the election for a fleet of one would leave a single appliance with no Wi-Fi at all |
 | ST-8 | Three independent delays end to end: each unit's slider driven through the address the host handed out, and moving one leaves the others alone (FR-14) |
 | ST-9 | SIGKILL the host process (its beacon stops being refreshed, exactly as pulling a plug) ⇒ one survivor promotes and the other rejoins it |
 | ST-10 | Restart the ex-host ⇒ it rejoins as a member; the fleet is sampled throughout, so a moment with two hosts fails the test even if the end state looks right |

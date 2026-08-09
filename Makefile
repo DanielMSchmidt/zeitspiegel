@@ -15,7 +15,7 @@ test-integration:
 # ffmpeg, no radios and no root, so it runs on a laptop.
 test-e2e:
 	$(GO) vet -tags e2e ./...
-	$(GO) test -race -tags e2e -run TestFleet ./cmd/zeitspiegel/
+	$(GO) test -race -tags e2e -run 'TestFleet|TestLoneUnit' ./cmd/zeitspiegel/
 
 # Linux only: needs SDL2/SDL2_image headers, V4L2 kernel headers, v4l2loopback for ST-1.
 test-hw:
