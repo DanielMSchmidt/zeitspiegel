@@ -11,6 +11,15 @@
 set -euo pipefail
 
 : "${AP_SSID:?}" "${ADMIN_HASH:?}" "${WIFI_COUNTRY:?}"
+# How many appliances share this network (E-8). Identical on every card: the
+# role is elected at boot, not baked, so one image serves the whole
+# installation. 1 keeps the classic single-appliance behaviour.
+FLEET_SIZE="${FLEET_SIZE:-1}"
+# 2.4 GHz channel 6 by default for maximum device compatibility. With several
+# units in one room, band=a on a non-DFS channel (36) gives clip downloads a
+# lot more headroom -- worth measuring on site before switching.
+AP_BAND="${AP_BAND:-bg}"
+AP_CHANNEL="${AP_CHANNEL:-6}"
 GROW_MB="${GROW_MB:-1500}"
 SRC_XZ=/work/raspios.img.xz
 OUT=/work/zeitspiegel-appliance.img
@@ -75,6 +84,11 @@ chroot "$ROOT" apt-get install -y -qq ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 \
 echo "==> install zeitspiegel binary / config / unit"
 install -D -m0755 "$PAYLOAD/zeitspiegel"          "$ROOT/usr/local/bin/zeitspiegel"
 install -D -m0644 "$PAYLOAD/config.toml"          "$ROOT/etc/zeitspiegel/config.toml"
+# The one value that differs between installations, and it is the same on
+# every card of a given one (E-8).
+sed -i "s/^fleet_size = .*/fleet_size = ${FLEET_SIZE}/" "$ROOT/etc/zeitspiegel/config.toml"
+grep -q "^fleet_size = ${FLEET_SIZE}\$" "$ROOT/etc/zeitspiegel/config.toml" \
+    || { echo "error: fleet_size not set in config.toml" >&2; exit 1; }
 install -D -m0644 "$PAYLOAD/zeitspiegel.service"  "$ROOT/etc/systemd/system/zeitspiegel.service"
 install -D -m0755 "$PAYLOAD/seal.sh"              "$ROOT/usr/local/sbin/zeitspiegel-seal"
 install -D -m0644 "$PAYLOAD/zeitspiegel-seal.service" "$ROOT/etc/systemd/system/zeitspiegel-seal.service"
@@ -112,6 +126,11 @@ for u in zeitspiegel-debug-pre-rfkill zeitspiegel-debug-post-rfkill zeitspiegel-
 done
 
 echo "==> hostname + mDNS (zeitspiegel.local)"
+# The baked name is what a lone appliance keeps, and what every unit answers
+# to for the few seconds before it knows its role. Once elected, the unit
+# hosting the network keeps "zeitspiegel" and the others rename themselves to
+# zeitspiegel-<unit id> so mDNS does not collide -- transiently, because
+# /etc/hostname is read-only once the overlay is sealed.
 echo zeitspiegel > "$ROOT/etc/hostname"
 sed -i 's/127\.0\.1\.1.*/127.0.1.1\tzeitspiegel/' "$ROOT/etc/hosts" 2>/dev/null \
     || printf '127.0.1.1\tzeitspiegel\n' >> "$ROOT/etc/hosts"
@@ -159,20 +178,24 @@ enabled=false
 NMCONF
 chmod 0644 "$ROOT/etc/NetworkManager/conf.d/00-zeitspiegel.conf"
 
-echo "==> Wi-Fi access point profile (open network, NetworkManager keyfile)"
+echo "==> Wi-Fi profiles: host the network, or join it (open, NetworkManager keyfiles)"
+# Both profiles have autoconnect=false on purpose. The appliance elects its
+# own role at boot -- host the shared network or join it (E-8, FR-15) -- and
+# activates whichever profile it decided on. Letting NetworkManager
+# autoconnect as well would race that decision, and a unit that lost the race
+# would come up beaconing a network somebody else is already hosting.
 install -d -m0700 "$ROOT/etc/NetworkManager/system-connections"
 cat > "$ROOT/etc/NetworkManager/system-connections/zeitspiegel-ap.nmconnection" <<EOF
 [connection]
 id=zeitspiegel-ap
 type=wifi
 interface-name=wlan0
-autoconnect=true
-autoconnect-priority=100
+autoconnect=false
 
 [wifi]
 mode=ap
-band=bg
-channel=6
+band=${AP_BAND}
+channel=${AP_CHANNEL}
 ssid=${AP_SSID}
 
 [ipv4]
@@ -182,6 +205,30 @@ method=shared
 method=disabled
 EOF
 chmod 600 "$ROOT/etc/NetworkManager/system-connections/zeitspiegel-ap.nmconnection"
+
+# Station profile: join the network somebody else is already hosting.
+# An OPEN network gets no [wifi-security] section at all -- that is what
+# nmcli writes for one. key-mgmt=none is the ambiguous spelling
+# NetworkManager documents as "WEP or no password protection", and using it
+# here makes the association fail in a way that is tedious to diagnose.
+cat > "$ROOT/etc/NetworkManager/system-connections/zeitspiegel-sta.nmconnection" <<EOF
+[connection]
+id=zeitspiegel-sta
+type=wifi
+interface-name=wlan0
+autoconnect=false
+
+[wifi]
+mode=infrastructure
+ssid=${AP_SSID}
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=disabled
+EOF
+chmod 600 "$ROOT/etc/NetworkManager/system-connections/zeitspiegel-sta.nmconnection"
 
 # Primary evidence from the previous bake's zeitspiegel-debug.log: Pi OS
 # Lite Trixie on Pi 5 has TWO independent gates blocking the AP, both

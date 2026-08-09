@@ -13,7 +13,23 @@ Insert the micro-SD into your computer, then:
 ```
 make sd                      # auto-detects the card, asks before erasing
 SSID=studio-mirror make sd   # choose the Wi-Fi network name
+FLEET_SIZE=3 make sd         # several mirrors sharing one network (E-8)
 ```
+
+**Several mirrors?** Bake **once** with `FLEET_SIZE` set to how many you have,
+then write that same image to every card — the role is elected at boot, not
+baked, so there is no per-card build and no "first" card. Whichever unit is on
+first hosts the network; the rest join it. Power-on order does not matter.
+
+To give a unit a human name, plug its card into any computer afterwards and
+write one line into `zeitspiegel-name.txt` on the FAT32 `bootfs` partition:
+
+```
+echo "Barre" > /Volumes/bootfs/zeitspiegel-name.txt
+```
+
+Unnamed units call themselves `Zeitspiegel <ID>` after their CPU serial. The
+image stays byte-identical either way.
 
 This downloads Pi OS Lite (cached under `build/cache/`), cross-builds the Pi
 binary, and **bakes a finished image** — ffmpeg/SDL2 packages, the binary,
@@ -88,6 +104,11 @@ sudo raspi-config nonint enable_overlayfs && sudo reboot
 
 To rename the Wi-Fi: unseal, `SSID=new-name sudo -E ./setup.sh`, re-seal.
 Easier: just re-bake the card with `SSID=new-name make sd`.
+
+Renaming a *mirror* needs none of that: the display name is read from
+`zeitspiegel-name.txt` on the FAT32 `bootfs` partition, which stays writable
+while the root overlay is sealed. Pull the card, edit the file on any
+computer, put it back.
 
 ## 6. Troubleshooting
 

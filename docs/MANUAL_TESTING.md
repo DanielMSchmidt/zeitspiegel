@@ -94,3 +94,26 @@ then run the same checklist against `http://zeitspiegel.local`
   NFR-9).
 - MT-10: unplug the camera USB mid-run → status degraded, /healthz 503;
   replug → picture returns without restart (NFR-5).
+
+### Several mirrors (E-8, needs 2–3 units)
+
+Bake once with `FLEET_SIZE=3 make sd` and write that same image to every
+card; optionally name two of them via `zeitspiegel-name.txt` on the FAT32
+`bootfs` partition. Then, with all of them on one power strip:
+
+- MT-12: power everything on at once → after ~30 s exactly one unit is
+  hosting; `http://zeitspiegel.local` lists all of them. Set three different
+  delays and confirm each screen shows its own — this is the whole point
+  (FR-14). Also check a clip downloads from a member's card.
+- MT-13: pull the hosting unit's plug → **every remaining screen keeps
+  mirroring without a flicker** (the mirror never waits on the network), and
+  within roughly 20–45 s one survivor is hosting and the page works again.
+  Record the real number in DEPLOYMENT.md.
+- MT-14: plug the old host back in → it rejoins as an ordinary member and the
+  network does **not** change hands again. Watch for a minute: a second
+  outage here would mean it preempted.
+- MT-15: before trusting any of the above, check the premise the combined
+  page rests on — from a laptop joined to the network, `curl
+  http://10.42.0.x/healthz` against a *member's* address. If clients cannot
+  reach each other, the cards for other mirrors will show Offline even though
+  the units are fine.

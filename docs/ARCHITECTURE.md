@@ -72,6 +72,45 @@ streamed straight to the client (never written to storage), volatile journal
 logs → pulling the plug is the supported off switch. Discovery via Avahi/mDNS (`zeitspiegel.local`). Details in
 docs/DEPLOYMENT.md.
 
+### D8 — Elected roles, not baked ones (multi-unit)
+Two or three appliances in one room have to share a network, and per-card
+configuration is what makes an installation tedious to operate. So every card
+carries the identical image and the role is decided at runtime: a unit scans
+for the shared SSID and joins it, or hosts it if nobody does (E-8). There is
+only ever one SSID and NetworkManager's shared mode always takes `10.42.0.1`,
+so the poster and `zeitspiegel.local` survive a failover.
+
+The shape of the solution is forced by one hardware fact: **a Wi-Fi radio in AP
+mode cannot scan.** A host can therefore never observe a second host beaconing
+the same SSID, so a split brain is undetectable by observation. Two mechanisms
+cover it instead — an id-derived stagger that makes a simultaneous claim
+unlikely, and a blind self-heal: a host that has stayed short of `fleet_size`
+demotes, looks around, and either joins what it finds or comes back up. Each
+fruitless heal doubles the next wait, so a legitimately switched-off peer costs
+a few brief interruptions rather than one every 90 s forever. A refused scan is
+never read as "nobody is out there" — that is exactly how a split brain gets
+made.
+
+Promotion generalises "the second one takes over" to "the lowest surviving id
+goes first, at position × PromoteStep", so the fleet cannot deadlock waiting
+for a designated successor that is also dead. A returning ex-host never
+preempts: a handback would cost the room a second outage for nothing.
+
+The decision logic is pure (`internal/netrole`: injected clock, no I/O) and the
+radio sits behind an interface (`internal/fleet`), so cold start, failover and
+split-brain recovery are all testable with no radios and no root. The nmcli
+adapter is a subprocess for the same reasons ffmpeg is (hard rule 7). Both
+NetworkManager profiles are baked with `autoconnect=false` so the binary, not
+NetworkManager, decides which is up — and nothing has to be written to the
+read-only root at runtime.
+
+Membership (`internal/peers`) lives only in RAM on the hosting unit. Members
+announce to their default gateway — the host, by construction — carrying no
+address of their own; the host fills it in from the connection. That is what
+lets a member ship with nothing about the network configured. The combined page
+then calls each unit directly rather than being proxied through the host, which
+keeps a clip download off a second wireless hop.
+
 ## 3. Components
 
 ```
@@ -120,7 +159,15 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   child is reniced (+10) so x264 on the Pi's four cores cannot starve the
   render loop's tick budget.
 - **HTTP layer** (`internal/httpapi`): stdlib ServeMux patterns; handlers
-  depend on small interfaces (StatusProvider, DelaySetter, ClipExporter).
+  depend on small interfaces (StatusProvider, DelaySetter, ClipExporter,
+  PeerStore).
+- **Fleet** (`internal/netrole` + `internal/fleet` + `internal/peers` +
+  `internal/identity`, D8): the election state machine, the supervisor that
+  drives it against a radio, the in-RAM membership list, and the unit's
+  identity (CPU serial for the id, boot-partition file for the name). None of
+  it touches the display path — a unit that cannot sort out its place on the
+  network still mirrors perfectly, since `zeitspiegel.service` is ordered
+  after `local-fs.target` only and never waits on the network.
 
 ## 4. Concurrency model
 

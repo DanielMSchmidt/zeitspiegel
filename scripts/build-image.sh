@@ -23,9 +23,16 @@ command -v docker >/dev/null || die "docker not found"
 command -v xz >/dev/null || die "xz not found — brew install xz"
 [[ -f bin/zeitspiegel-pi ]] || die "bin/zeitspiegel-pi missing — run 'make pi-binary' (make image does this for you)"
 
-AP_SSID="${AP_SSID:-zeitspiegel}"          # open Wi-Fi network (no password, E-7)
+# SSID is the documented spelling; AP_SSID is kept for older scripts.
+AP_SSID="${SSID:-${AP_SSID:-zeitspiegel}}" # open Wi-Fi network (no password, E-7)
 ADMIN_PASS="${ADMIN_PASS:-$(randpw)}"      # local-console login (SSH is off by default)
 WIFI_COUNTRY="${WIFI_COUNTRY:-DE}"
+# How many appliances share this network (E-8). The image is identical on
+# every card — the role is elected at boot, not baked — so this is the same
+# number on all of them. 1 keeps the classic single-appliance behaviour.
+FLEET_SIZE="${FLEET_SIZE:-1}"
+[[ "$FLEET_SIZE" =~ ^[0-9]+$ ]] && (( FLEET_SIZE >= 1 && FLEET_SIZE <= 16 )) \
+    || die "FLEET_SIZE must be a whole number between 1 and 16 (got '$FLEET_SIZE')"
 IMG_URL="${IMG_URL:-https://downloads.raspberrypi.com/raspios_lite_arm64_latest}"
 
 mkdir -p build/cache build/payload
@@ -66,7 +73,7 @@ ADMIN_HASH=$(docker run --rm golang:1.25-trixie openssl passwd -6 "$ADMIN_PASS")
 echo "==> baking image (privileged linux/arm64 container) ..."
 docker run --rm --privileged --platform linux/arm64 \
     -v "$PWD/build":/work -v "$PWD/deploy":/deploy:ro \
-    -e AP_SSID="$AP_SSID" \
+    -e AP_SSID="$AP_SSID" -e FLEET_SIZE="$FLEET_SIZE" \
     -e ADMIN_HASH="$ADMIN_HASH" -e WIFI_COUNTRY="$WIFI_COUNTRY" \
     golang:1.25-trixie bash /deploy/sd/bake.sh
 
@@ -74,6 +81,10 @@ cat > build/credentials.txt <<EOF
 Zeitspiegel appliance credentials
   Wi-Fi SSID:    $AP_SSID   (open network, no password)
   Mirror UI:     http://zeitspiegel.local   (or http://10.42.0.1)
+  Fleet size:    $FLEET_SIZE   (write this same image to all $FLEET_SIZE cards;
+                 whichever unit is on first hosts the network, the
+                 rest join it. Name a card by writing a line into
+                 zeitspiegel-name.txt on its bootfs partition.)
   Console login: zeitspiegel / $ADMIN_PASS
                  (HDMI + keyboard only — SSH is off by default.
                   sudo is passwordless. Escape hatch: touch ssh on
