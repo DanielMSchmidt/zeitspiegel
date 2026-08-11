@@ -42,7 +42,7 @@ SSID = os.environ.get("SSID", "zeitspiegel")
 DELAY = os.environ.get("DELAY", "15")
 
 # German leads, English follows. Every key must exist in both languages and
-# be rendered on the poster — UT-26 asserts both.
+# be rendered on the poster — UT-28 asserts both.
 STRINGS = {
     "de": {
         "subtitle": "DER TANZSPIEGEL MIT VERZÖGERUNG",
@@ -162,7 +162,7 @@ def extent(t):
 # --- document ---------------------------------------------------------------
 class Doc:
     """Collects SVG fragments plus a record of every text run and QR box, so
-    the layout can be asserted (UT-26) instead of eyeballed on a printout."""
+    the layout can be asserted (UT-28) instead of eyeballed on a printout."""
 
     def __init__(self):
         self.parts = []

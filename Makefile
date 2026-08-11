@@ -79,7 +79,7 @@ PYTHON ?= deploy/poster/.venv/bin/python
 poster:
 	$(PYTHON) deploy/poster/make-poster.py
 
-# UT-26: translations complete, nothing overflowing the page or the margins,
+# UT-28: translations complete, nothing overflowing the page or the margins,
 # both QR codes still encoding what their captions claim.
 poster-test:
 	$(PYTHON) -m unittest discover -s deploy/poster

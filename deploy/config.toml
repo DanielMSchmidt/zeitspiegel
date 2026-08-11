@@ -4,7 +4,7 @@
 
 bind = ":80"                      # web UI on plain http://zeitspiegel.local (NFR-6, LAN-only)
 source = "camera"                 # real capture; "synth" only for development
-device = "auto"                   # first node that streams (the Kiyo also exposes a metadata-only node)
+device = "auto"                   # first node that streams (UVC cameras also expose a metadata-only node)
 profile = "auto"                  # probe the camera's highest MJPEG mode, capped at 1080p (E-2 rev); or "720p60"/"1080p30"
 buffer_max_s = 60.0               # ring buffer length; delay in practice ≤ 30 s — a longer buffer only inflates heap + GC pauses
 buffer_max_bytes = 1073741824     # 1 GiB hard cap; bright-scene 1080p30 MJPEG can spike to ~15 MB/s ⇒ 60 s ≈ 900 MB worst case (§7)
@@ -19,8 +19,12 @@ default_delay_s = 15.0            # FR-3 boot delay; runtime slider overrides vi
 network_manage = true             # drive the radio: scan, then host or join the "zeitspiegel" network
 name_file = "/boot/firmware/zeitspiegel-name.txt"   # optional per-card display name; edit by plugging the card in
 
-# Camera controls (FR-9). The Kiyo hunts focus on movement; pin it.
-focus_auto = false                # disable continuous autofocus
-focus_absolute = 0                # TODO: set from spike S-2 measurement on real hardware
+# Camera controls (FR-9). An autofocus camera hunts on movement, so focus is
+# pinned here. On the recommended fixed-focus camera (E-9, docs/HARDWARE.md)
+# both focus keys are inert: the device implements no focus controls at all,
+# so they are skipped at open and named in the journal. That is expected — the
+# lens already sits at its hyperfocal distance, sharp from ~0.3 m to infinity.
+focus_auto = false                # disable continuous autofocus (autofocus cameras only)
+focus_absolute = 0                # autofocus cameras only: set from spike S-2 measurement on real hardware
 exposure_auto = true              # auto exposure is fine for v1
 exposure_absolute = 0             # only applies when exposure_auto = false

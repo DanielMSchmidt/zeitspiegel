@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -158,6 +159,15 @@ func run() error {
 			logger.Info("source opened",
 				"took", time.Since(t).Round(time.Millisecond),
 				"source", cfg.Source)
+			// Expected on a fixed-focus camera (E-9), which implements no
+			// focus controls at all — but a config key that silently had no
+			// effect must still be visible in the journal (NFR-8).
+			if s, ok := src.(interface{ SkippedControls() []string }); ok {
+				if names := s.SkippedControls(); len(names) > 0 {
+					logger.Info("camera controls not implemented by device, skipped",
+						"controls", strings.Join(names, ","))
+				}
+			}
 			return &restartable{Source: src, restart: restart}, nil
 		},
 		Push:    buf.Push,

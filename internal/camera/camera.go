@@ -22,15 +22,16 @@ import (
 
 // Camera implements capture.Source over a UVC device in native MJPEG (D2).
 type Camera struct {
-	dev    *device.Device
-	frames <-chan []byte
-	seq    uint64
+	dev     *device.Device
+	frames  <-chan []byte
+	seq     uint64
+	skipped []string
 }
 
 // Open configures and starts the device per the boot config (FR-9: pinned
 // focus / exposure to prevent hunting during movement). Device "auto" (or
 // empty) tries /dev/video* in order and takes the first node that opens,
-// configures and streams — UVC cameras like the Kiyo also enumerate a
+// configures and streams — UVC cameras commonly also enumerate a
 // metadata-only node that fails here and is skipped.
 func Open(ctx context.Context, cfg config.Config) (*Camera, error) {
 	if cfg.Device != "" && cfg.Device != "auto" {
@@ -74,7 +75,8 @@ func openDevice(ctx context.Context, cfg config.Config, path string) (*Camera, e
 	if err != nil {
 		return nil, fmt.Errorf("camera: open %s (%dx%d): %w", path, w, h, err)
 	}
-	if err := applyControls(dev, cfg); err != nil {
+	skipped, err := applyControls(dev, cfg)
+	if err != nil {
 		dev.Close()
 		return nil, err
 	}
@@ -82,7 +84,7 @@ func openDevice(ctx context.Context, cfg config.Config, path string) (*Camera, e
 		dev.Close()
 		return nil, fmt.Errorf("camera: start stream: %w", err)
 	}
-	return &Camera{dev: dev, frames: dev.GetOutput()}, nil
+	return &Camera{dev: dev, frames: dev.GetOutput(), skipped: skipped}, nil
 }
 
 // probeMaxMJPEG opens the node briefly and returns the largest discrete
@@ -113,41 +115,42 @@ func probeMaxMJPEG(path string) (w, h int, err error) {
 	return w, h, nil
 }
 
-// applyControls pins focus and exposure (FR-9; values from spike S-2).
-// UVC: exposure_auto menu is 1 = manual, 3 = aperture priority (auto).
-func applyControls(dev *device.Device, cfg config.Config) error {
-	set := func(id v4l2.CtrlID, val v4l2.CtrlValue, name string) error {
-		if err := v4l2.SetControlValue(dev.Fd(), id, val); err != nil {
-			return fmt.Errorf("camera: set %s=%d: %w", name, val, err)
-		}
-		return nil
-	}
-	focusAuto := v4l2.CtrlValue(0)
-	if cfg.FocusAuto {
-		focusAuto = 1
-	}
-	if err := set(v4l2.CtrlCameraFocusAuto, focusAuto, "focus_auto"); err != nil {
-		return err
-	}
-	if !cfg.FocusAuto {
-		if err := set(v4l2.CtrlCameraFocusAbsolute, v4l2.CtrlValue(cfg.FocusAbsolute), "focus_absolute"); err != nil {
-			return err
-		}
-	}
-	expoAuto := v4l2.CtrlValue(1) // manual
-	if cfg.ExposureAuto {
-		expoAuto = 3 // aperture priority
-	}
-	if err := set(v4l2.CtrlCameraExposureAuto, expoAuto, "exposure_auto"); err != nil {
-		return err
-	}
-	if !cfg.ExposureAuto {
-		if err := set(v4l2.CtrlCameraExposureAbsolute, v4l2.CtrlValue(cfg.ExposureAbsolute), "exposure_absolute"); err != nil {
-			return err
-		}
-	}
-	return nil
+// ctrlIDs maps the config-facing control names (controls.go) to their V4L2 ids.
+var ctrlIDs = map[string]v4l2.CtrlID{
+	ctrlFocusAuto:        v4l2.CtrlCameraFocusAuto,
+	ctrlFocusAbsolute:    v4l2.CtrlCameraFocusAbsolute,
+	ctrlExposureAuto:     v4l2.CtrlCameraExposureAuto,
+	ctrlExposureAbsolute: v4l2.CtrlCameraExposureAbsolute,
 }
+
+// applyControls pins focus and exposure (FR-9; values from spike S-2) and
+// returns the controls the device does not implement. Fixed-focus cameras —
+// the class the appliance is built around (E-9) — expose no focus controls at
+// all, so a missing control is skipped rather than fatal; see applyPlan.
+func applyControls(dev *device.Device, cfg config.Config) ([]string, error) {
+	return applyPlan(plannedControls(cfg), func(c control) error {
+		id, ok := ctrlIDs[c.Name]
+		if !ok {
+			return fmt.Errorf("unknown control %q", c.Name)
+		}
+		err := v4l2.SetControlValue(dev.Fd(), id, v4l2.CtrlValue(c.Value))
+		// go4vl discards the errno and reports its own values: an
+		// unimplemented control id fails VIDIOC_QUERYCTRL with EINVAL
+		// (ErrorBadArgument), a device with no control interface at all
+		// answers ENOTTY (ErrorUnsupported). An out-of-range value is a
+		// distinct, unwrapped go4vl error and correctly stays fatal.
+		if err != nil && (errors.Is(err, v4l2.ErrorBadArgument) || errors.Is(err, v4l2.ErrorUnsupported)) {
+			return fmt.Errorf("%w: %v", errUnsupportedControl, err)
+		}
+		return err
+	})
+}
+
+// SkippedControls returns the configured controls this device does not
+// implement, in application order. Empty on a camera that supports them all.
+// Reported at startup so a control silently dropped from the config stays
+// visible (NFR-8), and recorded by spike S-2.
+func (c *Camera) SkippedControls() []string { return c.skipped }
 
 // ReadFrame returns the next MJPEG frame, stamped with the wall clock
 // (allowed here: hardware adapter, hard rule 6). The payload is copied out

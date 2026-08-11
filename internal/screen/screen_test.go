@@ -96,6 +96,43 @@ func TestRenderWithDelayBadge(t *testing.T) {
 	}
 }
 
+// UT-27 (sdl side): the render path survives frames whose aspect ratio does
+// not match the panel — the dummy window is 4:3, so these letterbox and
+// pillarbox rather than stretch (FR-16). Geometry itself is covered by the
+// tag-free fitRect table; this proves the SDL destination rect is accepted.
+func TestRenderMismatchedAspect(t *testing.T) {
+	s := openDummy(t) // 320x240, i.e. 4:3
+	cases := []struct {
+		name string
+		w, h int
+	}{
+		{"16:9 letterboxes", 640, 360},
+		{"portrait pillarboxes", 480, 640},
+		{"square pillarboxes", 512, 512},
+		{"matching 4:3 fills", 640, 480},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := frame.Frame{Seq: uint64(200 + i), JPEG: encodeJPEG(t, tc.w, tc.h)}
+			if err := s.Render(f); err != nil {
+				t.Fatalf("render %dx%d: %v", tc.w, tc.h, err)
+			}
+			s.SetMirror(i%2 == 0) // flip inside the fitted rect must also hold
+			if err := s.Render(f); err != nil {
+				t.Fatalf("render %dx%d mirrored: %v", tc.w, tc.h, err)
+			}
+		})
+	}
+	// Splash paints its own backdrop colour; a frame after it must still come
+	// back with black bars rather than inheriting that colour.
+	if err := s.Splash(); err != nil {
+		t.Fatalf("splash: %v", err)
+	}
+	if err := s.Render(frame.Frame{Seq: 300, JPEG: encodeJPEG(t, 640, 360)}); err != nil {
+		t.Fatalf("render after splash: %v", err)
+	}
+}
+
 // encodeJPEG produces a solid-colour JPEG at the given size (stdlib only).
 func encodeJPEG(t *testing.T, w, h int) []byte {
 	t.Helper()

@@ -29,7 +29,8 @@ frame-accurate export are trivial, and no live encoder is needed.
 
 ## Target hardware
 
-Raspberry Pi 5 (4/8 GB) + Razer Kiyo (USB, native MJPEG, 720p60 default) +
+Raspberry Pi 5 (4/8 GB) + a wide-angle fixed-focus UVC webcam (native MJPEG,
+1080p30; see [docs/HARDWARE.md](docs/HARDWARE.md) for how to pick one) +
 any HDMI display. Runs as an unattended appliance: power on → mirror in ~20 s.
 The appliance hosts its own Wi-Fi (SSID `zeitspiegel`): join it and open
 `http://zeitspiegel.local` — no venue network needed. Power-off = pull the

@@ -55,7 +55,7 @@ first); `make sd` runs that, then writes the card.
 
 ## 2. First boot (no network needed)
 
-Put the card in the Pi, attach HDMI + Kiyo + the official 5 V/5 A PSU, power
+Put the card in the Pi, attach HDMI + the camera + the official 5 V/5 A PSU, power
 on, and wait (~3 minutes: the Pi resizes its filesystem, creates the user,
 brings up its access point, seals the read-only overlay, and reboots a
 couple of times — no interaction, no cable).
