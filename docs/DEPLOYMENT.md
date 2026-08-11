@@ -50,6 +50,20 @@ to every card you own now, and to every card you buy later.
 - There is only ever **one** SSID; whoever hosts it takes `10.42.0.1` and
   answers to `zeitspiegel.local`, so the printed poster and QR codes stay
   valid across every failover. Members answer to `zeitspiegel-<unit id>.local`.
+  The rename is done live via `avahi-set-host-name` on every role change —
+  Avahi does not follow kernel hostname changes, so without it
+  `zeitspiegel.local` would stay stuck on whichever unit won the boot-time
+  name race and go dark when the host changes.
+- **Client ceiling:** the Pi's built-in radio serves at most **~8 associated
+  stations** in AP mode (a brcmfmac firmware memory limit — Pi 4-class
+  hardware measures 7, and it is not tunable). Member units count against
+  it, so a 3-mirror fleet leaves roughly **5 phone slots**. That fits the
+  intended use — one person per mirror adjusting its delay — comfortably; a
+  whole class connecting phones simultaneously will find later phones simply
+  fail to associate, silently. If that day comes, the escalation paths are
+  the `cyfmac43455-sdio-minimal.bin` firmware variant (reported ~19 clients,
+  feature-stripped, unvalidated) or a dedicated router — measure before
+  trusting either.
 - `http://zeitspiegel.local` shows a card per mirror — its own delay slider
   and download button each. Delays are fully independent; the page talks to
   each unit directly, so a clip download never relays through the host.
@@ -72,7 +86,10 @@ to every card you own now, and to every card you buy later.
   laptop). The combined page rests on that.
 - Radio: all units share one channel; `AP_BAND=a AP_CHANNEL=36 make sd`
   (non-DFS 5 GHz) gives clip downloads far more headroom in one room;
-  `bg`/6 stays the compatibility default.
+  `bg`/6 stays the compatibility default. The station profile ships with
+  Wi-Fi powersave disabled (`powersave=2`) — Pi OS's default powersave is a
+  documented source of latency and dropped links on units that serve HTTP,
+  and these are on wall power.
 - Election observability: `curl -s zeitspiegel.local/debug/vars` →
   `zeitspiegel_fleet` (`role`, `role_changes`, `heal_probes`,
   `announce_failures`, `peers`); role transitions are also in the journal.

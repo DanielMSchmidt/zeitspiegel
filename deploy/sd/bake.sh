@@ -72,10 +72,14 @@ rm -f "$ROOT/etc/resolv.conf"; echo "nameserver 1.1.1.1" > "$ROOT/etc/resolv.con
 echo "==> install runtime packages into the image"
 chroot "$ROOT" apt-get update -qq
 chroot "$ROOT" apt-get install -y -qq ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 \
-    network-manager dnsmasq-base iptables rfkill iw >/dev/null
+    network-manager dnsmasq-base iptables rfkill iw avahi-utils >/dev/null
 # dnsmasq-base + iptables: required by NM's `ipv4.method=shared` AP profile
 # (DHCP to clients + NAT rules). rfkill + iw: lightweight tools for in-place
-# debugging when the appliance won't broadcast.
+# debugging when the appliance won't broadcast, and `iw station dump` is how
+# a host counts its audience (D8). avahi-utils: avahi-set-host-name is the
+# only way to rename a running Avahi -- the daemon does not follow kernel
+# hostname changes, and without the rename zeitspiegel.local would not move
+# to the new host after a failover.
 
 echo "==> install zeitspiegel binary / config / unit"
 install -D -m0755 "$PAYLOAD/zeitspiegel"          "$ROOT/usr/local/bin/zeitspiegel"
@@ -212,6 +216,12 @@ autoconnect=false
 [wifi]
 mode=infrastructure
 ssid=${AP_SSID}
+# 2 = disable Wi-Fi powersave. Pi OS leaves it on by default, and a member
+# unit is an HTTP server on this link (1 Hz status polls from every open
+# page, whole clip downloads) -- the documented failure mode is added
+# latency and the link dropping offline after hours. Wall power, nothing
+# to save.
+powersave=2
 
 [ipv4]
 method=auto

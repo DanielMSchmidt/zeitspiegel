@@ -126,3 +126,9 @@ of them via `zeitspiegel-name.txt` on the FAT32 `bootfs` partition. Then:
   survivors' delays did not move. Replug the old unit: it must come back as a
   member card. Finally verify `iw dev wlan0 station dump` on the host (SSH
   escape hatch) counts an attached phone — the audience rule rests on it.
+  Two more checks while everything is set up: after the failover,
+  `http://zeitspiegel.local` must resolve to the **new** host (the live
+  Avahi rename — if it dead-ends, only `10.42.0.1` works and the poster URL
+  is broken); and connect phones one at a time until one fails to join, to
+  record the real client ceiling next to the ~8-station firmware limit in
+  DEPLOYMENT.md.

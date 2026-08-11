@@ -30,7 +30,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- runtime dependencies (libs only; the binary links SDL2 dynamically) ---
 apt-get update
-apt-get install -y ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0
+apt-get install -y ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 avahi-utils
 
 # For an on-device build instead, install the dev toolchain and run
 # `make build-pi` in the repo:
@@ -167,10 +167,13 @@ nmcli connection add type wifi ifname wlan0 con-name zeitspiegel-ap \
 # writes for one. key-mgmt=none is the ambiguous spelling NetworkManager
 # documents as "WEP or no password protection"; using it here makes the
 # association fail in a way that is tedious to diagnose.
+# powersave 2 = disable: a member unit is an HTTP server on this link, and
+# Pi OS's default powersave is a documented source of latency and dropped
+# links after hours.
 nmcli connection add type wifi ifname wlan0 con-name zeitspiegel-sta \
     autoconnect no \
     ssid "$AP_SSID" \
-    802-11-wireless.mode infrastructure \
+    802-11-wireless.mode infrastructure 802-11-wireless.powersave 2 \
     ipv4.method auto ipv6.method disabled
 echo "note: both Wi-Fi profiles are inactive by design — zeitspiegel brings one up once it has elected its role"
 

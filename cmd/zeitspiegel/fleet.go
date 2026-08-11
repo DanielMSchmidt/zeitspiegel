@@ -185,12 +185,26 @@ func (f *fleetRuntime) onRole(role netrole.Role) {
 		host = "zeitspiegel-" + f.unit.ID
 	}
 	// --transient is required: the persistent form writes /etc/hostname,
-	// which fails on the sealed read-only root. Avahi follows the transient
-	// hostname, which is all mDNS needs.
+	// which fails on the sealed read-only root.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if out, err := exec.CommandContext(ctx, "hostnamectl", "--transient", "set-hostname", host).CombinedOutput(); err != nil {
 		f.logger.Warn("set transient hostname", "host", host, "err", err, "output", string(out))
+	}
+
+	// Avahi does NOT follow kernel hostname changes: it picks its mDNS name
+	// at daemon startup, so without this call zeitspiegel.local would stay
+	// wherever the boot-time name race left it and go dark after a failover
+	// — the printed poster's URL, dead until a power cycle.
+	// avahi-set-host-name renames the running daemon live; that the rename
+	// does not persist across daemon restarts is exactly right on a
+	// read-only root, where the next boot re-elects anyway. Skip silently
+	// when the tool is absent (dev machines — avahi-utils is baked into the
+	// appliance image).
+	if _, err := exec.LookPath("avahi-set-host-name"); err == nil {
+		if out, err := exec.CommandContext(ctx, "avahi-set-host-name", host).CombinedOutput(); err != nil {
+			f.logger.Warn("set mDNS hostname", "host", host, "err", err, "output", string(out))
+		}
 	}
 }
 
