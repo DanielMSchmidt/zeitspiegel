@@ -111,43 +111,135 @@ disqualifying:
   firmware state was last saved, with no way to change it.
 
 Excluded by name: OBSBOT Meet series, Insta360 Link / Link 2C, Razer Kiyo V2,
-WyreStorm FOCUS 210, and anything advertising AI tracking or auto-framing.
+WyreStorm FOCUS 210, Logitech Brio 500 (its "Point Mode" is auto-framing),
+and anything advertising AI tracking or auto-framing.
 
 This is also why the **Razer Kiyo is no longer the reference camera** — it is
 discontinued, and its successor is exactly this class.
 
 ## 6. Shortlist
 
+Two form factors, and they fail in opposite directions.
+
+A **stock webcam** is a finished product: moulded body, hinged clip that sits on
+top of a TV, tripod thread, cable strain relief. A **camera module** is a bare
+PCB — you supply the housing, the mount and the strain relief. §6.1 covers the
+first, §6.2 the second.
+
+The trade-off is not cosmetic:
+
+|  | Stock webcam | Camera module |
+|---|---|---|
+| MJPEG at 1080p30 | effectively guaranteed¹ | must be checked per device |
+| dFOV | 78-120°, mostly 78-90° | 100-130°, freely chosen |
+| Sensor size | rarely published | published, and larger |
+| Focus | autofocus (drifts) or manual | fixed at hyperfocal — §3 |
+| Mounting on a TV | it is the product | your problem |
+| §5 "AI" risk | high, and rising | nil |
+
+¹ USB 2.0 carries 480 Mbit/s. Uncompressed 1080p30 YUYV needs ~995 Mbit/s. So
+any camera advertising **USB 2.0 and 1080p30 is compressing** — in practice
+MJPEG, since that is what UVC mandates. This is why the MJPEG column is a
+non-issue for §6.1 and the main risk for §6.2. It does not hold for USB 3.0
+cameras, which is one more reason to prefer USB 2.0 parts.
+
+**Owner preference: §6.1.** The mirror is a TV with a camera on top of it, and
+the overhead of housing and mounting a bare PCB is not wanted. §6.2 is kept
+because it is where the sensor quality and the FOV actually are — if §7 turns
+out to bite, that is where the answer lives.
+
 Ranked by how much of the above is *documented* rather than assumed. None is
-hardware-tested; ✅ means the manufacturer publishes it, ⚠️ means the claim
-comes from marketplace copy.
+hardware-tested. Confidence in the MJPEG column:
 
-| # | Camera | dFOV | Focus | Sensor | MJPEG 1080p30 | Where |
+- ✅✅ — a buyer reports the MJPEG mode working over V4L2 on Linux
+- ✅ — the manufacturer publishes it, or footnote ¹ forces it
+- ⚠️ — marketplace copy only, or the format is not stated at all
+
+Prices and stock verified on amazon.de 2026-08-11, delivering to Hamburg.
+
+### 6.1 Stock webcams — preferred
+
+| # | Camera | dFOV | Focus | MJPEG 1080p30 | Price | Where |
 |---|---|---|---|---|---|---|
-| 1 | **Arducam IMX291**, waterproof metal housing | 120° | fixed | 1/2.8″, 0.001 lux | ✅ | [amazon.de B0C36ZVQ5G](https://www.amazon.de/Arducam-USB-Kamera-Weitwinkel-Kameramodule-wasserdichtem-Metallgeh%C3%A4use/dp/B0C36ZVQ5G) |
-| 2 | **WyreStorm FOCUS 100** | 100° | fixed | 1/3″, F2.8 | ✅ | AV distribution; no Amazon.de listing found |
-| 3 | Arducam IMX291 module | 100-120°¹ | fixed | 1/2.8″ | ✅ | [amazon.de B07ZS7LX3Y](https://www.amazon.de/Arducam-Kamera-Modul-Computer-Weitwinkel-Mikrofon/dp/B07ZS7LX3Y) |
-| 4 | Logitech C930e | 90° | autofocus, pin it | 1/3″ | ✅ | widely stocked, ~€44 |
-| 5 | Spedal, manual focus 7 cm→∞ | 120° | manual, lockable | — | ⚠️ | [amazon.de B07TF5J6JZ](https://www.amazon.de/Computer-Kamera-Streaming-Weitwinkel-Webcam-Videoanruf-Videokonferenzen/dp/B07TF5J6JZ) |
-| 6 | Spedal 100° | 100° | fixed | — | ⚠️ | [amazon.de B07N2JQMY2](https://www.amazon.de/Spedal-Weitwinkel-Streaming-Kamera-PC-Desktop-Laptop-kompatibel/dp/B07N2JQMY2) |
-| 7 | Svpro IMX214, metal housing | 100° | fixed | 1/3.06″ | ⚠️ | [amazon.de B09D7MTL57](https://www.amazon.de/Svpro-Weitwinkel-Fixfokus-100Degree-Metallgeh%C3%A4use/dp/B09D7MTL57) |
+| W1 | **LogiLink UA0378** conference | **100°** | manual | ✅ | €33.99 | [amazon.de B08QCXMC1V](https://www.amazon.de/dp/B08QCXMC1V) |
+| W2 | **LogiLink UA0377** conference | 120° | manual | ✅ | €44.11 | [amazon.de B08QD7QDTJ](https://www.amazon.de/dp/B08QD7QDTJ) |
+| W3 | eMeet C960 | 90° | fixed ⚠️ | ✅ | €29.99 | [amazon.de B0002HAHUY](https://www.amazon.de/dp/B0002HAHUY) |
+| W4 | Logitech C920s HD Pro | 78° | autofocus, pin it | ✅ | €55.18 | [amazon.de B07MM4V7NR](https://www.amazon.de/dp/B07MM4V7NR) |
 
-¹ The German listing does not clearly distinguish the 100° from the 120°
-variant; check the title and photo before ordering.
+- **W1 is the recommended buy.** 100° is exactly the E-9 target; f/2.2; manual
+  focus, which on a static mirror is strictly better than autofocus — you set
+  it once at the dancing distance and it cannot hunt or drift. Explicitly lists
+  Linux. Swivels −90°/+0° and rotates ±180°, clips to an LCD screen, and has a
+  tripod thread. USB 2.0 at 1080p30, so footnote ¹ applies. Every "automatic"
+  feature it advertises (AE, AWB, flicker, gamma, edge enhancement) is
+  ordinary sensor-side UVC processing, not §5 framing. Caveat: 12 ratings, and
+  the sensor size is not published anywhere — §7 is unquantified for it.
+- **W2** is the same camera family at 120° and f/2.4. Take it only if the room
+  forces a ~2 m mount; otherwise W1's 100° is the better shape.
+- **W3** is the volume choice at 5,101 ratings, with a working tripod thread
+  and 180°/90° rotation, but 90° is below target and the listing never states
+  the focus type. eMeet's autofocus model is the separate NOVA, which implies
+  C960 is fixed — implication, not documentation.
+- **W4** is the most-proven UVC device on this page by an order of magnitude
+  (10,706 ratings) and will certainly work. 78° is simply too narrow: per §2 it
+  covers 2.8 m at 2 m, and per §3 its near-sharp limit is around 0.9 m. Buy it
+  only as a known-good control device for debugging the pipeline.
+
+### 6.2 Camera modules — bare PCB, better optics
+
+| # | Camera | dFOV | Focus | Sensor | MJPEG 1080p30 | Price | Where |
+|---|---|---|---|---|---|---|---|
+| M1 | **Arducam IMX291**, waterproof metal housing | 120° | fixed | 1/2.8″, 0.001 lux, 80 dB WDR | ✅✅ | €55.00 | [amazon.de B0C36ZVQ5G](https://www.amazon.de/dp/B0C36ZVQ5G) |
+| M2 | **ELP 8MP**, 105°, with mic | 105° | fixed | 1/3.2″ IMX179 | ✅ | €43.99 | [amazon.de B07DBYKG7X](https://www.amazon.de/dp/B07DBYKG7X) |
+| M3 | **innomaker 121°**, true HDR/WDR | 121° | manual, lockable | PS5268, 120 dB HDR | ✅✅ | €29.99 | [amazon.de B0H26BG9RP](https://www.amazon.de/dp/B0H26BG9RP) |
+| M4 | Svpro 8MP, 102° | 102° | fixed | 1/3.2″ IMX179 | ⚠️ | €42.99 | [amazon.de B0F6LK8MKH](https://www.amazon.de/dp/B0F6LK8MKH) |
+| M5 | WyreStorm FOCUS 100 | 100° | fixed | 1/3″, F2.8 | ✅ | — | AV distribution; no Amazon.de listing found |
+| M6 | innomaker 130° | 130° | manual | — | ✅ | €18.99 | [amazon.de B0CNCSFQC1](https://www.amazon.de/dp/B0CNCSFQC1) |
 
 Trade-offs worth knowing:
 
-- **#1** is the only readily-orderable option meeting every hard constraint on
-  paper, and its 1/2.8″ sensor is the best low-light performer on the list. It
-  is a cased module with a threaded mount rather than a clip-on webcam — which
-  suits bolting to a TV. At 120° mount it around 2 m.
-- **#2** is the best pure spec match at exactly 100°, but its 1/3″ F2.8 sensor
+- **M1** has the best sensor here by a clear margin, which matters because §7
+  is the unmeasured risk. Its MJPEG mode is printed in the listing *and* a
+  verified buyer reports "supports H.264 & MJPEG simultaneously, at 1080p30"
+  under V4L. It is a cased module with a threaded yoke rather than a clip-on
+  webcam — which suits bolting to a TV. At 120° mount it around 2 m. Two
+  cautions: several reviewers report the yoke set screws are too long to lock
+  the angle (a set of 4 mm fine-thread M2 screws fixes it), and the "Product
+  description" block is copy-pasted from a different product (8MP IMX179, 115°
+  *manual* focus) and contradicts the bullets. Trust the bullets.
+- **M2** is the best FOV match that is actually orderable — 105° sits dead
+  centre of the target — and ELP publishes the full mode table. The 1/3.2″
+  sensor is the cost.
+- **M3** is the only candidate with a first-hand report of *this* pipeline: a
+  reviewer runs it on a Raspberry Pi under Klipper/crowsnest at a stable
+  1080p30 MJPEG stream. Its 120 dB hardware HDR is the best answer on this list
+  to a studio with a bright window and dark corners — but two reviewers say the
+  low-light marketing is overstated and it noises up quickly, and sensor noise
+  inflates MJPEG bitrate, which is a §7 problem. Focus is manual, not fixed:
+  set it once and threadlock it.
+- **M4** is the only in-stock listing that states fixed focus outright, at a
+  near-ideal 102°. But MJPEG is not stated anywhere on the listing. Svpro's own
+  comparison table shows Mjpeg/YUY2 across the range so it is very likely
+  present — this is the one where "verify on arrival" carries the most weight.
+- **M5** is the best pure spec match at exactly 100°, but its 1/3″ F2.8 sensor
   is the weakest here in a dim studio, and it is not an Amazon purchase.
-- **#4** is the boring safe choice: unquestionably works on Linux, but 90° is
-  below target and it needs its focus pinned.
-- **#5-7** are the right shape at the right price, but MJPEG is unverified.
-  If one of them only offers YUYV it will not open at all. Buy from somewhere
-  with easy returns and run `v4l2-ctl` first.
+- **M6** is a €19 "does the pipeline work end to end" unit, not a candidate for
+  the finished mirror. 130° is past the point where barrel distortion curves
+  body lines, and nothing downstream corrects it (§2).
+
+Note that no module implements `focus_absolute`, so **nothing in §6.2 exercises
+the FR-9 focus-control path** — that path is only covered if a §6.1 autofocus
+webcam (W4) is also on hand. Worth one such device in the drawer regardless of
+which camera ships.
+
+**M2 and M4 are 8MP sensors, so §8 applies to them directly**: `probeMaxMJPEG`
+picks by pixel area and will select 3264×2448 at 15 fps. Set
+`profile = "1080p30"` explicitly rather than leaving it on `auto`. M1, M3 and
+M6 cap at 1080p and cannot be mis-selected.
+
+Listings churn: four cameras this page once recommended have since been
+delisted or drifted to a different product. Re-check availability before
+ordering, and re-verify against §1 before adding anything here.
 
 ## 7. Low light is the real risk
 
