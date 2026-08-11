@@ -1,6 +1,7 @@
 # CI matrix per docs/TESTPLAN.md:
 #   go test -race ./...  (anywhere)          -> unit
 #   -tags integration    (ffmpeg/ffprobe)    -> integration
+#   make test-ui         (headless Chromium) -> ui
 #   -tags "v4l2 sdl"     build (Linux)       -> hw-build
 #   arm64 cross build                        -> cross-arm64
 name: CI
@@ -43,6 +44,22 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       # make test-integration = go vet ./... + go test -race -tags integration ./...
       - run: make test-integration
+
+  # The control page (UI-1..UI-10) in headless Chromium with the API stubbed
+  # in the browser's network layer. No Go, no binary, no camera: this lane
+  # only ever needs Node and one browser.
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright + Chromium
+        working-directory: web/uitest
+        run: npm install --no-package-lock && npx playwright install --with-deps chromium
+      - run: make test-ui
 
   # Multi-unit election (ST-7..ST-12): three real binaries, real HTTP, only
   # the radio faked. Its own job because it spawns processes and is timing

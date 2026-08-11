@@ -103,7 +103,10 @@ of them via `zeitspiegel-name.txt` on the FAT32 `bootfs` partition. Then:
 - MT-12: power everything on at once → after ~30 s exactly one unit is
   hosting; `http://zeitspiegel.local` lists all of them. Set three different
   delays and confirm each screen shows its own — this is the whole point
-  (FR-14). Also check a clip downloads from a member's card.
+  (FR-14). Also check, on a *member's* card, that the preview streams that
+  member's picture and that a clip downloads from it — both go straight to
+  that unit's address, so this is where a broken client-to-client route
+  (MT-15) shows up first.
 - MT-13: pull the hosting unit's plug → **every remaining screen keeps
   mirroring without a flicker** (the mirror never waits on the network), and
   within roughly 20–45 s one survivor is hosting and the page works again.

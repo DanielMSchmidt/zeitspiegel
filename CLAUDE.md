@@ -33,6 +33,7 @@ silently pick one.
 
 ```
 make test              # pure unit tests, -race, runs anywhere   (every change)
+make test-ui           # control page in headless Chromium, API stubbed (needs Node)
 make test-integration  # adds -tags integration (needs ffmpeg + ffprobe)
 make test-e2e          # multi-unit: 3 real binaries elect a role (no ffmpeg/root)
 make test-hw           # -tags "v4l2 sdl" build + v4l2loopback tests (Linux)
