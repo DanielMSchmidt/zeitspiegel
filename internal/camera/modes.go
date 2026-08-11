@@ -6,11 +6,15 @@ package camera
 
 import "fmt"
 
-// fpsTolerance is how far below the target rate still counts as meeting it.
-// One frame is enough to absorb NTSC-style rates: a camera advertising
-// 30000/1001 (29.97 fps) is a 30 fps camera, and a strict comparison would
-// wrongly demote it to the best-effort tier below.
-const fpsTolerance = 1.0
+// fpsFloorMargin is how far below the target rate a mode may fall and still
+// count as meeting it — 30 - 5 = 25 fps.
+//
+// It is deliberately wider than a rounding tolerance. It absorbs NTSC and PAL
+// rates (30000/1001 = 29.97, and 25) so those cameras are not demoted, and it
+// buys resolution: holding 1080p at 25 fps is worth more in a mirror than
+// dropping to 720p to gain five frames. Below 25, motion starts reading as
+// stutter, which defeats the point of reviewing movement.
+const fpsFloorMargin = 5.0
 
 // mode is one capture geometry the device advertises. FPS is the highest rate
 // the device reports for that geometry; zero means it enumerated the size but
@@ -23,19 +27,21 @@ type mode struct {
 func (m mode) area() int { return m.W * m.H }
 
 // selectMode picks the capture mode to open: the **largest** geometry within
-// the cap that still sustains the target frame rate (E-2 — dancers read the
-// screen from across a room, so pixels win once the rate is safe).
+// the cap whose rate clears the floor (target minus fpsFloorMargin, i.e.
+// 25 fps for a 30 fps target). Among modes that clear it, pixels win (E-2 —
+// dancers read the screen from across a room).
 //
 // Frame rate is the constraint and resolution is maximised under it, so a
-// camera offering 1600x1200@15 and 1280x720@30 opens 720p30 rather than a
-// mode it cannot actually deliver. When nothing reaches the target it falls
-// back to the fastest mode available rather than refusing the device: 25 fps
-// is closer to the intent than 15, and a choppy mirror beats a black screen.
+// camera offering 1600x1200@15 and 1280x720@30 opens 720p30 rather than a mode
+// it cannot actually deliver — while one offering 1920x1080@25 keeps the
+// 1080p, because 25 fps still reads as motion. When nothing clears the floor
+// it falls back to the fastest mode available rather than refusing the device:
+// a choppy mirror beats a black screen.
 //
 // Selection is independent of enumeration order so a given camera comes up the
 // same way on every boot.
 func selectMode(modes []mode, maxW, maxH int, targetFPS float64) (mode, error) {
-	floor := targetFPS - fpsTolerance
+	floor := targetFPS - fpsFloorMargin
 	var atRate, fastest mode
 	var haveAtRate, haveFastest bool
 

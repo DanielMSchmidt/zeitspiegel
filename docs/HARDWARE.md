@@ -161,18 +161,25 @@ over 1/3″), and light the room.
 ## 8. What `auto` actually picks
 
 `auto` reads the frame rate of **every** MJPEG mode the camera advertises and
-opens the largest one that sustains ~30 fps, capped at 1080p. Frame rate is the
-constraint; resolution is maximised under it. So:
+opens the largest one that clears a **25 fps floor**, capped at 1080p. Frame
+rate is the constraint; resolution is maximised under it. So:
 
 | Camera offers | `auto` opens | Why |
 |---|---|---|
-| 1920×1080@30, 1280×720@60 | **1920×1080@30** | both hold 30, so pixels win (E-2) |
+| 1920×1080@30, 1280×720@60 | **1920×1080@30** | both clear the floor, so pixels win (E-2) |
 | 1600×1200@15, 1280×720@30 | **1280×720@30** | trades resolution to hold the rate |
+| 1920×1080@25, 1280×720@30 | **1920×1080@25** | 25 clears the floor, so keep the pixels |
+| 1920×1080@24, 1280×720@30 | **1280×720@30** | just under the floor, so the rate wins |
 | 1920×1080@60 only | **1920×1080@60** | 60 is fine, and is carried downstream |
-| 1920×1080@15, 640×480@25 | **640×480@25** | nothing reaches 30; closest rate wins |
+| 1920×1080@15, 640×480@20 | **640×480@20** | nothing clears the floor; fastest wins |
+
+The floor is 25 rather than a hair under 30 on purpose: it absorbs NTSC and PAL
+rates (29.97 and 25) and buys resolution, because holding 1080p at 25 fps beats
+dropping to 720p to gain five frames. Below 25, motion starts reading as
+stutter — which defeats the point of a movement mirror.
 
 It never refuses a camera for being slow — a choppy mirror beats a black
-screen. 29.97 fps (30000/1001) counts as 30.
+screen.
 
 The mode it chose is in the boot log (`source opened … width=… height=… fps=…`)
 and in `GET /api/v1/status`, which reports the real mode rather than the profile

@@ -30,9 +30,21 @@ func TestSelectMode(t *testing.T) {
 		},
 		{
 			// 30000/1001 — a strict >= 30 would wrongly demote this to tier B.
-			"29.97 counts as reaching 30",
+			"29.97 clears the floor",
 			[]mode{{1920, 1080, 30000.0 / 1001.0}, {1280, 720, 30}},
 			mode{1920, 1080, 30000.0 / 1001.0},
+		},
+		{
+			// The floor is 25, not 29: holding 1080p is worth more than five
+			// frames. A PAL-rate camera keeps its resolution.
+			"1080p at 25 beats dropping to 720p at 30",
+			[]mode{{1920, 1080, 25}, {1280, 720, 30}},
+			mode{1920, 1080, 25},
+		},
+		{
+			"just below the floor loses the resolution",
+			[]mode{{1920, 1080, 24}, {1280, 720, 30}},
+			mode{1280, 720, 30},
 		},
 		{
 			"modes above the cap are filtered out",
@@ -45,10 +57,10 @@ func TestSelectMode(t *testing.T) {
 			mode{1280, 720, 30},
 		},
 		{
-			// Tier B: never fail, take the closest rate available.
-			"nothing reaches the target, fastest wins",
-			[]mode{{1920, 1080, 15}, {640, 480, 25}},
-			mode{640, 480, 25},
+			// Nothing clears the floor: never fail, take the fastest.
+			"nothing clears the floor, fastest wins",
+			[]mode{{1920, 1080, 15}, {640, 480, 20}},
+			mode{640, 480, 20},
 		},
 		{
 			"tier B ties on rate, largest wins",
