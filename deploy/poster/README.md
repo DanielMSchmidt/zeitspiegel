@@ -53,5 +53,5 @@ pushes what follows down instead of overlapping it — and if the page fills
 up, generation fails with a `LayoutError` rather than quietly printing
 something that runs off the paper.
 
-`make poster-test` (UT-28) checks all of that, plus that both QR codes still
+`make poster-test` (UT-30) checks all of that, plus that both QR codes still
 decode back to the network name and the URL their captions promise.

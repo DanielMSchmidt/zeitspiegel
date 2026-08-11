@@ -75,7 +75,7 @@ internal/camera/     V4L2 source via go4vl        [build tag: v4l2]
 
 internal/screen/     SDL2/KMSDRM display          [build tag: sdl]
 
-web/                 static UI (embedded)
+web/                 static UI (embedded); web/uitest/ headless-browser tests (make test-ui)
 
 deploy/              systemd unit, config, setup script, first-boot SD machinery, provisioning guide
 

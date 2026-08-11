@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-e2e test-hw build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
+.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
 
 test: vet
 	$(GO) test -race ./...
@@ -16,6 +16,14 @@ test-integration:
 test-e2e:
 	$(GO) vet -tags e2e ./...
 	$(GO) test -race -tags e2e -run 'TestFleet|TestLoneUnit' ./cmd/zeitspiegel/
+
+# UI unit tests (UI-1..UI-10): the control page in headless Chromium with the
+# API stubbed in the browser's network layer — no binary, no camera, no ffmpeg.
+# Needs Node and Playwright: `cd web/uitest && npm install && npx playwright
+# install chromium`, or a global playwright with NODE_PATH set. The page ships
+# with no build tooling; this is test-only (ARCHITECTURE §D5).
+test-ui:
+	cd web/uitest && node --test
 
 # Linux only: needs SDL2/SDL2_image headers, V4L2 kernel headers, v4l2loopback for ST-1.
 test-hw:
@@ -79,7 +87,7 @@ PYTHON ?= deploy/poster/.venv/bin/python
 poster:
 	$(PYTHON) deploy/poster/make-poster.py
 
-# UT-28: translations complete, nothing overflowing the page or the margins,
+# UT-30: translations complete, nothing overflowing the page or the margins,
 # both QR codes still encoding what their captions claim.
 poster-test:
 	$(PYTHON) -m unittest discover -s deploy/poster

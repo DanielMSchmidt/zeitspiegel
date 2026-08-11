@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -88,6 +89,11 @@ func (a *airspace) ids() []string {
 	for id := range a.aps {
 		out = append(out, id)
 	}
+	// Sorted: map iteration order is randomized, and this result feeds both an
+	// indexed read and the split-brain failure message. Today the indexed read
+	// is safe only because its caller has already asserted there is exactly one
+	// AP -- the guard makes it safe, not this helper.
+	sort.Strings(out)
 	return out
 }
 
@@ -335,9 +341,19 @@ func distinctSlotIDs(t *testing.T, n int) []string {
 	if len(bySlot) < n {
 		t.Fatalf("could not find %d ids in distinct stagger slots", n)
 	}
+	// Ordered by stagger slot, ascending. Ranging over the map instead would
+	// return a fresh permutation on every run (Go randomizes map iteration),
+	// so ids[0] — the unit a test powers on first — would draw a different
+	// slot each time and the election would be re-rolled per run. That is the
+	// dependency this helper exists to remove.
+	slots := make([]time.Duration, 0, len(bySlot))
+	for d := range bySlot {
+		slots = append(slots, d)
+	}
+	sort.Slice(slots, func(i, j int) bool { return slots[i] < slots[j] })
 	out := make([]string, 0, n)
-	for _, id := range bySlot {
-		out = append(out, id)
+	for _, d := range slots {
+		out = append(out, bySlot[d])
 	}
 	return out
 }

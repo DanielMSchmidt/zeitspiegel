@@ -7,3 +7,8 @@
 /build/
 .claude/settings.local.json
 /docs/superpowers/
+
+# UI test tooling (make test-ui); the shipped page has no dependencies.
+/web/uitest/node_modules/
+/web/uitest/package-lock.json
+/web/uitest/test-results/

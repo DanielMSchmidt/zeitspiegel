@@ -73,7 +73,7 @@ h2 {
   align-items: center;
   gap: 14px;
 }
-#delay-value {
+.unit-delay-value {
   font-variant-numeric: tabular-nums;
   font-size: 1.6rem;
   font-weight: 600;
@@ -202,16 +202,21 @@ label { color: var(--muted); font-size: 0.9rem; }
 #offline-badge { background: var(--error); color: #14161a; }
 [hidden] { display: none !important; }
 /* ---- preview ---- */
-#preview {
+.unit-preview {
   display: block;
   width: 100%;
   height: auto;
+  /* A preview is a glance, not the show — the mirror itself is on the TV.
+     Capping it keeps the controls of the next card within reach. */
+  max-height: 50vh;
+  object-fit: contain;
   border-radius: 8px;
   background: var(--bg);
-  margin-top: 12px;
+  margin-top: 10px;
   min-height: 40px;
 }
-#preview:not([src]) { display: none; }
+/* No src means no stream: the element is gone, not merely invisible. */
+.unit-preview:not([src]) { display: none; }
 /* ---- switch row ---- */
 .switch-row {
   display: flex;
@@ -262,19 +267,65 @@ footer a { color: var(--muted); }
 }
 #toast.show { opacity: 1; }
 .hint { color: var(--muted); font-size: 0.82rem; margin: 10px 0 0; }
-/* ---- other mirrors on this network (E-8) ---- */
-/* One card per mirror. Each keeps its own delay, so each gets its own
-   slider; the card is built once and then only updated, which is what lets
-   a slider survive the 1 Hz poll. */
-.unit-card {
-  border: 1px solid var(--panel-edge);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin: 12px 0 0;
+/* ---- one card per mirror (E-8, FR-14) ---- */
+/* Every mirror on the network is a card, this one included, and each card
+   carries everything you can do to that mirror: its delay, its preview, its
+   clips. On a phone they stack in one column and stay thumb-sized; on a
+   wider screen they sit side by side, capped so a lone mirror does not
+   stretch across a desktop. */
+#units {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  /* Each card is as tall as its own contents. Without this a running preview
+     stretches every card in its row into a wall of empty panel. */
+  align-items: start;
 }
-.unit-card .row { margin: 0; }
-.unit-card .delay-row { margin: 10px 0; }
-.unit-card strong { flex: 1; }
+#units .unit-card { margin: 0; }
+/* The lines around the grid introduce and explain the whole group, so they
+   have to stand clear of it — flush against a card they read as that card's
+   own label. Wider than the gap between cards, deliberately. */
+#fleet-hint { margin: 6px 0 18px; }
+#units + .hint { margin-top: 18px; }
+.unit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.unit-name {
+  /* An h2, but a name rather than a section label. */
+  font-size: 1.05rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.unit-tag {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+.unit-badge { background: var(--warn); color: #14161a; }
+.unit-card.offline .unit-badge { background: var(--error); }
+.unit-card .delay-row { margin: 6px 0 4px; }
+.unit-controls { margin-top: 10px; }
+/* The action of the row; the format select keeps its natural width. */
+.unit-download, .unit-preview-toggle { flex: 1 1 auto; }
 /* A mirror that stopped answering stays visible but obviously inert, rather
    than vanishing and reshuffling the cards under someone's finger. */
 .unit-card.offline { opacity: 0.55; }
+@media (min-width: 760px) {
+  header, main, footer { max-width: 940px; }
+  #units {
+    grid-template-columns: repeat(auto-fit, minmax(320px, 440px));
+    justify-content: center;
+  }
+}

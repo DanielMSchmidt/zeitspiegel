@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UT-28 — the printed poster, checked without printing it.
+"""UT-30 — the printed poster, checked without printing it.
 
     python3 -m unittest discover -s deploy/poster        (or: make poster-test)
 
@@ -33,13 +33,13 @@ def build(langs=("de", "en"), **kw):
 
 
 class Translations(unittest.TestCase):
-    # UT-28: neither language may quietly lag the other.
+    # UT-30: neither language may quietly lag the other.
     def test_both_languages_carry_the_same_keys(self):
         de, en = set(poster.STRINGS["de"]), set(poster.STRINGS["en"])
         self.assertEqual(de - en, set(), "keys missing from the English strings")
         self.assertEqual(en - de, set(), "keys missing from the German strings")
 
-    # UT-28: every string is actually placed on the bilingual poster — a
+    # UT-30: every string is actually placed on the bilingual poster — a
     # translated string nobody renders is as bad as a missing one.
     def test_every_string_is_rendered_in_both_languages(self):
         doc = build()
@@ -48,7 +48,7 @@ class Translations(unittest.TestCase):
             for key, s in poster.strings(lang).items():
                 self.assertIn((lang, s), placed, f"{lang}.{key} is never drawn")
 
-    # UT-28: a single-language poster carries that language and nothing of
+    # UT-30: a single-language poster carries that language and nothing of
     # the other — the variants are for rooms that want one language only.
     def test_single_language_variants_carry_one_language(self):
         for lang, other in (("de", "en"), ("en", "de")):
@@ -59,7 +59,7 @@ class Translations(unittest.TestCase):
 
 
 class Layout(unittest.TestCase):
-    # UT-28: no line may run past the content column. German is the long
+    # UT-30: no line may run past the content column. German is the long
     # language; this is the assertion that catches it.
     def test_no_text_runs_past_the_margins(self):
         for langs in VARIANTS:
@@ -70,7 +70,7 @@ class Layout(unittest.TestCase):
                     self.assertGreaterEqual(round(left, 1), poster.MARGIN)
                     self.assertLessEqual(round(right, 1), poster.W - poster.MARGIN)
 
-    # UT-28: everything drawn stays on the page, above the footer rule.
+    # UT-30: everything drawn stays on the page, above the footer rule.
     def test_content_stays_on_the_page(self):
         for langs in VARIANTS:
             doc = build(langs)
@@ -80,7 +80,7 @@ class Layout(unittest.TestCase):
                     self.assertGreater(t["y"], poster.MARGIN / 2)
                     self.assertLess(t["y"], poster.H - poster.MARGIN / 4)
 
-    # UT-28: the three-column rows (the step strip, the two QR captions) put
+    # UT-30: the three-column rows (the step strip, the two QR captions) put
     # a German and an English label on one baseline. The German one is the
     # longer one, and nothing stops it growing into its neighbour but this.
     def test_columns_on_one_baseline_do_not_collide(self):
@@ -98,7 +98,7 @@ class Layout(unittest.TestCase):
                         self.assertGreaterEqual(left - right, 12,
                                                 f"columns touch at y={y}")
 
-    # UT-28: the layout flows, so a longer network name or URL must push
+    # UT-30: the layout flows, so a longer network name or URL must push
     # things around rather than overlap them.
     def test_a_long_ssid_and_url_still_fit(self):
         for langs in VARIANTS:
@@ -115,7 +115,7 @@ class Layout(unittest.TestCase):
                     self.assertGreaterEqual(round(left, 1), poster.MARGIN)
                     self.assertLessEqual(round(right, 1), poster.W - poster.MARGIN)
 
-    # UT-28: wrapping is the mechanism the two assertions above rely on.
+    # UT-30: wrapping is the mechanism the two assertions above rely on.
     def test_wrap_splits_only_where_it_must(self):
         self.assertEqual(poster.wrap("short line", 18, 400, 600), ["short line"])
         lines = poster.wrap("wort " * 40, 18, 400, 300)
@@ -131,7 +131,7 @@ class QRCodes(unittest.TestCase):
     def setUp(self):
         self.doc = build(ssid="zeitspiegel", url="http://zeitspiegel.local")
 
-    # UT-28: the poster offers exactly the two codes, in order.
+    # UT-30: the poster offers exactly the two codes, in order.
     def test_two_codes_join_then_controls(self):
         self.assertEqual(len(self.doc.qrs), 2)
         wifi, controls = self.doc.qrs
@@ -141,7 +141,7 @@ class QRCodes(unittest.TestCase):
         self.assertEqual(wifi["size"], controls["size"])
         self.assertEqual(wifi["y"], controls["y"])
 
-    # UT-28: read the emitted rects back as a module matrix and compare it
+    # UT-30: read the emitted rects back as a module matrix and compare it
     # with what segno says the payload encodes. This is what proves the
     # run-length rects, the quiet zone and the scaling still spell out the
     # network name and the URL — a poster whose codes look fine and scan to
