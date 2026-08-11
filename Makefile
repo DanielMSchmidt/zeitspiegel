@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-e2e test-hw build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean poster poster-check
+.PHONY: test test-integration test-e2e test-hw build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
 
 test: vet
 	$(GO) test -race ./...
@@ -68,9 +68,10 @@ run-tv: build-tv
 clean:
 	rm -rf bin
 
-# Regenerate the guest poster. The script writes both the print master
-# (deploy/poster/zeitspiegel-poster.svg) and the site copy (site/poster.svg);
-# don't hand-edit either SVG.
+# Regenerate the guest posters: the bilingual one plus the German-only and
+# English-only variants. The script writes both the print masters
+# (deploy/poster/zeitspiegel-poster*.svg) and the site copies (site/poster*.svg);
+# don't hand-edit any of the SVGs.
 #
 # Override PYTHON to use a different interpreter, e.g.
 #   make poster PYTHON=python3   # if segno is on the system path
@@ -78,7 +79,12 @@ PYTHON ?= deploy/poster/.venv/bin/python
 poster:
 	$(PYTHON) deploy/poster/make-poster.py
 
-# CI guard: regenerate and fail if either checked-in copy drifted.
-poster-check:
+# UT-26: translations complete, nothing overflowing the page or the margins,
+# both QR codes still encoding what their captions claim.
+poster-test:
+	$(PYTHON) -m unittest discover -s deploy/poster
+
+# CI guard: regenerate and fail if any checked-in copy drifted.
+poster-check: poster-test
 	$(PYTHON) deploy/poster/make-poster.py
-	git diff --exit-code -- deploy/poster/zeitspiegel-poster.svg site/poster.svg
+	git diff --exit-code -- 'deploy/poster/*.svg' 'site/poster*.svg'
