@@ -9,11 +9,19 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 ## Hardware checklist
 
 - Raspberry Pi 5, 4 GB (8 GB for long 1080p buffers); official 5 V/5 A PSU
-  (required — Kiyo is USB-powered and x264 exports load all cores); active
-  cooler; micro-HDMI → HDMI cable
-- Razer Kiyo (USB). Ring light is hardware-controlled via its bezel.
-  Autofocus must be pinned in config (`focus_automatic_continuous=0`,
-  `focus_absolute` from spike S-2) to prevent focus hunting during movement.
+  (required — the camera is USB-powered and x264 exports load all cores);
+  active cooler; micro-HDMI → HDMI cable
+- A **wide-angle (~100-110° diagonal), fixed-focus UVC webcam with native
+  MJPEG** and no in-camera AI processing. Selection criteria, the field-of-view
+  and depth-of-field numbers, why 4K and AI webcams are rejected, and the
+  ranked shortlist are in **docs/HARDWARE.md** (provisional until spike S-2).
+  Verify on arrival with `v4l2-ctl --list-formats-ext` — a camera without a
+  discrete MJPEG mode at or below 1080p cannot be opened at all.
+  - Fixed focus needs no pinning: the lens sits at its hyperfocal distance, so
+    everything from ~0.3-0.4 m to infinity is sharp, and the focus controls
+    simply do not exist (they are skipped at open, and logged — FR-9).
+  - On an **autofocus** camera instead, pin it: `focus_auto = false` plus a
+    `focus_absolute` measured in spike S-2, or it hunts during movement.
 
 ## Artifacts (deploy/)
 

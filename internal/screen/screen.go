@@ -149,8 +149,9 @@ func (s *Screen) ProcessEvents() bool {
 func (s *Screen) SetMirror(on bool) { s.mirror.Store(on) }
 
 // Render decodes one JPEG (SDL2_image / libjpeg-turbo) and presents it
-// full-screen, flipped when mirroring. Budget: decode 4–8 ms + present
-// 2–4 ms at 720p on the Pi 5 (validate in spike S-1).
+// full-screen, flipped when mirroring and letterboxed to the camera's aspect
+// ratio (FR-16). Budget: decode 4–8 ms + present 2–4 ms at 720p on the Pi 5
+// (validate in spike S-1).
 func (s *Screen) Render(f frame.Frame) error {
 	rw, err := sdl.RWFromMem(f.JPEG)
 	if err != nil {
@@ -179,10 +180,25 @@ func (s *Screen) Render(f frame.Frame) error {
 	if s.mirror.Load() {
 		flip = sdl.FLIP_HORIZONTAL
 	}
+	// Fit rather than fill: a stretched image is a lie to anyone checking
+	// their own body line in the mirror (FR-16). A 4:3 camera on a 16:9 panel
+	// pillarboxes instead of widening the dancer by a third.
+	outW, outH, err := s.ren.GetOutputSize()
+	if err != nil {
+		return fmt.Errorf("screen: output size: %w", err)
+	}
+	x, y, w, h := fitRect(int(surf.W), int(surf.H), int(outW), int(outH))
+	dst := &sdl.Rect{X: int32(x), Y: int32(y), W: int32(w), H: int32(h)}
+
+	// Paint the bars black explicitly: Splash leaves its own backdrop colour
+	// on the renderer, and the letterbox must not inherit it.
+	if err := s.ren.SetDrawColor(0, 0, 0, 255); err != nil {
+		return fmt.Errorf("screen: clear color: %w", err)
+	}
 	if err := s.ren.Clear(); err != nil {
 		return fmt.Errorf("screen: clear: %w", err)
 	}
-	if err := s.ren.CopyEx(tex, nil, nil, 0, nil, flip); err != nil {
+	if err := s.ren.CopyEx(tex, nil, dst, 0, nil, flip); err != nil {
 		return fmt.Errorf("screen: copy: %w", err)
 	}
 	if err := s.drawBadge(time.Duration(s.delayNS.Load())); err != nil {

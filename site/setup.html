@@ -74,14 +74,25 @@
       </td>
     </tr>
     <tr>
-      <td><strong>Razer Kiyo</strong> webcam (USB)</td>
+      <td><strong>A wide-angle USB webcam</strong> (~100–110° diagonal, fixed focus, native MJPEG)</td>
       <td>
-        This is the recommended camera. It outputs MJPEG natively at 720p60
-        and has a hardware ring light controlled by a bezel. Other UVC
-        webcams with native MJPEG should work too, but Kiyo is what's
-        actually tested.
+        Three things matter, in this order. It must output <strong>MJPEG
+        natively</strong> — that's the one requirement that can't be worked
+        around, and a camera without it won't start at all. It should be
+        <strong>wide</strong>, so the whole dancer fits from a couple of metres
+        away. And it should be <strong>fixed focus</strong> with
+        <strong>no "AI" features</strong> — no auto-framing, no background
+        blur, no beauty mode. Fixed focus isn't a downgrade: the lens is set so
+        that everything from about 30&nbsp;cm to infinity is sharp, and it can
+        never hunt mid-movement. Auto-framing is the worst offender — it would
+        pan and crop the picture as you move.
         <br>
-        <a href="https://www.google.com/search?q=razer+kiyo">search</a>
+        Ranked shortlist with links, plus the field-of-view maths:
+        <a href="https://github.com/DanielMSchmidt/zeitspiegel/blob/main/docs/HARDWARE.md">docs/HARDWARE.md</a>
+        <br>
+        <strong>Don't buy 4K.</strong> The Pi can't decode it fast enough for a
+        live mirror, and it would be scaled back down anyway — you'd pay for
+        resolution the appliance can never use.
       </td>
     </tr>
     <tr>
