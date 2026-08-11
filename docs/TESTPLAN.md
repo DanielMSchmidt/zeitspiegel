@@ -8,7 +8,8 @@ records (frame, render time). All timing behavior is deterministic without
 hardware. CI matrix: `go test -race ./...` (anywhere) · `-tags integration`
 (ffmpeg/ffprobe) · `-tags e2e` (`make test-e2e`: three real binaries electing
 a role over a virtual airspace — no ffmpeg, no radios, no root) ·
-`-tags "v4l2 sdl"` build + v4l2loopback (Linux) · arm64 cross build.
+`-tags "v4l2 sdl"` build + v4l2loopback (Linux) · arm64 cross build ·
+`make test-ui` (the control page in headless Chromium, API stubbed).
 
 The multi-unit lane fakes only the radio, and fakes it faithfully in the ways
 that decide the design (§D8): a beaconing unit cannot scan, two units can
@@ -48,6 +49,29 @@ so a full failover takes seconds.
 | UT-26 | camera | `plannedControls` table per config (pinned focus / auto focus / everything pinned); a device implementing no focus controls still opens, both are reported by `SkippedControls()`, and the controls it *does* implement are still applied; a genuine failure (I/O error, out-of-range value) still aborts and names the control (FR-9, E-9). Tag-free: the cgo `SetControlValue` stays behind the `v4l2` tag, the skip decision does not |
 | UT-27 | screen | `fitRect` table: same aspect ⇒ full bleed; 4:3 into 16:9 ⇒ pillarbox; 16:9 into 4:3 ⇒ letterbox; square and 1×1 sources; non-positive source or destination ⇒ fill (never divide by zero, never blank the screen). Plus a sweep asserting the rect never escapes the destination and never inverts the source aspect (FR-16) |
 | UT-18 | httpapi | Streaming clip handler: headers (`X-Clip-Duration`, no `Content-Length`) precede the chunked body; pre-flight busy/empty still 503; exporter failing before the first body byte ⇒ 500 problem+json; failure mid-stream ⇒ truncated body, no second response; the stream is Closed exactly once |
+
+## 1.1 Tier 1b — UI unit (headless browser, no server, `make test-ui`)
+
+The control page is the one part of the system no Go test can see. These run
+it in headless Chromium (Playwright) with every `/api/v1` call answered by a
+stub fleet inside the browser's network layer — no binary, no camera, no
+ffmpeg — so they assert the page's own behaviour and nothing about the API.
+What the server does with those calls is UT-23/24, IT-10 and ST-8/12. The
+page still ships with no build tooling and no dependencies (§D5); the test
+harness under `web/uitest/` is the only thing that needs Node.
+
+| ID | Case |
+|---|---|
+| UI-1 | A lone mirror renders exactly one card — its own — carrying delay, preview and clip controls; no fleet hint |
+| UI-2 | One card per mirror with this one first, names from the roster; a mirror leaving loses its card, and a returning one (new address) gets a rebuilt card with its own slider |
+| UI-3 | FR-14 as the page sees it: a card's slider PUTs `{"seconds"}` to **that** mirror's own `base_url` and no other origin is touched; this mirror's card posts to the page's origin |
+| UI-4 | A slider being dragged is not overwritten by the 1 Hz poll (hold-off), and follows the mirror again once released |
+| UI-5 | A mirror that stops answering is marked Offline and stays visible; it clears itself when it answers again — including the mirror serving the page, whose card is the only offline indicator now |
+| UI-6 | Preview is per card: starting one streams from that mirror only, the view select swaps the running stream, stopping drops `src` rather than hiding it |
+| UI-7 | Download asks that mirror directly (no second hop), for that mirror's own buffer length, in that card's format — one card's format select never changes another's |
+| UI-8 | Three cards on a 390 px phone: no sideways scroll, one column, every control ≥ 44 px tall and on-screen |
+| UI-9 | Each card's slider range follows that mirror's own `buffer.capacity_s` |
+| UI-10 | A rejected delay surfaces the server's problem+json `detail` in the toast (FR-11) |
 
 ## 2. Tier 2 — integration (SyntheticSource, seconds, every PR)
 
@@ -89,11 +113,12 @@ real studio lighting**, since sensor noise in a dim room inflates it and
 | 6 | camera + screen adapters (thin), reconnect supervisor | UT-11,26,27; IT-7; ST-1 |
 | 7 | wiring, web UI, deploy artifacts, soak | ST-2..6 |
 | 8 | observability + stutter hardening (render metrics, capture gaps, streaming texture, export nice, 60 s capacity) | UT-12..17; ST-4 |
-| 9 | multi-unit: dynamic election, membership, combined page, one image (E-8) | UT-19..25; IT-10,11; ST-7..13 |
+| 9 | multi-unit: dynamic election, membership, combined page, one image (E-8) | UT-19..25; UI-1..10; IT-10,11; ST-7..13 |
 
 Step 9 in order: netrole (UT-19) → config + identity (UT-20, UT-21) → peers
 (UT-22, UT-25) → httpapi (UT-23, UT-24) → the fleet supervisor and IT-11 →
-IT-10 → cmd wiring and the radio adapters → the combined page → ST-7..12.
+IT-10 → cmd wiring and the radio adapters → the combined page (UI-1..10) →
+ST-7..12.
 The election is built before anything can call it, and the E2E lane last,
 because it exercises the whole thing through real processes.
 
@@ -102,7 +127,7 @@ because it exercises the whole thing through real processes.
 | ID | Case |
 |---|---|
 | ST-1 | API contract suite vs running process with v4l2loopback (CI, no camera) |
-| ST-2 | UI smoke (Playwright): slider ⇒ PUT /delay; download ⇒ MP4 |
+| ST-2 | UI smoke (Playwright) **against the real binary**: slider ⇒ PUT /delay; download ⇒ a file ffprobe accepts as MP4. **Not implemented** — the repo has no such lane. UI-1..10 now cover the page's behaviour with the API stubbed, so what is still missing here is only the page against a live server and a real encode |
 | ST-3 | 24 h soak (synth): RSS growth < 5 %, drops < 0.1 % (NFR-1/2) |
 | ST-4 | Load: export loop + preview client ⇒ NFR-3/4 held: `zeitspiegel_render.render_over_budget/ticks < 1 %`, `tick_overruns ≈ 0`, `miss_too_early = miss_empty = 0`, `held_streak_max ≤ 2` |
 | ST-5 | systemd kill -9 ⇒ restart, /healthz green < 10 s |

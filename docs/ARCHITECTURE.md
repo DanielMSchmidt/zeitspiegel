@@ -61,7 +61,16 @@ binding maintenance).
 
 ### D5 — REST API + thin static frontend
 Versioned HTTP API is the testable contract; the UI is one embedded
-HTML/JS page with no build tooling.
+HTML/JS page with no build tooling. The page is a list of cards, one per
+mirror on the network and this one included: identical markup and identical
+controls (delay, preview, clip), differing only in the base URL they call —
+`""` for this unit, the host-issued address for another. Cards rather than
+tabs: with two or three mirrors in a room the delays have to be comparable
+at a glance, and a mirror hidden behind a tab is one nobody notices has gone
+Offline. Each card is built once and then only updated, which is what lets a
+slider survive the 1 Hz poll and keep its own hold-off state. Node and
+Playwright appear only under `web/uitest` (UI-1..10); the shipped page
+depends on neither.
 
 ### D6 — Testability as architecture
 Injected `Clock` and `FrameSource` interfaces. `synth.Source` emits frames at

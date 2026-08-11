@@ -204,8 +204,8 @@ func TestBinaryAPIContract(t *testing.T) {
 		}
 
 		index := get("/")
-		for _, want := range []string{"zeitspiegel", `id="delay-slider"`, `id="download-btn"`,
-			`href="/settings.html"`, "What is this"} {
+		for _, want := range []string{"zeitspiegel", `id="unit-template"`, `class="unit-delay"`,
+			`class="unit-download"`, `href="/settings.html"`, "What is this"} {
 			if !strings.Contains(strings.ToLower(index), strings.ToLower(want)) {
 				t.Errorf("index page missing %q", want)
 			}

@@ -11,65 +11,61 @@
 <header>
   <h1>Zeitspiegel<small>delayed mirror</small></h1>
   <span class="header-badges">
-    <span class="badge" id="warming-badge" hidden>Warming up</span>
-    <span class="badge" id="offline-badge" hidden>Offline</span>
     <button type="button" class="link" id="about-link">What is this?</button>
   </span>
 </header>
 
 <main>
-  <!-- Delay -->
-  <section>
-    <h2><span id="local-title">Delay</span></h2>
-    <div class="delay-row">
-      <input type="range" id="delay-slider" min="0" max="60" step="0.1" value="0"
-             aria-label="Delay in seconds">
-      <span><span id="delay-value">0.0</span><span class="delay-unit"> s</span></span>
-    </div>
-  </section>
+  <!-- One card per mirror, this one first. Alone, that is a single card and
+       the page reads as it always has; with company, every mirror gets the
+       same controls (FR-14). -->
+  <p class="hint" id="fleet-hint" hidden>Every mirror is its own: the delay,
+  preview and clip in a card only ever change that one.</p>
 
-  <!-- Clip download -->
-  <section>
-    <h2>Save clip</h2>
-    <div class="row">
-      <label for="download-format">Save as</label>
-      <select id="download-format">
-        <option value="mp4" selected>MP4</option>
-        <option value="mjpeg">MJPEG</option>
-      </select>
-      <button type="button" id="download-btn">Download last 60 s</button>
-    </div>
-    <p class="hint">Downloads everything in the buffer. If nothing downloads,
-    an export may already be running or the buffer is still filling &mdash;
-    try again in a moment.</p>
-  </section>
+  <div id="units"></div>
 
-  <!-- Other mirrors on this network. Hidden unless there are any, so a
-       single Zeitspiegel looks exactly as it always has. -->
-  <section id="fleet" hidden>
-    <h2>Other mirrors</h2>
-    <p class="hint">Every mirror keeps its own delay &mdash; a slider here
-    only changes that mirror.</p>
-    <div id="fleet-list"></div>
-  </section>
-
-  <!-- Preview -->
-  <section>
-    <h2>Preview</h2>
-    <div class="row">
-      <button type="button" id="preview-toggle" aria-pressed="false">Start preview</button>
-      <select id="preview-view" aria-label="Preview view">
-        <option value="live" selected>live camera</option>
-        <option value="delayed">delayed mirror</option>
-      </select>
-    </div>
-    <img id="preview" alt="Live preview">
-  </section>
+  <p class="hint">A clip is everything in that mirror&rsquo;s buffer. If
+  nothing downloads, an export may already be running or the buffer is still
+  filling &mdash; try again in a moment.</p>
 </main>
 
 <footer>
   <a href="/settings.html">Status &amp; settings</a>
 </footer>
+
+<!-- The card, built once per mirror and then only updated: that is what lets
+     a slider survive the 1 Hz poll and keep its own hold-off state. -->
+<template id="unit-template">
+  <section class="unit-card">
+    <div class="unit-head">
+      <h2 class="unit-name"></h2>
+      <span class="unit-tag" hidden></span>
+      <span class="badge unit-badge" hidden></span>
+    </div>
+
+    <div class="delay-row">
+      <input type="range" class="unit-delay" min="0" max="60" step="0.1" value="0">
+      <span class="delay-readout"><span class="unit-delay-value">0.0</span><span class="delay-unit"> s</span></span>
+    </div>
+
+    <div class="row unit-controls">
+      <button type="button" class="unit-preview-toggle" aria-pressed="false">Start preview</button>
+      <select class="unit-preview-view">
+        <option value="live" selected>live camera</option>
+        <option value="delayed">delayed mirror</option>
+      </select>
+    </div>
+    <img class="unit-preview" alt="">
+
+    <div class="row unit-controls">
+      <select class="unit-format">
+        <option value="mp4" selected>MP4</option>
+        <option value="mjpeg">MJPEG</option>
+      </select>
+      <button type="button" class="unit-download">Save last 60 s</button>
+    </div>
+  </section>
+</template>
 
 <dialog id="about-dialog" aria-labelledby="about-title">
   <h2 id="about-title">What is this?</h2>
@@ -85,7 +81,7 @@
   music.</p>
   <p><strong>How to use it:</strong> set the delay a little longer than
   the movement you&rsquo;re working on, do the movement, then watch the
-  screen. Liked an attempt? Save the last seconds as a video below.</p>
+  screen. Liked an attempt? Save the last seconds as a video.</p>
   <p>Everything stays in this room: the video lives only in the
   device&rsquo;s memory and is gone when you unplug it &mdash; nothing is
   recorded unless you download a clip.</p>
@@ -100,18 +96,10 @@
 
   function $(id) { return document.getElementById(id); }
 
-  var slider     = $("delay-slider");
-  var delayValue = $("delay-value");
-  var localTitle = $("local-title");
-  var warmBadge  = $("warming-badge");
-  var offBadge   = $("offline-badge");
-  var dlFormat   = $("download-format");
-  var dlBtn      = $("download-btn");
-  var preview    = $("preview");
-  var prevToggle = $("preview-toggle");
-  var toast      = $("toast");
-  var fleetBox   = $("fleet");
-  var fleetList  = $("fleet-list");
+  var unitsBox = $("units");
+  var fleetHint = $("fleet-hint");
+  var template = $("unit-template");
+  var toast    = $("toast");
 
   // ---------- about dialog ----------
   var aboutDialog = $("about-dialog");
@@ -166,18 +154,22 @@
   }
 
   // ---------- delay control ----------
+  // Only one finger is ever on a slider, so the drag is tracked once for the
+  // whole page rather than per card: cards come and go with the mirrors, and
+  // per-card window listeners would outlive the cards that registered them.
+  var draggedSlider = null;
+  window.addEventListener("pointerup", function () { draggedSlider = null; });
+  window.addEventListener("pointercancel", function () { draggedSlider = null; });
+
   // One mirror's slider. Each unit owns its own delay, so each control keeps
   // its own debounce and hold-off state and posts to its own base URL --
   // "" for this unit, an absolute address for another one.
-  function makeDelayControl(sliderEl, valueEl, base) {
+  function makeDelayControl(sliderEl, valueEl, base, note) {
     var debounceTimer = null;   // pending debounced PUT
-    var sliderActive = false;   // user is touching/dragging the slider
     var holdOff = 0;            // do not let status polls overwrite the slider
                                 // until this timestamp (ms since epoch)
 
-    sliderEl.addEventListener("pointerdown", function () { sliderActive = true; });
-    window.addEventListener("pointerup", function () { sliderActive = false; });
-    window.addEventListener("pointercancel", function () { sliderActive = false; });
+    sliderEl.addEventListener("pointerdown", function () { draggedSlider = sliderEl; });
 
     sliderEl.addEventListener("input", function () {
       valueEl.textContent = fmtSecs(parseFloat(sliderEl.value));
@@ -196,10 +188,10 @@
       }).then(function (res) {
         if (res.ok) return;
         return res.json().catch(function () { return null; }).then(function (body) {
-          showToast(problemDetail(body, "Delay rejected by server"));
+          showToast(note(problemDetail(body, "Delay rejected by server")));
         });
       }).catch(function () {
-        showToast("Could not reach mirror");
+        showToast(note("Could not reach mirror"));
       });
     }
 
@@ -211,7 +203,7 @@
         if (cap > 0 && parseFloat(sliderEl.max) !== cap) {
           sliderEl.max = cap;
         }
-        if (!sliderActive && !debounceTimer && Date.now() > holdOff) {
+        if (draggedSlider !== sliderEl && !debounceTimer && Date.now() > holdOff) {
           sliderEl.value = st.delay_s;
           valueEl.textContent = fmtSecs(st.delay_s);
         }
@@ -234,9 +226,9 @@
   var preparingBtn = null;
   var preparingTimer = null;
 
-  function setPreparing(btn, label, on) {
+  function setPreparing(btn, on) {
     btn.disabled = on;
-    btn.textContent = on ? "Preparing…" : label;
+    btn.textContent = on ? "Preparing…" : (btn.dataset.label || "Save clip");
     if (on) {
       btn.setAttribute("aria-busy", "true");
       preparingBtn = btn;
@@ -253,8 +245,7 @@
   // message stands.
   dlFrame.addEventListener("load", function () {
     if (preparingTimer) clearTimeout(preparingTimer);
-    var btn = preparingBtn;
-    if (btn) setPreparing(btn, btn.dataset.label || "Download", false);
+    if (preparingBtn) setPreparing(preparingBtn, false);
     var msg = "Could not export clip";
     try {
       var body = JSON.parse(dlFrame.contentDocument.body.textContent);
@@ -268,169 +259,189 @@
   function download(btn, base, capS, format) {
     var url = base + "/api/v1/clip?seconds=" + encodeURIComponent(capS) +
               "&format=" + encodeURIComponent(format);
-    setPreparing(btn, btn.dataset.label || "Download", true);
+    setPreparing(btn, true);
     dlFrame.src = url;
     // The browser gives no signal when the attachment download starts, so
     // free the button after a short grace period. The export streams, so
     // the download begins within ~1 s -- 2 s covers a slow phone.
     if (preparingTimer) clearTimeout(preparingTimer);
     preparingTimer = setTimeout(function () {
-      if (preparingBtn) setPreparing(preparingBtn, preparingBtn.dataset.label || "Download", false);
+      if (preparingBtn) setPreparing(preparingBtn, false);
     }, 2000);
   }
 
-  // ---------- this mirror ----------
-  var localDelay = makeDelayControl(slider, delayValue, "");
-  var localCapS = 60;
-  dlBtn.dataset.label = "Download last 60 s";
-
-  // The unit's own name and role, remembered so the peers poll can label
-  // the local section once other mirrors show up.
-  var localName = "";
+  // ---------- cards ----------
+  // Every mirror is a card, this one included: same markup, same controls,
+  // only the base URL differs ("" for this unit). Cards are built once and
+  // then updated in place.
+  var cards = {};      // peer unit id -> card (this mirror's card is `local`)
   var localRole = "";
 
-  function applyStatus(st) {
-    offBadge.hidden = true;
-    warmBadge.hidden = !st.warming_up;
-    localName = st.name || "";
-    localRole = st.role || "";
+  function cardCount() { return Object.keys(cards).length + 1; }
 
-    var cap = (st.buffer && st.buffer.capacity_s) || 0;
-    // The download button always grabs the full buffer; keep its label and
-    // request length in sync with the server's actual capacity.
-    if (cap > 0 && cap !== localCapS) {
-      localCapS = cap;
-      dlBtn.dataset.label = "Download last " + Math.round(cap) + " s";
-      if (!dlBtn.disabled) dlBtn.textContent = dlBtn.dataset.label;
-    }
-    localDelay.apply(st);
-  }
-
-  function pollStatus() {
-    fetchJSON("/api/v1/status").then(applyStatus).catch(function () {
-      offBadge.hidden = false;
-    });
-  }
-
-  dlBtn.addEventListener("click", function () {
-    // Full-buffer clip; the server clamps to what is actually buffered
-    // (FR-5: duration = min(n, buffered)).
-    download(dlBtn, "", localCapS, dlFormat.value);
-  });
-
-  // ---------- other mirrors ----------
-  // Cards are built once per mirror and then only updated, so a card's
-  // slider survives the 1 Hz poll and keeps its own hold-off state.
-  var cards = {}; // unit id -> card
-
-  function buildCard(peer) {
-    var wrap = document.createElement("div");
-    wrap.className = "unit-card";
-
-    var head = document.createElement("div");
-    head.className = "row";
-    var title = document.createElement("strong");
-    title.textContent = peer.name || peer.id;
-    var state = document.createElement("span");
-    state.className = "badge";
-    state.hidden = true;
-    head.appendChild(title);
-    head.appendChild(state);
-    wrap.appendChild(head);
-
-    var row = document.createElement("div");
-    row.className = "delay-row";
-    var sl = document.createElement("input");
-    sl.type = "range";
-    sl.min = "0";
-    sl.max = "60";
-    sl.step = "0.1";
-    sl.value = "0";
-    sl.setAttribute("aria-label", "Delay in seconds for " + (peer.name || peer.id));
-    var val = document.createElement("span");
-    var num = document.createElement("span");
-    num.textContent = "0.0";
-    var unit = document.createElement("span");
-    unit.className = "delay-unit";
-    unit.textContent = " s";
-    val.appendChild(num);
-    val.appendChild(unit);
-    row.appendChild(sl);
-    row.appendChild(val);
-    wrap.appendChild(row);
-
-    var actions = document.createElement("div");
-    actions.className = "row";
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.dataset.label = "Download last 60 s";
-    btn.textContent = btn.dataset.label;
-    btn.addEventListener("click", function () {
-      download(btn, peer.base_url, card.capS, dlFormat.value);
-    });
-    actions.appendChild(btn);
-    wrap.appendChild(actions);
-
-    var card = {
-      el: wrap,
-      title: title,
-      state: state,
-      button: btn,
-      capS: 60,
-      base: peer.base_url,
-      delay: makeDelayControl(sl, num, peer.base_url)
+  // note tags a message with the mirror it came from, but only once there is
+  // more than one mirror to confuse it with.
+  function note(card) {
+    return function (msg) {
+      return cardCount() > 1 && card.name ? msg + " — " + card.name : msg;
     };
+  }
+
+  function makeCard(spec) {
+    var el = template.content.firstElementChild.cloneNode(true);
+    var card = {
+      el: el,
+      base: spec.base,
+      name: spec.name || "",
+      local: !!spec.local,
+      capS: 60,
+      previewOn: false,
+      nameEl:     el.querySelector(".unit-name"),
+      tag:        el.querySelector(".unit-tag"),
+      badge:      el.querySelector(".unit-badge"),
+      slider:     el.querySelector(".unit-delay"),
+      value:      el.querySelector(".unit-delay-value"),
+      prevToggle: el.querySelector(".unit-preview-toggle"),
+      prevView:   el.querySelector(".unit-preview-view"),
+      preview:    el.querySelector(".unit-preview"),
+      format:     el.querySelector(".unit-format"),
+      dlBtn:      el.querySelector(".unit-download")
+    };
+    if (spec.local) el.setAttribute("data-local", "1");
+    if (spec.id) el.setAttribute("data-unit-id", spec.id);
+
+    card.delay = makeDelayControl(card.slider, card.value, card.base, note(card));
+    card.dlBtn.dataset.label = "Save last 60 s";
+    card.dlBtn.textContent = card.dlBtn.dataset.label;
+    card.dlBtn.addEventListener("click", function () {
+      download(card.dlBtn, card.base, card.capS, card.format.value);
+    });
+
+    card.prevToggle.addEventListener("click", function () {
+      setPreview(card, !card.previewOn);
+    });
+    card.prevView.addEventListener("change", function () {
+      if (card.previewOn) card.preview.src = previewSrc(card); // swap the running stream
+    });
+    card.preview.addEventListener("error", function () {
+      if (card.previewOn) showToast(note(card)("Preview stream unavailable"));
+    });
+
+    setName(card, card.name || "This mirror");
     return card;
   }
 
-  function refreshCard(card, peer) {
-    card.title.textContent = peer.name || peer.id;
-    // A mirror that moved to a new address gets a rebuilt card, since the
-    // slider and the download button both close over the old one.
-    if (card.base !== peer.base_url) return false;
-    fetchJSON(peer.base_url + "/api/v1/status").then(function (st) {
-      card.state.hidden = !st.warming_up;
-      card.state.textContent = "Warming up";
-      card.el.classList.remove("offline");
-      var cap = (st.buffer && st.buffer.capacity_s) || 0;
-      if (cap > 0 && cap !== card.capS) {
-        card.capS = cap;
-        card.button.dataset.label = "Download last " + Math.round(cap) + " s";
-        if (!card.button.disabled) card.button.textContent = card.button.dataset.label;
-      }
-      card.delay.apply(st);
+  // setName keeps the visible name and every control's accessible name in
+  // step: with three cards on screen, "Start preview" alone says nothing.
+  function setName(card, name) {
+    card.name = name;
+    card.nameEl.textContent = name;
+    card.slider.setAttribute("aria-label", "Delay in seconds for " + name);
+    card.prevView.setAttribute("aria-label", "Preview view for " + name);
+    card.format.setAttribute("aria-label", "Clip format for " + name);
+    card.preview.alt = "Preview of " + name;
+    relabel(card);
+  }
+
+  function relabel(card) {
+    card.prevToggle.setAttribute("aria-label",
+      (card.previewOn ? "Stop preview of " : "Start preview of ") + card.name);
+    card.dlBtn.setAttribute("aria-label", card.dlBtn.dataset.label + " from " + card.name);
+  }
+
+  function previewSrc(card) {
+    return card.base + "/api/v1/preview?view=" + card.prevView.value;
+  }
+
+  function setPreview(card, on) {
+    card.previewOn = on;
+    if (on) {
+      card.preview.src = previewSrc(card);
+    } else {
+      card.preview.removeAttribute("src"); // drop the stream, do not just hide it
+    }
+    card.prevToggle.textContent = on ? "Stop preview" : "Start preview";
+    card.prevToggle.setAttribute("aria-pressed", String(on));
+    relabel(card);
+  }
+
+  // applyStatus draws one mirror's own status onto its card.
+  function applyStatus(card, st) {
+    card.el.classList.remove("offline");
+    card.badge.hidden = !st.warming_up;
+    card.badge.textContent = "Warming up";
+
+    var cap = (st.buffer && st.buffer.capacity_s) || 0;
+    // The download button always grabs the full buffer; keep its label and
+    // request length in sync with that mirror's actual capacity.
+    if (cap > 0 && cap !== card.capS) {
+      card.capS = cap;
+      card.dlBtn.dataset.label = "Save last " + Math.round(cap) + " s";
+      if (!card.dlBtn.disabled) card.dlBtn.textContent = card.dlBtn.dataset.label;
+      relabel(card);
+    }
+    card.delay.apply(st);
+  }
+
+  // A mirror that stopped answering stays on screen but obviously inert,
+  // rather than vanishing and reshuffling the cards under someone's finger.
+  function markOffline(card) {
+    card.el.classList.add("offline");
+    card.badge.hidden = false;
+    card.badge.textContent = "Offline";
+  }
+
+  // ---------- this mirror ----------
+  var local = makeCard({ base: "", local: true });
+  unitsBox.appendChild(local.el);
+
+  function pollStatus() {
+    fetchJSON("/api/v1/status").then(function (st) {
+      if (st.name && st.name !== local.name) setName(local, st.name);
+      if (st.unit_id) local.el.setAttribute("data-unit-id", st.unit_id);
+      localRole = st.role || "";
+      applyStatus(local, st);
+      applyTags();
     }).catch(function () {
-      card.el.classList.add("offline");
-      card.state.hidden = false;
-      card.state.textContent = "Offline";
+      markOffline(local);
     });
+  }
+
+  // ---------- other mirrors ----------
+  function refreshCard(card, peer) {
+    if (peer.name && peer.name !== card.name) setName(card, peer.name);
+    // A mirror that moved to a new address gets a rebuilt card, since the
+    // slider, preview and download all close over the old one.
+    if (card.base !== peer.base_url) return false;
+    fetchJSON(peer.base_url + "/api/v1/status")
+      .then(function (st) { applyStatus(card, st); })
+      .catch(function () { markOffline(card); });
     return true;
   }
 
+  // applyTags says which card is the one you are looking at, but only when
+  // there is another card to confuse it with.
+  function applyTags() {
+    var many = cardCount() > 1;
+    local.tag.hidden = !many;
+    local.tag.textContent = localRole === "primary" ? "this mirror · hosting" : "this mirror";
+    fleetHint.hidden = !many;
+  }
+
   function applyPeers(list) {
-    fleetBox.hidden = list.length === 0;
-
-    // With other mirrors around, say which one this page belongs to; alone,
-    // the page reads exactly as it always has.
-    if (list.length > 0 && localName) {
-      localTitle.textContent = "Delay — " + localName +
-        (localRole === "primary" ? " (this network)" : "");
-    } else {
-      localTitle.textContent = "Delay";
-    }
-
     var seen = {};
     list.forEach(function (peer) {
       seen[peer.id] = true;
       var card = cards[peer.id];
       if (card && !refreshCard(card, peer)) {
-        fleetList.removeChild(card.el);
+        unitsBox.removeChild(card.el);
+        delete cards[peer.id];
         card = null;
       }
       if (!card) {
-        card = buildCard(peer);
+        card = makeCard({ id: peer.id, name: peer.name || peer.id, base: peer.base_url });
         cards[peer.id] = card;
-        fleetList.appendChild(card.el);
+        unitsBox.appendChild(card.el);
         refreshCard(card, peer);
       }
     });
@@ -438,11 +449,12 @@
     // A mirror that dropped off the network loses its card. The list is
     // already sorted by the server, so cards do not reshuffle between polls.
     Object.keys(cards).forEach(function (id) {
-      if (!seen[id]) {
-        fleetList.removeChild(cards[id].el);
-        delete cards[id];
-      }
+      if (seen[id]) return;
+      unitsBox.removeChild(cards[id].el);
+      delete cards[id];
     });
+
+    applyTags();
   }
 
   // The fleet API is always on: a lone mirror reports an empty list, and
@@ -461,30 +473,6 @@
 
   poll();
   setInterval(poll, 1000);
-
-  // ---------- preview ----------
-  var previewOn = false;
-  var prevView = $("preview-view");
-  function previewSrc() {
-    return "/api/v1/preview?view=" + prevView.value;
-  }
-  prevToggle.addEventListener("click", function () {
-    previewOn = !previewOn;
-    if (previewOn) {
-      preview.src = previewSrc();
-      prevToggle.textContent = "Stop preview";
-    } else {
-      preview.removeAttribute("src");
-      prevToggle.textContent = "Start preview";
-    }
-    prevToggle.setAttribute("aria-pressed", String(previewOn));
-  });
-  prevView.addEventListener("change", function () {
-    if (previewOn) preview.src = previewSrc(); // swap the running stream
-  });
-  preview.addEventListener("error", function () {
-    if (previewOn) showToast("Preview stream unavailable");
-  });
 })();
 </script>
 </body>
