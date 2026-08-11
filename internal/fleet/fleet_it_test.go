@@ -89,6 +89,11 @@ func (a *airspace) ids() []string {
 	for id := range a.aps {
 		out = append(out, id)
 	}
+	// Sorted: map iteration order is randomized, and this result feeds both an
+	// indexed read and the split-brain failure message. Today the indexed read
+	// is safe only because its caller has already asserted there is exactly one
+	// AP -- the guard makes it safe, not this helper.
+	sort.Strings(out)
 	return out
 }
 
