@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 	"time"
@@ -26,6 +27,7 @@ type Camera struct {
 	frames  <-chan []byte
 	seq     uint64
 	skipped []string
+	mode    mode
 }
 
 // Open configures and starts the device per the boot config (FR-9: pinned
@@ -56,12 +58,19 @@ func Open(ctx context.Context, cfg config.Config) (*Camera, error) {
 // openDevice configures and starts one specific node.
 func openDevice(ctx context.Context, cfg config.Config, path string) (*Camera, error) {
 	w, h := cfg.Resolution()
+	fps := cfg.FPS()
 	if cfg.AutoResolution() {
-		dw, dh, err := probeMaxMJPEG(path)
+		best, err := probeBestMode(path, cfg.FPS())
 		if err != nil {
 			return nil, fmt.Errorf("camera: probe %s: %w", path, err)
 		}
-		w, h = dw, dh
+		w, h = best.W, best.H
+		if best.FPS > 0 {
+			// Ask the device for the rate it actually advertises, not the
+			// profile nominal — requesting 30 from a 15 fps mode is the bug
+			// this replaces. Rounded, so 30000/1001 asks for 30, not 29.
+			fps = best.FPS
+		}
 	}
 	dev, err := device.Open(path,
 		device.WithPixFormat(v4l2.PixFormat{
@@ -69,11 +78,11 @@ func openDevice(ctx context.Context, cfg config.Config, path string) (*Camera, e
 			Width:       uint32(w),
 			Height:      uint32(h),
 		}),
-		device.WithFPS(uint32(cfg.FPS())),
+		device.WithFPS(uint32(math.Round(fps))),
 		device.WithBufferSize(4),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("camera: open %s (%dx%d): %w", path, w, h, err)
+		return nil, fmt.Errorf("camera: open %s (%dx%d@%.4g): %w", path, w, h, fps, err)
 	}
 	skipped, err := applyControls(dev, cfg)
 	if err != nil {
@@ -84,35 +93,76 @@ func openDevice(ctx context.Context, cfg config.Config, path string) (*Camera, e
 		dev.Close()
 		return nil, fmt.Errorf("camera: start stream: %w", err)
 	}
-	return &Camera{dev: dev, frames: dev.GetOutput(), skipped: skipped}, nil
+	return &Camera{
+		dev:     dev,
+		frames:  dev.GetOutput(),
+		skipped: skipped,
+		mode:    mode{W: w, H: h, FPS: fps},
+	}, nil
 }
 
-// probeMaxMJPEG opens the node briefly and returns the largest discrete
-// MJPEG frame size it advertises, capped at config.MaxAuto{Width,Height} so
-// a >1080p camera cannot exceed the Pi 5's software-decode budget (E-2 rev).
-func probeMaxMJPEG(path string) (w, h int, err error) {
+// probeBestMode opens the node briefly, enumerates every MJPEG geometry it
+// advertises together with the rate each one sustains, and lets selectMode
+// choose. The cap (config.MaxAuto{Width,Height}) keeps a >1080p camera from
+// exceeding the Pi 5's software-decode budget (E-2 rev); it is applied inside
+// selectMode so the rule lives in one place.
+func probeBestMode(path string, targetFPS float64) (mode, error) {
 	dev, err := device.Open(path)
 	if err != nil {
-		return 0, 0, fmt.Errorf("open: %w", err)
+		return mode{}, fmt.Errorf("open: %w", err)
 	}
 	defer dev.Close()
 	sizes, err := v4l2.GetFormatFrameSizes(dev.Fd(), v4l2.PixelFmtMJPEG)
 	if err != nil {
-		return 0, 0, fmt.Errorf("enum frame sizes: %w", err)
+		return mode{}, fmt.Errorf("enum frame sizes: %w", err)
 	}
+	modes := make([]mode, 0, len(sizes))
 	for _, s := range sizes {
-		fw, fh := int(s.Size.MaxWidth), int(s.Size.MaxHeight)
-		if fw == 0 || fh == 0 || fw > config.MaxAutoWidth || fh > config.MaxAutoHeight {
+		w, h := int(s.Size.MaxWidth), int(s.Size.MaxHeight)
+		if w <= 0 || h <= 0 {
 			continue
 		}
-		if fw*fh > w*h {
-			w, h = fw, fh
+		// A stepwise/continuous device reports a single entry covering a
+		// range (GetFormatFrameSizes stops after index 0 for those), so the
+		// range maximum is the best geometry we can name. UVC webcams are
+		// discrete in practice.
+		modes = append(modes, mode{W: w, H: h, FPS: maxFrameRate(dev.Fd(), uint32(w), uint32(h))})
+	}
+	return selectMode(modes, config.MaxAutoWidth, config.MaxAutoHeight, targetFPS)
+}
+
+// maxFrameRate returns the highest rate the device reports for one geometry,
+// or 0 if it enumerates sizes but not intervals — selectMode treats that as
+// "unknown" rather than "zero", so such a device still opens.
+//
+// V4L2 enumerates frame *intervals* (seconds per frame), so the rate is the
+// inverted fraction and the shortest interval is the fastest mode. For a
+// discrete device each index is one interval; for stepwise/continuous, Min is
+// the shortest interval of the range.
+func maxFrameRate(fd uintptr, w, h uint32) float64 {
+	var best float64
+	// Bounded: a driver that never returns the terminating error must not
+	// hang the open. No real device enumerates anywhere near this many.
+	for index := uint32(0); index < 64; index++ {
+		fi, err := v4l2.GetFormatFrameInterval(fd, index, v4l2.PixelFmtMJPEG, w, h)
+		if err != nil {
+			return best
+		}
+		if r := rateOf(fi.Interval.Min); r > best {
+			best = r
+		}
+		if fi.Type != v4l2.FrameIntervalTypeDiscrete {
+			return best
 		}
 	}
-	if w == 0 || h == 0 {
-		return 0, 0, fmt.Errorf("no MJPEG mode at or below %dx%d", config.MaxAutoWidth, config.MaxAutoHeight)
+	return best
+}
+
+func rateOf(f v4l2.Fract) float64 {
+	if f.Numerator == 0 || f.Denominator == 0 {
+		return 0
 	}
-	return w, h, nil
+	return float64(f.Denominator) / float64(f.Numerator)
 }
 
 // ctrlIDs maps the config-facing control names (controls.go) to their V4L2 ids.
@@ -151,6 +201,15 @@ func applyControls(dev *device.Device, cfg config.Config) ([]string, error) {
 // Reported at startup so a control silently dropped from the config stays
 // visible (NFR-8), and recorded by spike S-2.
 func (c *Camera) SkippedControls() []string { return c.skipped }
+
+// SelectedMode returns the geometry and frame rate actually opened, which on
+// the "auto" profile is what the probe chose rather than the profile nominal.
+// The pipeline reports and budgets against this (status fps/resolution, gap
+// detection, clip export rate) — a clip encoded at the nominal 30 from a
+// 60 fps capture would play at half speed (FR-5).
+func (c *Camera) SelectedMode() (w, h int, fps float64) {
+	return c.mode.W, c.mode.H, c.mode.FPS
+}
 
 // ReadFrame returns the next MJPEG frame, stamped with the wall clock
 // (allowed here: hardware adapter, hard rule 6). The payload is copied out

@@ -158,10 +158,39 @@ MJPEG bitrate, which eats the buffer budget directly. S-2 must measure
 `buffer_max_bytes` is trusted. Prefer the largest sensor you can get (1/2.8″
 over 1/3″), and light the room.
 
-## 8. Known issue
+## 8. What `auto` actually picks
 
-`probeMaxMJPEG` picks the largest MJPEG mode by pixel **area** and ignores
-frame rate, so it can select a mode the camera only sustains at 5-15 fps, which
-`device.WithFPS(30)` then cannot honour. If `v4l2-ctl --list-formats-ext` shows
-a large mode with a low frame rate, set `profile = "1080p30"` explicitly rather
-than leaving it on `auto`.
+`auto` reads the frame rate of **every** MJPEG mode the camera advertises and
+opens the largest one that clears a **25 fps floor**, capped at 1080p. Frame
+rate is the constraint; resolution is maximised under it. So:
+
+| Camera offers | `auto` opens | Why |
+|---|---|---|
+| 1920×1080@30, 1280×720@60 | **1920×1080@30** | both clear the floor, so pixels win (E-2) |
+| 1600×1200@15, 1280×720@30 | **1280×720@30** | trades resolution to hold the rate |
+| 1920×1080@25, 1280×720@30 | **1920×1080@25** | 25 clears the floor, so keep the pixels |
+| 1920×1080@24, 1280×720@30 | **1280×720@30** | just under the floor, so the rate wins |
+| 1920×1080@60 only | **1920×1080@60** | 60 is fine, and is carried downstream |
+| 1920×1080@15, 640×480@20 | **640×480@20** | nothing clears the floor; fastest wins |
+
+The floor is 25 rather than a hair under 30 on purpose: it absorbs NTSC and PAL
+rates (29.97 and 25) and buys resolution, because holding 1080p at 25 fps beats
+dropping to 720p to gain five frames. Below 25, motion starts reading as
+stutter — which defeats the point of a movement mirror.
+
+It never refuses a camera for being slow — a choppy mirror beats a black
+screen.
+
+The mode it chose is in the boot log (`source opened … width=… height=… fps=…`)
+and in `GET /api/v1/status`, which reports the real mode rather than the profile
+nominal. Check there first if the picture looks softer or choppier than
+expected, and compare against `v4l2-ctl --list-formats-ext`.
+
+To override, set `profile = "1080p30"` or `"720p60"` explicitly instead of
+`auto`.
+
+**One budget note:** if your camera's best 30 fps mode is 1080p**60**, `auto`
+takes it and the byte rate roughly doubles. `buffer_max_bytes` (1 GiB) then
+evicts before `buffer_max_s` (60 s), so the usable delay window shrinks. That is
+correct ring-buffer behaviour, not a bug — pin `1080p30` if you would rather
+have the full 60 s.

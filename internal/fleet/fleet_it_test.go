@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -335,9 +336,19 @@ func distinctSlotIDs(t *testing.T, n int) []string {
 	if len(bySlot) < n {
 		t.Fatalf("could not find %d ids in distinct stagger slots", n)
 	}
+	// Ordered by stagger slot, ascending. Ranging over the map instead would
+	// return a fresh permutation on every run (Go randomizes map iteration),
+	// so ids[0] — the unit a test powers on first — would draw a different
+	// slot each time and the election would be re-rolled per run. That is the
+	// dependency this helper exists to remove.
+	slots := make([]time.Duration, 0, len(bySlot))
+	for d := range bySlot {
+		slots = append(slots, d)
+	}
+	sort.Slice(slots, func(i, j int) bool { return slots[i] < slots[j] })
 	out := make([]string, 0, n)
-	for _, id := range bySlot {
-		out = append(out, id)
+	for _, d := range slots {
+		out = append(out, bySlot[d])
 	}
 	return out
 }

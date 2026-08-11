@@ -27,12 +27,21 @@ type sysStatus struct {
 	eng   *engine.Engine
 	sup   *capture.Supervisor
 	fleet *fleetRuntime
+	mode  *modeStore // live capture mode; nil ⇒ profile nominal only
 }
 
 func (s *sysStatus) Status() httpapi.Status {
 	st := s.buf.Stats()
 	rt := s.store.Current()
+	// Report what the camera actually opened, not what the profile nominally
+	// asks for — on "auto" the probe may have traded resolution for frame
+	// rate (E-2), and a status line that hides that is a lie.
 	w, h := profileResolution(rt.Profile)
+	fps := profileFPS(rt.Profile)
+	if s.mode != nil {
+		w, h = s.mode.resolution(rt.Profile)
+		fps = s.mode.fps(rt.Profile)
+	}
 	filled := st.Span.Seconds()
 
 	// Warm-up mirrors the engine's FR-10 semantics exactly: warming when
@@ -44,7 +53,7 @@ func (s *sysStatus) Status() httpapi.Status {
 
 	out := httpapi.Status{
 		DelayS:        s.eng.Delay().Seconds(),
-		FPS:           profileFPS(rt.Profile),
+		FPS:           fps,
 		Resolution:    fmt.Sprintf("%dx%d", w, h),
 		Buffer:        httpapi.BufferStatus{CapacityS: rt.BufferMaxS, FilledS: filled, Bytes: st.Bytes},
 		DroppedFrames: s.sup.Dropped(),

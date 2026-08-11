@@ -14,7 +14,7 @@ type Config struct {
 	Bind           string  `toml:"bind"`
 	Source         string  `toml:"source"` // "camera" | "synth"
 	Device         string  `toml:"device"`
-	Profile        string  `toml:"profile"` // "720p60" | "1080p30" (E-2)
+	Profile        string  `toml:"profile"` // "auto" | "720p60" | "1080p30" (E-2)
 	BufferMaxS     float64 `toml:"buffer_max_s"`
 	BufferMaxBytes int64   `toml:"buffer_max_bytes"`
 	MirrorFlip     bool    `toml:"mirror_flip"`     // FR-2, default on
@@ -98,8 +98,8 @@ func (c Config) Validate() error {
 }
 
 // AutoResolution reports whether the camera adapter should probe the device
-// for its highest MJPEG mode instead of using a fixed profile (capped at the
-// nominal 1080p, see MaxAutoWidth/Height).
+// instead of using a fixed profile: the largest MJPEG mode that still sustains
+// FPS(), capped at MaxAutoWidth/Height (E-2).
 func (c Config) AutoResolution() bool { return c.Profile == "auto" }
 
 // MaxAutoWidth/MaxAutoHeight cap auto-detection so a >1080p camera cannot
@@ -109,10 +109,12 @@ const (
 	MaxAutoHeight = 1080
 )
 
-// FPS returns the nominal pipeline frame rate of the profile. For "auto" it
-// is the 1080p nominal (30) — the display tick and exporter use this; the
-// engine selects frames by capture timestamp, so a camera delivering a
-// slightly different rate stays correct.
+// FPS returns the nominal frame rate of the profile. For "auto" (30) it is the
+// rate the camera adapter probes *for* — the mode it actually opens is what
+// status, gap detection and the exporter then use, since a camera may only
+// offer 60, or may not reach 30 at all (E-2). This stays the fallback for
+// sources that report no mode. The engine selects frames by capture timestamp,
+// so a camera drifting from its advertised rate stays correct either way.
 func (c Config) FPS() float64 {
 	if c.Profile == "720p60" {
 		return 60
@@ -121,7 +123,8 @@ func (c Config) FPS() float64 {
 }
 
 // Resolution returns the nominal capture size of the profile; "auto" reports
-// the 1080p cap (the actual mode is chosen by the camera adapter at open).
+// the 1080p cap. The size actually opened is chosen by the camera adapter and
+// reported through /api/v1/status, so it may be smaller than this.
 func (c Config) Resolution() (w, h int) {
 	if c.Profile == "720p60" {
 		return 1280, 720
