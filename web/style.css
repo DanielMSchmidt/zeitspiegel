@@ -282,6 +282,11 @@ footer a { color: var(--muted); }
   align-items: start;
 }
 #units .unit-card { margin: 0; }
+/* The lines around the grid introduce and explain the whole group, so they
+   have to stand clear of it — flush against a card they read as that card's
+   own label. Wider than the gap between cards, deliberately. */
+#fleet-hint { margin: 6px 0 18px; }
+#units + .hint { margin-top: 18px; }
 .unit-head {
   display: flex;
   align-items: baseline;

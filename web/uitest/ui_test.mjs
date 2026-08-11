@@ -266,6 +266,25 @@ test("UI-8 three cards fit a phone: no sideways scroll, thumb-sized controls", a
   assert.equal(new Set(lefts).size, 1, "cards must stack in one column on a phone");
 });
 
+// UI-12: the line explaining the cards has to read as an intro to the group,
+// not as a label stuck to the first card.
+test("UI-12 the fleet hint clears the first card", async (t) => {
+  const ui = await openUI({
+    local: { unit_id: "unit-a", name: "Corner" },
+    peers: [{ id: "unit-b", name: "Barre" }],
+  });
+  t.after(() => ui.close());
+
+  await until(async () => (await ui.cards().count()) === 2, "two cards");
+
+  const gap = await ui.page.evaluate(() => {
+    const hint = document.getElementById("fleet-hint").getBoundingClientRect();
+    const card = document.querySelector("#units .unit-card").getBoundingClientRect();
+    return Math.round(card.top - hint.bottom);
+  });
+  assert.ok(gap >= 12, `only ${gap}px between the hint and the first card`);
+});
+
 // UI-11: a card is as tall as its own contents. Side by side, a card whose
 // preview is running must not stretch its neighbour into a wall of empty
 // panel — which is exactly what a grid row does if you let it.
