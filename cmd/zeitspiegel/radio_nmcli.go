@@ -119,6 +119,31 @@ func (r *nmcliRadio) Associated(ctx context.Context) (bool, error) {
 	return strings.Contains(out, "100 ("), nil
 }
 
+// Stations counts the clients associated to this unit's AP — member units
+// and guests' phones alike. `iw` speaks nl80211 directly and, unlike a scan,
+// this works IN AP mode, which is exactly what lets a host know whether
+// anyone is using its network without ever taking it down (D8). iw is baked
+// into the image. The supervisor throttles calls: frequent station dumps
+// have been reported to cause momentary drops on brcmfmac in noisy RF.
+func (r *nmcliRadio) Stations(ctx context.Context) (int, error) {
+	if r.currentMode() != "ap" {
+		return 0, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, nmcliTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "iw", "dev", r.iface, "station", "dump").CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("iw station dump: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	n := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "Station ") {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // Gateway is the default route on the wireless interface, which on this
 // network is the unit hosting the AP — NetworkManager's shared mode always
 // takes 10.42.0.1, so a member needs no configuration to find its primary.

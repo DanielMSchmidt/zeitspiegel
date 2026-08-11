@@ -57,7 +57,6 @@ func run() error {
 	// share one machine and therefore one /proc/cpuinfo.
 	unitID := flag.String("unit-id", "", "override the unit id (dev/test; normally derived from the hardware)")
 	unitName := flag.String("unit-name", "", "override the display name (dev/test; normally read from the boot partition)")
-	fleetSize := flag.Int("fleet-size", 0, "override fleet_size (dev/test)")
 	netSim := flag.String("net-sim", "", "drive a virtual radio backed by this directory instead of nmcli (dev/test)")
 	netScale := flag.Float64("net-scale", 1, "divide every election timing by this, so a failover takes seconds (dev/test)")
 	flag.Parse()
@@ -86,11 +85,10 @@ func run() error {
 	// the network (FR-15, E-8). Resolved before anything else so the id is
 	// in the log from the first line.
 	fleetRT, err := newFleetRuntime(cfg, fleetOptions{
-		UnitID:    *unitID,
-		UnitName:  *unitName,
-		FleetSize: *fleetSize,
-		NetSim:    *netSim,
-		NetScale:  *netScale,
+		UnitID:   *unitID,
+		UnitName: *unitName,
+		NetSim:   *netSim,
+		NetScale: *netScale,
 	}, logger)
 	if err != nil {
 		return err

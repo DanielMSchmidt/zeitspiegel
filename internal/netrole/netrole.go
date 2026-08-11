@@ -1,18 +1,21 @@
 // Package netrole decides, at runtime, which role a unit takes on the shared
 // Wi-Fi network: host the access point (primary) or join it (member). Because
 // the decision is made from what the radio can see rather than from baked
-// configuration, every appliance can ship the identical SD image (E-8).
+// configuration, every appliance ships the identical SD image, and units can
+// be added to — or removed from — an installation at any time (E-8).
 //
 // The package is pure — no I/O, no wall clock (hard rule 6). The caller drives
 // it: each Step returns an Action to perform against a real radio, and what
 // the radio reported goes back in on the next Step as an Observation.
 //
 // The shape of the machine is forced by one hardware fact: a Wi-Fi radio in AP
-// mode cannot scan. A primary therefore can never see that a second primary is
+// mode cannot scan. A host therefore can never see that a second host is
 // beaconing the same SSID, so a split brain is undetectable by observation.
-// Two mechanisms cover it instead — an id-derived stagger that makes a
-// simultaneous claim unlikely, and a blind self-heal that demotes a primary
-// which has stayed short of its expected fleet (ARCHITECTURE D8).
+// What a host CAN see, cheaply and even in AP mode, is whether anyone at all
+// is using its network — associated stations include member units and guests'
+// phones alike. That yields the central rule: a host serving anybody holds its
+// network; only a host serving nobody probes for other networks, and since
+// nobody is attached, probing kicks no one (ARCHITECTURE D8).
 package netrole
 
 import (
@@ -32,7 +35,7 @@ type Role int
 
 const (
 	// RoleUnknown is the boot state, and the state while a unit is between
-	// roles (searching, waiting its turn to promote, or just demoted).
+	// roles (searching, waiting its turn to promote, or probing).
 	RoleUnknown Role = iota
 	// RolePrimary means this unit hosts the access point.
 	RolePrimary
@@ -86,36 +89,44 @@ func (a Action) String() string {
 // Timings are injected so the E2E lane can compress a failover into seconds
 // (hard rule 6 — nothing here reads the wall clock).
 type Timings struct {
-	// Stagger is the spacing between AP-claim slots. A unit waits
-	// slot×Stagger before claiming an unclaimed SSID, which is what stops a
-	// shared power strip from making every unit primary at once.
-	Stagger time.Duration
-	// PromoteStep is the spacing between promotion positions after the
-	// primary disappears: the unit at roster position n waits n×PromoteStep.
+	// Stagger is the spacing between AP-claim slots; a unit waits
+	// slot×Stagger before claiming an unclaimed SSID. The slot count is
+	// fixed (StaggerSlots) — there is no fleet size to derive it from — and
+	// the total is kept short: the stagger only reduces the chance of a
+	// simultaneous claim, because a claim collision is healed by the idle
+	// probe anyway, and a solo dancer's Wi-Fi must not take a minute to
+	// appear.
+	Stagger      time.Duration
+	StaggerSlots int
+	// PromoteStep is the spacing between promotion positions after the host
+	// disappears: the unit at roster position n waits n×PromoteStep.
 	PromoteStep time.Duration
-	// HealAfter is how long a primary tolerates being short of its fleet
-	// before demoting to check whether it is half of a split brain. Each
-	// fruitless heal doubles the next wait, up to MaxHealMult.
+	// HealAfter is how long a host serving nobody at all waits before
+	// probing for other networks. Each fruitless probe doubles the next
+	// wait, up to MaxHealMult.
 	HealAfter time.Duration
 	// JoinTimeout bounds how long an association may take before the unit
 	// gives up and goes back to searching.
 	JoinTimeout time.Duration
-	// MaxHealMult caps the exponential backoff on fruitless heals, so a
-	// legitimately switched-off peer costs a few brief interruptions rather
-	// than one every HealAfter forever.
+	// MaxHealMult caps the probe backoff, so a genuinely lonely unit
+	// converges to a quiet cadence instead of flapping.
 	MaxHealMult int
 }
 
 // DefaultTimings are the production values. HealAfter is deliberately well
-// above PromoteStep: a promotion race must have fully settled before a short
-// fleet is allowed to look like a split brain.
+// above PromoteStep: a promotion race must have fully settled before an empty
+// audience is allowed to look like a split brain. PromoteStep is short —
+// after a host's power is cut, position 1 brings the network back in roughly
+// detection (~2-4 s) + 10 s + AP bring-up (~3-5 s), and phones rejoin the
+// same open SSID on their own.
 func DefaultTimings() Timings {
 	return Timings{
-		Stagger:     8 * time.Second,
-		PromoteStep: 15 * time.Second,
-		HealAfter:   90 * time.Second,
-		JoinTimeout: 30 * time.Second,
-		MaxHealMult: 8,
+		Stagger:      3 * time.Second,
+		StaggerSlots: 4,
+		PromoteStep:  10 * time.Second,
+		HealAfter:    90 * time.Second,
+		JoinTimeout:  30 * time.Second,
+		MaxHealMult:  8,
 	}
 }
 
@@ -130,8 +141,12 @@ type Observation struct {
 	// Associated reports that the station link is up (members only).
 	Associated bool
 	// Peers is the number of other units currently registered with this
-	// unit (primaries only).
+	// unit (hosts only).
 	Peers int
+	// Stations is the number of clients associated to this unit's AP —
+	// member units and guests' phones alike (hosts only). Anyone at all
+	// being served is reason to hold the network.
+	Stations int
 }
 
 type state int
@@ -147,10 +162,9 @@ const (
 // Machine is the election state machine for one unit. It is not safe for
 // concurrent use; the caller drives it from a single goroutine.
 type Machine struct {
-	id    string
-	fleet int
-	t     Timings
-	clk   Clock
+	id  string
+	t   Timings
+	clk Clock
 
 	role   Role
 	state  state
@@ -160,22 +174,21 @@ type Machine struct {
 	// searching, association timeout while joining, promotion time while
 	// waiting to promote.
 	deadline time.Time
-	// shortSince is when a primary first noticed it was short of its fleet;
-	// zero means it is not currently short.
-	shortSince time.Time
-	// healAttempt counts consecutive fruitless heals, driving the backoff.
+	// idleSince is when a host last saw an empty audience begin — zero
+	// while anyone (unit or phone) is being served.
+	idleSince time.Time
+	// healAttempt counts consecutive fruitless probes, driving the backoff.
 	healAttempt int
 }
 
-// New returns a Machine for a unit with the given stable id. fleetSize is the
-// number of units expected on the network and is identical on every card; 1
-// disables the stagger and the self-heal entirely, so a single appliance
-// behaves exactly as it did before multi-unit support (E-7).
-func New(id string, fleetSize int, t Timings, clk Clock) *Machine {
-	if fleetSize < 1 {
-		fleetSize = 1
+// New returns a Machine for a unit with the given stable id. There is no
+// fleet size: how many units share the network is discovered, not configured,
+// so one image serves an installation that grows over time (E-8).
+func New(id string, t Timings, clk Clock) *Machine {
+	if t.StaggerSlots < 1 {
+		t.StaggerSlots = 1
 	}
-	return &Machine{id: id, fleet: fleetSize, t: t, clk: clk}
+	return &Machine{id: id, t: t, clk: clk}
 }
 
 // Role reports the current role.
@@ -183,7 +196,7 @@ func (m *Machine) Role() Role { return m.role }
 
 // SetRoster records the unit ids last known to be on the network, which is
 // what gives promotion its deterministic order. The caller passes the roster
-// it got from the primary when registering.
+// it got from the host when registering.
 func (m *Machine) SetRoster(ids []string) {
 	m.roster = append([]string(nil), ids...)
 	sort.Strings(m.roster)
@@ -193,20 +206,17 @@ func (m *Machine) SetRoster(ids []string) {
 // derived from the unit id, so it is stable across reboots and differs
 // between units without any coordination.
 func (m *Machine) StaggerDelay() time.Duration {
-	if m.fleet <= 1 {
-		return 0
-	}
 	return time.Duration(m.slot()) * m.t.Stagger
 }
 
 func (m *Machine) slot() int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(m.id))
-	return int(h.Sum32() % uint32(m.fleet))
+	return int(h.Sum32() % uint32(m.t.StaggerSlots))
 }
 
 // promoteDelay is how long this unit waits before trying to take over after
-// the primary disappears: its position in the roster times PromoteStep. The
+// the host disappears: its position in the roster times PromoteStep. The
 // lowest surviving id goes first, and if that unit is dead too the next one
 // follows automatically, so the fleet cannot deadlock waiting for a
 // designated successor.
@@ -221,35 +231,9 @@ func (m *Machine) promoteDelay() time.Duration {
 	return time.Duration(m.slot()) * m.t.PromoteStep
 }
 
-// mayYield reports whether a host is allowed to drop its network to check
-// whether it is half of a split brain.
-//
-// Only a host serving a minority of the fleet may. The alternative — letting
-// whichever host runs out of patience first yield — is a race between two
-// independent timers whose start times bear no relation to each other, so a
-// host that had been short for a while could yield ahead of a genuinely
-// stranded one and drop a working network for nothing. A majority is a
-// predicate, not a race, so it cannot be lost to a head start.
-//
-// For a fleet of two or three this always converges: the split is 0+0 or
-// 1+0 members, so at least one host is in the minority and yields. An exact
-// tie (a fleet of four splitting 1+1) leaves both willing, and they are
-// separated by the stagger and the backoff as before.
-//
-// A useful side effect: with one unit simply switched off, the host still
-// serving the other one holds a majority and never yields, so the room never
-// pays for an outage that could not have helped.
-func (m *Machine) mayYield(peers int) bool {
-	if peers < 0 {
-		peers = 0
-	}
-	return 2*peers < m.fleet-1
-}
-
-// healDelay is how long a short-fleet host waits before yielding. It backs off
-// on every fruitless attempt, so a peer that is simply switched off costs a
-// few brief interruptions rather than one every HealAfter forever, and carries
-// the unit's stagger offset so two hosts never yield in lockstep.
+// healDelay is how long an audience-less host waits before probing. It backs
+// off on every fruitless probe and carries the unit's stagger offset so two
+// hosts in a split brain do not probe in lockstep.
 func (m *Machine) healDelay() time.Duration {
 	mult := 1
 	for i := 0; i < m.healAttempt; i++ {
@@ -279,12 +263,12 @@ func (m *Machine) Step(o Observation) Action {
 		if o.ScanFailed {
 			return ActionScan
 		}
-		if m.fleet <= 1 {
-			return m.becomeAP()
-		}
 		if m.deadline.IsZero() {
 			m.deadline = now.Add(m.StaggerDelay())
-			return ActionScan
+			if now.Before(m.deadline) {
+				return ActionScan
+			}
+			// Slot 0: nothing to wait for.
 		}
 		if now.Before(m.deadline) {
 			return ActionScan
@@ -308,13 +292,20 @@ func (m *Machine) Step(o Observation) Action {
 		if o.Associated {
 			return ActionNone
 		}
-		// The primary went away. Wait our turn rather than racing every
-		// other survivor onto the air at once.
+		// The host went away. Wait our turn rather than racing every other
+		// survivor onto the air at once.
 		m.role, m.state = RoleUnknown, statePendingPromote
 		m.deadline = now.Add(m.promoteDelay())
 		return ActionNone
 
 	case statePendingPromote:
+		// The network is back — either the loss was a blip or a faster
+		// survivor already promoted. Rejoining is always safe (it cannot
+		// create a second AP), and it turns a transient Wi-Fi hiccup into
+		// seconds of absence instead of a whole promotion slot.
+		if o.SSIDSeen {
+			return m.join(now)
+		}
 		if now.Before(m.deadline) {
 			return ActionNone
 		}
@@ -322,32 +313,29 @@ func (m *Machine) Step(o Observation) Action {
 		return ActionScan
 
 	case statePrimary:
-		// Nothing to be short of, or the fleet is all here.
-		if m.fleet <= 1 || o.Peers >= m.fleet-1 {
-			m.shortSince = time.Time{}
+		// Anyone at all being served — a registered unit or just a phone —
+		// is reason to hold the network. This is what makes a solo mirror
+		// with an audience rock-solid: it never takes its Wi-Fi away.
+		if o.Peers > 0 || o.Stations > 0 {
+			m.idleSince = time.Time{}
 			m.healAttempt = 0
 			return ActionNone
 		}
-		// Short, but still serving most of the fleet: this network is the
-		// one worth keeping, whoever else may be beaconing.
-		if !m.mayYield(o.Peers) {
-			m.shortSince = time.Time{}
+		if m.idleSince.IsZero() {
+			m.idleSince = now
 			return ActionNone
 		}
-		if m.shortSince.IsZero() {
-			m.shortSince = now
+		if now.Sub(m.idleSince) < m.healDelay() {
 			return ActionNone
 		}
-		if now.Sub(m.shortSince) < m.healDelay() {
-			return ActionNone
-		}
-		// We have been short for long enough that we might be one half of a
-		// split brain — and being in AP mode, we cannot scan to find out.
-		// Drop the AP and look. Either we find the other network and join
-		// it, or nothing is there and we come straight back up.
+		// Nobody has used this network for a while. We might be one half of
+		// a split brain — and being in AP mode, we cannot scan to find out.
+		// Drop the AP and look; with zero stations there is nobody to kick,
+		// so the probe costs nothing. Either we find the other network and
+		// join it, or nothing is there and we come straight back up.
 		m.healAttempt++
 		m.role, m.state = RoleUnknown, stateSearching
-		m.deadline, m.shortSince = time.Time{}, time.Time{}
+		m.deadline, m.idleSince = time.Time{}, time.Time{}
 		return ActionDemote
 	}
 
@@ -362,6 +350,6 @@ func (m *Machine) join(now time.Time) Action {
 
 func (m *Machine) becomeAP() Action {
 	m.role, m.state = RolePrimary, statePrimary
-	m.shortSince = time.Time{}
+	m.idleSince = time.Time{}
 	return ActionBecomeAP
 }

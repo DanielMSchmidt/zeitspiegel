@@ -11,11 +11,11 @@ buffer_max_bytes = 1073741824     # 1 GiB hard cap; bright-scene 1080p30 MJPEG c
 mirror_flip = true                # horizontal flip — it is a mirror (FR-2)
 default_delay_s = 15.0            # FR-3 boot delay; runtime slider overrides via PUT /api/v1/delay
 
-# Fleet (FR-15, E-8). Identical on every card — the role is elected at boot,
-# so one image serves the whole installation. bake.sh rewrites fleet_size from
-# FLEET_SIZE at image build time; 1 keeps the classic single-appliance
-# behaviour (own AP, no election, no self-heal).
-fleet_size = 1
+# Network (FR-15, E-8). Identical on every card — the role is elected at boot
+# and the fleet's size is discovered, not configured, so this same image
+# serves an installation that grows one unit at a time. A unit joins the
+# "zeitspiegel" network if it is on the air, hosts it otherwise, and a host
+# serving anyone (a member unit or just a dancer's phone) never gives it up.
 network_manage = true             # drive the radio: scan, then host or join the "zeitspiegel" network
 name_file = "/boot/firmware/zeitspiegel-name.txt"   # optional per-card display name; edit by plugging the card in
 

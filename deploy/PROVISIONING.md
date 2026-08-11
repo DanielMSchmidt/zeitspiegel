@@ -13,13 +13,14 @@ Insert the micro-SD into your computer, then:
 ```
 make sd                      # auto-detects the card, asks before erasing
 SSID=studio-mirror make sd   # choose the Wi-Fi network name
-FLEET_SIZE=3 make sd         # several mirrors sharing one network (E-8)
 ```
 
-**Several mirrors?** Bake **once** with `FLEET_SIZE` set to how many you have,
-then write that same image to every card — the role is elected at boot, not
-baked, so there is no per-card build and no "first" card. Whichever unit is on
-first hosts the network; the rest join it. Power-on order does not matter.
+**Several mirrors?** Nothing changes: write that same image to every card —
+including cards you buy years later. The role is elected at boot and the
+fleet's size is discovered, not configured, so there is no per-card build, no
+"first" card, and no count to keep in sync. Whichever unit is on first hosts
+the network; the rest join it; if the host is unplugged another takes over by
+itself. Power-on order does not matter.
 
 To give a unit a human name, plug its card into any computer afterwards and
 write one line into `zeitspiegel-name.txt` on the FAT32 `bootfs` partition:

@@ -37,57 +37,45 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 - mDNS via Avahi (preinstalled): `http://zeitspiegel.local`; fallback
   `http://10.42.0.1` always works.
 
-## Several units in one room (E-8)
+## Several units, added over time (E-8)
 
-Every card carries the **identical image**; the role is elected at boot, not
-baked. Bake once with `FLEET_SIZE=3 make sd` and write that same image to all
-three cards.
+Every card carries the **identical image** and nothing about the fleet is
+configured — not even how many units exist. `make sd` once, write that image
+to every card you own now, and to every card you buy later.
 
-- On boot a unit looks for the `zeitspiegel` network. If it is on the air, the
-  unit joins it and registers with whoever is hosting; if not, the unit hosts
-  it. Power-on order does not matter — a unit that boots late just joins.
-- There is only ever **one** SSID, and whoever hosts it takes `10.42.0.1` and
-  the name `zeitspiegel.local`. The printed poster and the QR codes therefore
-  stay valid no matter which box is hosting. The others answer to
-  `zeitspiegel-<unit id>.local`.
-- Open `http://zeitspiegel.local` and you get a card per mirror, each with its
-  own delay slider and download button. Delays are entirely independent; the
-  page talks to each unit directly, so a clip download never relays through
-  the hosting unit.
-- **Pull the host's plug** and one survivor takes over within roughly 20–45 s
-  (measure on site and record it here). Every mirror keeps running throughout
-  — `zeitspiegel.service` never waits on the network. Plug the old one back in
-  and it rejoins as an ordinary member; it does not take the network back,
-  because a handback would cost the room a second outage for nothing.
-- To name a unit, plug its SD card into any computer and write one line into
-  `zeitspiegel-name.txt` on the FAT32 `bootfs` partition (e.g. `Barre`). The
-  image itself stays identical. Unnamed units call themselves
-  `Zeitspiegel <ID>` after their CPU serial.
-- **The one thing to check on site first:** a phone and a member, both joined
-  to the hosting unit's AP, must be able to reach each other
-  (`curl http://10.42.0.x/healthz` from a laptop on the network).
-  NetworkManager exposes no client-isolation knob and does not enable one, so
-  this should work — but the whole combined page depends on it.
-- Radio: all units share one channel. Control traffic is negligible, but a
-  full-buffer clip from a member relays member→host→phone on 2.4 GHz. With
-  every unit in one room, `AP_BAND=a AP_CHANNEL=36` (non-DFS) gives a lot more
-  headroom; `bg`/6 remains the compatibility default.
-- Split brain: two units that come up in the same stagger slot can both host
-  the same SSID, and neither can detect it — a radio in AP mode cannot scan.
-  A host that stays short of `fleet_size` for ~90 s drops its network, looks
-  around and joins the other one, so the fleet recovers on its own at the cost
-  of a brief interruption. Each fruitless attempt backs the next one off, so a
-  unit that is simply switched off does not cost an outage every 90 s.
-- The Pi never needs internet: packages are baked into the image at build
-  time (`make image`, on your computer). Clients on the AP get no internet
-  either; phones may warn about it ("stay connected" once).
-- Radio: 2.4 GHz (band bg, channel 6) for maximum device compatibility; the
-  regulatory domain must be set (default DE, `WIFI_COUNTRY=`) — and the
-  stock Pi OS image's saved rfkill state must be cleared at bake time
-  (bake.sh does this), or the radio stays soft-blocked even with the
-  regdom set, and NM logs `Wi-Fi disabled by radio killswitch; disabled
-  by state file` while wlan0 stays in `unavailable`.
-- The join-venue-Wi-Fi variant is preserved on the `wifi-client` branch.
+- On boot a unit looks for the `zeitspiegel` network. On the air ⇒ join it
+  and register with whoever is hosting; not ⇒ host it. Power-on order never
+  matters, and units are stopped by cutting power — nothing depends on a
+  clean shutdown anywhere.
+- There is only ever **one** SSID; whoever hosts it takes `10.42.0.1` and
+  answers to `zeitspiegel.local`, so the printed poster and QR codes stay
+  valid across every failover. Members answer to `zeitspiegel-<unit id>.local`.
+- `http://zeitspiegel.local` shows a card per mirror — its own delay slider
+  and download button each. Delays are fully independent; the page talks to
+  each unit directly, so a clip download never relays through the host.
+- **A host serving anyone never takes the network down.** "Anyone" includes
+  a dancer's phone: a single station used all afternoon holds its Wi-Fi
+  unconditionally. Only a host with nobody attached occasionally drops its
+  AP for a few seconds to check whether another network exists (that is how
+  two units that cold-booted into separate networks find each other) — and
+  since nobody is attached, nobody notices.
+- **Pull the host's plug** and a survivor takes over in roughly 15–20 s
+  (measure on site and record it here); phones rejoin the same open SSID by
+  themselves. Every mirror keeps mirroring throughout — the display path
+  never waits on the network. Plug the old unit back in and it joins as an
+  ordinary member.
+- Name a unit by writing one line into `zeitspiegel-name.txt` on the FAT32
+  `bootfs` partition (e.g. `Barre`); unnamed units call themselves
+  `Zeitspiegel <ID>` after their CPU serial. The image stays identical.
+- **First thing to check on site:** a phone and a member unit, both on the
+  network, must reach each other (`curl http://10.42.0.x/healthz` from a
+  laptop). The combined page rests on that.
+- Radio: all units share one channel; `AP_BAND=a AP_CHANNEL=36 make sd`
+  (non-DFS 5 GHz) gives clip downloads far more headroom in one room;
+  `bg`/6 stays the compatibility default.
+- Election observability: `curl -s zeitspiegel.local/debug/vars` →
+  `zeitspiegel_fleet` (`role`, `role_changes`, `heal_probes`,
+  `announce_failures`, `peers`); role transitions are also in the journal.
 
 ## Operations
 

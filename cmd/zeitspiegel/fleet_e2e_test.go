@@ -28,7 +28,6 @@ import (
 )
 
 const (
-	fleetSize = 3
 	// netScale compresses every election timing by this factor, so a whole
 	// failover happens in seconds instead of a minute. Production runs at 1.
 	netScale = 30
@@ -80,7 +79,6 @@ type unit struct {
 	base    string
 	air     string
 	logPath string
-	size    int // fleet_size this unit is configured with
 	cmd     *exec.Cmd
 	log     *os.File
 }
@@ -95,18 +93,14 @@ func freeTCPPort(t *testing.T) int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
-// startUnit launches one real appliance and waits for it to serve.
+// startUnit launches one real appliance and waits for it to serve. There is
+// nothing fleet-shaped to configure: every unit runs the identical command
+// line apart from its identity (which on hardware comes from the CPU serial).
 func startUnit(t *testing.T, id, name, air string) *unit {
-	return startUnitOfSize(t, id, name, air, fleetSize)
-}
-
-// startUnitOfSize is startUnit with an explicit fleet_size, so the
-// single-appliance case can be exercised through the same harness.
-func startUnitOfSize(t *testing.T, id, name, air string, size int) *unit {
 	t.Helper()
 	// t.TempDir() mints a fresh directory on every call, so the log path is
 	// fixed once here — a restarted unit must append to the same file.
-	u := &unit{t: t, id: id, name: name, port: freeTCPPort(t), air: air, size: size,
+	u := &unit{t: t, id: id, name: name, port: freeTCPPort(t), air: air,
 		logPath: filepath.Join(t.TempDir(), id+".log")}
 	u.base = fmt.Sprintf("http://127.0.0.1:%d", u.port)
 	u.start()
@@ -127,7 +121,6 @@ func (u *unit) start() {
 		"--bind", fmt.Sprintf("127.0.0.1:%d", u.port),
 		"--unit-id", u.id,
 		"--unit-name", u.name,
-		"--fleet-size", fmt.Sprint(u.size),
 		"--net-sim", u.air,
 		"--net-scale", fmt.Sprint(netScale),
 	)
@@ -179,11 +172,10 @@ func (u *unit) tail() string {
 }
 
 type status struct {
-	DelayS    float64 `json:"delay_s"`
-	UnitID    string  `json:"unit_id"`
-	Name      string  `json:"name"`
-	Role      string  `json:"role"`
-	FleetSize int     `json:"fleet_size"`
+	DelayS float64 `json:"delay_s"`
+	UnitID string  `json:"unit_id"`
+	Name   string  `json:"name"`
+	Role   string  `json:"role"`
 }
 
 func (u *unit) status() (status, error) {
@@ -362,14 +354,14 @@ func beaconing(t *testing.T, air string) []string {
 // ST-7: a lone appliance still brings its own network up. Both NetworkManager
 // profiles ship with autoconnect=false so they cannot race the election, which
 // makes the binary the only thing that ever hosts a network — including when
-// there is no fleet at all. Skipping the election for fleet_size 1 would leave
-// a single appliance with no Wi-Fi and no way in.
+// no other unit exists. A dancer powering on a single station must get a
+// working Wi-Fi within seconds, with no configuration saying "you are alone".
 func TestLoneUnitStillHostsItsOwnNetwork(t *testing.T) {
 	air := filepath.Join(t.TempDir(), "air")
 	if err := os.MkdirAll(air, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	u := startUnitOfSize(t, "solo", "Solo", air, 1)
+	u := startUnit(t, "solo", "Solo", air)
 
 	deadline := time.Now().Add(settleFor)
 	for {
@@ -382,18 +374,27 @@ func TestLoneUnitStillHostsItsOwnNetwork(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	st := u.mustStatus()
-	if st.Role != "primary" || st.FleetSize != 1 {
-		t.Fatalf("lone unit reports %+v, want primary in a fleet of 1", st)
+	if st := u.mustStatus(); st.Role != "primary" {
+		t.Fatalf("lone unit reports %+v, want primary", st)
 	}
-	// And it serves no fleet API: there is no fleet to describe.
+	// The fleet API is always on; with nobody registered it reports an
+	// explicit empty list, which is what tells the page "no cards yet".
 	resp, err := http.Get(u.base + "/api/v1/peers")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != 404 {
-		t.Errorf("GET /api/v1/peers on a lone unit = %d, want 404", resp.StatusCode)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("GET /api/v1/peers on a lone unit = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Peers []peer `json:"peers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Peers) != 0 {
+		t.Errorf("lone unit lists %v, want an empty fleet", out.Peers)
 	}
 }
 
@@ -424,11 +425,11 @@ func TestFleetColdStartElectsOnePrimary(t *testing.T) {
 		}
 	}
 
-	// Every unit knows its own identity and the size of the fleet, which is
-	// what the combined page labels its cards with.
+	// Every unit knows its own identity, which is what the combined page
+	// labels its cards with.
 	for _, u := range units {
 		st := u.mustStatus()
-		if st.UnitID != u.id || st.Name != u.name || st.FleetSize != fleetSize {
+		if st.UnitID != u.id || st.Name != u.name {
 			t.Errorf("unit %s reports %+v", u.id, st)
 		}
 	}
@@ -673,5 +674,85 @@ func TestFleetPeersAnswerCrossOriginCalls(t *testing.T) {
 		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
 			t.Errorf("peer %s Allow-Origin = %q", p.ID, got)
 		}
+	}
+}
+
+// --- ST-13 -------------------------------------------------------------------
+
+// ST-13: a full studio day, end to end against real binaries. A dancer powers
+// on one station and works alone; later two more are added one at a time and
+// simply join; each keeps its own delay; then the first unit — the one
+// hosting the network — has its power cut mid-use. A survivor takes over
+// within seconds, the remaining units re-associate, and when the first unit
+// is plugged back in it rejoins as an ordinary member. This is the owner's
+// exact operating story (E-8), compressed by --net-scale.
+func TestFleetStudioDay(t *testing.T) {
+	air := filepath.Join(t.TempDir(), "air")
+	if err := os.MkdirAll(air, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Morning: one station in a corner. Its network must be up quickly.
+	a := startUnit(t, "unit-a", "Corner", air)
+	units := []*unit{a}
+	waitSettled(t, units, "one unit alone")
+	setDelay(t, a.base, 5)
+
+	// Half an hour later (the sim needs no actual gap — nothing in the
+	// election keys on elapsed time between boots), a second station.
+	b := startUnit(t, "unit-b", "Barre", air)
+	units = append(units, b)
+	host := waitSettled(t, units, "second unit added")
+	if host.id != a.id {
+		t.Fatalf("adding a unit moved the network to %s; joining must not preempt", host.id)
+	}
+	waitPeers(t, a, 1, "second unit added")
+
+	// And a third.
+	c := startUnit(t, "unit-c", "Window", air)
+	units = append(units, c)
+	waitSettled(t, units, "third unit added")
+	list := waitPeers(t, a, 2, "third unit added")
+
+	// Everyone gets their own delay, driven through the addresses the host
+	// handed out — exactly what the combined page does.
+	byID := map[string]*unit{"unit-a": a, "unit-b": b, "unit-c": c}
+	want := map[string]float64{"unit-a": 5}
+	for i, p := range list {
+		secs := float64(10 + i*8)
+		setDelay(t, p.BaseURL, secs)
+		want[p.ID] = secs
+	}
+	for id, secs := range want {
+		if got := byID[id].mustStatus().DelayS; got != secs {
+			t.Errorf("unit %s delay = %v, want %v", id, got, secs)
+		}
+	}
+
+	// Evening: the corner station — the host — gets unplugged mid-use.
+	a.kill()
+	survivor := waitSettled(t, units, "after the host's power was cut")
+	if survivor.id == a.id {
+		t.Fatal("the dead unit is still listed as hosting")
+	}
+	waitPeers(t, survivor, 1, "after failover")
+
+	// The survivors' delays were never touched by any of this: each unit
+	// owns its own, and the failover is control-plane only.
+	for _, u := range []*unit{b, c} {
+		if got := u.mustStatus().DelayS; got != want[u.id] {
+			t.Errorf("unit %s delay = %v after failover, want %v", u.id, got, want[u.id])
+		}
+	}
+
+	// The corner station comes back — and joins, rather than fighting for
+	// the network it used to host.
+	a.start()
+	if got := waitSettled(t, units, "after the ex-host returned"); got.id != survivor.id {
+		t.Fatalf("network changed hands to %s when the ex-host returned", got.id)
+	}
+	waitPeers(t, survivor, 2, "after the ex-host rejoined")
+	if st := a.mustStatus(); st.Role != "member" {
+		t.Fatalf("returned unit is %q, want member", st.Role)
 	}
 }

@@ -22,27 +22,32 @@ const (
 
 func timings() netrole.Timings {
 	return netrole.Timings{
-		Stagger:     10 * time.Second,
-		PromoteStep: 20 * time.Second,
-		HealAfter:   90 * time.Second,
-		JoinTimeout: 30 * time.Second,
-		MaxHealMult: 8,
+		Stagger:      10 * time.Second,
+		StaggerSlots: 4,
+		PromoteStep:  20 * time.Second,
+		HealAfter:    90 * time.Second,
+		JoinTimeout:  30 * time.Second,
+		MaxHealMult:  8,
 	}
 }
 
 // --- a virtual airspace ------------------------------------------------------
 //
-// Faithful in the one way that matters: a unit that is beaconing cannot
-// scan. Two units can beacon the same SSID at once and neither can see the
-// other, which is exactly the split brain the real hardware permits and the
-// reason the self-heal exists.
+// Faithful in the ways that decide the design: a unit that is beaconing
+// cannot scan; two units can beacon the same SSID at once, each blind to the
+// other; a station stays on the access point it joined; and an access point
+// can count its associated clients without ever scanning — which is the
+// signal the whole dynamic election rests on.
 
 type airspace struct {
-	mu  sync.Mutex
-	aps map[string]int // beaconing unit id → partition
+	mu   sync.Mutex
+	aps  map[string]int    // beaconing unit id → partition
+	stas map[string]string // associated unit id → the AP it joined
 }
 
-func newAirspace() *airspace { return &airspace{aps: map[string]int{}} }
+func newAirspace() *airspace {
+	return &airspace{aps: map[string]int{}, stas: map[string]string{}}
+}
 
 // apIn returns a unit beaconing in the given partition. When more than one is
 // (a split brain), the lowest id is returned rather than a random map entry,
@@ -86,14 +91,17 @@ func (a *airspace) ids() []string {
 	return out
 }
 
-// merge drops every partition boundary, putting all units on one channel —
-// how a split brain becomes visible to the fleet's own recovery.
-func (a *airspace) merge() {
+// unitStations counts the member units associated to the given AP.
+func (a *airspace) unitStations(apID string) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for id := range a.aps {
-		a.aps[id] = 0
+	n := 0
+	for _, ap := range a.stas {
+		if ap == apID {
+			n++
+		}
 	}
+	return n
 }
 
 type fakeRadio struct {
@@ -102,11 +110,12 @@ type fakeRadio struct {
 	partition int
 	mode      string // "off", "ap", "sta"
 	// assoc is the unit this radio associated with. A real station stays on
-	// the access point it joined; it does not re-pick one every scan. Without
-	// that stickiness a member would drift between two hosts during a split
-	// brain, which no real radio does and which would make the fleet's
-	// membership counts meaningless.
+	// the access point it joined; it does not re-pick one every scan.
 	assoc string
+	// phantom models guests' phones associated to this unit's AP — clients
+	// that are not Zeitspiegel units but count exactly the same for the
+	// hold-the-network rule.
+	phantom int
 }
 
 func (r *fakeRadio) Scan(context.Context) ([]string, error) {
@@ -121,8 +130,9 @@ func (r *fakeRadio) Scan(context.Context) ([]string, error) {
 
 func (r *fakeRadio) ActivateAP(context.Context) error {
 	r.air.mu.Lock()
-	defer r.air.mu.Unlock()
 	r.air.aps[r.id] = r.partition
+	delete(r.air.stas, r.id)
+	r.air.mu.Unlock()
 	r.mode, r.assoc = "ap", ""
 	return nil
 }
@@ -134,12 +144,18 @@ func (r *fakeRadio) ActivateSTA(context.Context) error {
 	r.mode = "sta"
 	// Pick an access point now and stay on it.
 	r.assoc, _ = r.air.apIn(r.partition, r.id)
+	r.air.mu.Lock()
+	if r.assoc != "" {
+		r.air.stas[r.id] = r.assoc
+	}
+	r.air.mu.Unlock()
 	return nil
 }
 
 func (r *fakeRadio) Down(context.Context) error {
 	r.air.mu.Lock()
 	delete(r.air.aps, r.id)
+	delete(r.air.stas, r.id)
 	r.air.mu.Unlock()
 	r.mode, r.assoc = "off", ""
 	return nil
@@ -150,6 +166,13 @@ func (r *fakeRadio) Associated(context.Context) (bool, error) {
 		return false, nil
 	}
 	return r.air.beaconing(r.assoc, r.partition), nil
+}
+
+func (r *fakeRadio) Stations(context.Context) (int, error) {
+	if r.mode != "ap" {
+		return 0, nil
+	}
+	return r.air.unitStations(r.id) + r.phantom, nil
 }
 
 func (r *fakeRadio) Gateway(context.Context) (string, error) {
@@ -175,16 +198,14 @@ type harness struct {
 	clk   *synth.FakeClock
 	air   *airspace
 	units []*unit
-	fleet int
 }
 
 func newHarness(t *testing.T, ids []string) *harness {
 	t.Helper()
 	h := &harness{
-		t:     t,
-		clk:   synth.NewFakeClock(time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)),
-		air:   newAirspace(),
-		fleet: len(ids),
+		t:   t,
+		clk: synth.NewFakeClock(time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)),
+		air: newAirspace(),
 	}
 	for _, id := range ids {
 		h.units = append(h.units, h.build(id, 0))
@@ -197,7 +218,7 @@ func (h *harness) build(id string, partition int) *unit {
 		id:    id,
 		radio: &fakeRadio{air: h.air, id: id, partition: partition},
 		reg:   peers.NewRegistry(id, peerTTL, h.clk),
-		mach:  netrole.New(id, h.fleet, timings(), h.clk),
+		mach:  netrole.New(id, timings(), h.clk),
 		alive: true,
 	}
 	u.sup = &fleet.Supervisor{
@@ -207,18 +228,18 @@ func (h *harness) build(id string, partition int) *unit {
 		Peers:         u.reg,
 		Clock:         h.clk,
 		AnnounceEvery: 10 * time.Second,
+		StationEvery:  10 * time.Second,
 		Announce:      func(ctx context.Context) error { return h.announce(u) },
 		OnError:       func(error) {}, // failures are expected while the fleet is unsettled
 	}
 	return u
 }
 
-// announce mimics a member registering with whichever unit is currently
-// hosting its network, and feeding the roster it gets back into its own
-// election machine — the same loop the real Announcer runs over HTTP.
+// announce mimics a member registering with the unit whose network it is
+// associated to — its default route — and feeding the roster it gets back
+// into its own election machine, the same loop the real Announcer runs over
+// HTTP.
 func (h *harness) announce(u *unit) error {
-	// Announce to the access point this unit is actually associated with —
-	// its default route — not to whichever one happens to be on the air.
 	apID := u.radio.assoc
 	if apID == "" || !h.air.beaconing(apID, u.radio.partition) {
 		return errors.New("no primary to announce to")
@@ -300,21 +321,21 @@ func (h *harness) requireOneAP(what string) string {
 // distinctSlotIDs finds ids that land in different stagger slots, so a clean
 // cold start can be asserted without depending on how the hash happens to
 // spread three arbitrary names.
-func distinctSlotIDs(t *testing.T, fleetSize int) []string {
+func distinctSlotIDs(t *testing.T, n int) []string {
 	t.Helper()
 	clk := synth.NewFakeClock(time.Now())
 	bySlot := map[time.Duration]string{}
-	for i := 0; len(bySlot) < fleetSize && i < 10000; i++ {
+	for i := 0; len(bySlot) < n && i < 10000; i++ {
 		id := fmt.Sprintf("u%d", i)
-		d := netrole.New(id, fleetSize, timings(), clk).StaggerDelay()
+		d := netrole.New(id, timings(), clk).StaggerDelay()
 		if _, taken := bySlot[d]; !taken {
 			bySlot[d] = id
 		}
 	}
-	if len(bySlot) < fleetSize {
-		t.Fatalf("could not find %d ids in distinct stagger slots", fleetSize)
+	if len(bySlot) < n {
+		t.Fatalf("could not find %d ids in distinct stagger slots", n)
 	}
-	out := make([]string, 0, fleetSize)
+	out := make([]string, 0, n)
 	for _, id := range bySlot {
 		out = append(out, id)
 	}
@@ -325,21 +346,46 @@ func distinctSlotIDs(t *testing.T, fleetSize int) []string {
 
 // IT-11: three units powered on together settle into exactly one access
 // point with the other two joined to it — no coordination, no baked roles,
-// identical software on every card.
+// no fleet size, identical software on every card.
 func TestColdStartElectsOnePrimary(t *testing.T) {
 	h := newHarness(t, distinctSlotIDs(t, 3))
 	h.settle(20)
 	primary := h.requireOneAP("cold start")
 
-	// And the primary actually knows about the others.
 	if got := h.find(primary).reg.Count(); got != 2 {
 		t.Fatalf("primary %q sees %d members, want 2", primary, got)
 	}
 }
 
-// IT-11: pull the primary's plug and exactly one survivor takes over, with
-// the other rejoining it. Nothing designates a successor in advance, so this
-// works whichever unit died.
+// IT-11: the studio's core flow — units are added one at a time. The first
+// hosts; each later unit finds the network and joins it, whatever the order
+// and however long the gaps.
+func TestUnitsAddedStepByStepJoin(t *testing.T) {
+	ids := distinctSlotIDs(t, 3)
+	h := newHarness(t, ids[:1])
+	h.settle(10)
+	first := h.requireOneAP("first unit alone")
+
+	// Half an hour later, a second unit is powered on.
+	h.clk.Advance(30 * time.Minute)
+	h.units = append(h.units, h.build(ids[1], 0))
+	h.settle(10)
+	if got := h.requireOneAP("after the second joined"); got != first {
+		t.Fatalf("network changed hands to %q when a unit joined", got)
+	}
+
+	// And later a third.
+	h.clk.Advance(10 * time.Minute)
+	h.units = append(h.units, h.build(ids[2], 0))
+	h.settle(10)
+	h.requireOneAP("after the third joined")
+	if got := h.find(first).reg.Count(); got != 2 {
+		t.Fatalf("host sees %d members, want 2", got)
+	}
+}
+
+// IT-11: pull the host's plug and exactly one survivor takes over, with the
+// other rejoining it. Nothing designates a successor in advance.
 func TestPrimaryFailoverPromotesExactlyOne(t *testing.T) {
 	h := newHarness(t, distinctSlotIDs(t, 3))
 	h.settle(20)
@@ -354,9 +400,8 @@ func TestPrimaryFailoverPromotesExactlyOne(t *testing.T) {
 	}
 }
 
-// IT-11: the fleet must survive losing two of three — the rule is "the
-// lowest surviving id goes first", not "the second one goes", so a dead
-// successor cannot deadlock the remaining unit.
+// IT-11: the fleet survives losing two of three — the "lowest surviving id
+// goes first" rule cannot deadlock on a dead successor.
 func TestFailoverSurvivesLosingTwoUnits(t *testing.T) {
 	h := newHarness(t, distinctSlotIDs(t, 3))
 	h.settle(20)
@@ -374,9 +419,8 @@ func TestFailoverSurvivesLosingTwoUnits(t *testing.T) {
 	}
 }
 
-// IT-11: an ex-primary that gets plugged back in rejoins as a member. It
-// must not preempt — a handback would cost the room a second outage for no
-// benefit — and the fleet must stay on exactly one AP throughout.
+// IT-11: an ex-host that gets plugged back in rejoins as a member. It must
+// not preempt, and the fleet must stay on exactly one AP throughout.
 func TestExPrimaryReturnsAsMemberWithoutFlapping(t *testing.T) {
 	ids := distinctSlotIDs(t, 3)
 	h := newHarness(t, ids)
@@ -411,7 +455,7 @@ func TestExPrimaryReturnsAsMemberWithoutFlapping(t *testing.T) {
 		h.clk.Advance(roundStep)
 	}
 
-	if got := h.requireOneAP("after the ex-primary returned"); got != newPrimary {
+	if got := h.requireOneAP("after the ex-host returned"); got != newPrimary {
 		t.Fatalf("primary changed to %q; the returning unit should not preempt", got)
 	}
 	if revived.mach.Role() != netrole.RoleMember {
@@ -419,52 +463,18 @@ func TestExPrimaryReturnsAsMemberWithoutFlapping(t *testing.T) {
 	}
 }
 
-// IT-11: the case no scan can detect. Two units come up on separate
-// partitions, each hosting the same SSID and each blind to the other. When
-// the partitions merge, the fleet has to notice from its own membership
-// count alone and collapse back to one network.
-func TestSplitBrainSelfHeals(t *testing.T) {
-	h := &harness{
-		t:     t,
-		clk:   synth.NewFakeClock(time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)),
-		air:   newAirspace(),
-		fleet: 2,
-	}
-	ids := distinctSlotIDs(t, 2)
-	h.units = []*unit{h.build(ids[0], 0), h.build(ids[1], 1)} // separate partitions
-
-	h.settle(20)
-	if n := h.air.count(); n != 2 {
-		t.Fatalf("setup: %d units beaconing, want 2 (a split brain)", n)
-	}
-
-	// One channel again. Neither unit can see the other — both are
-	// beaconing, and a beaconing radio cannot scan.
-	h.air.merge()
-	for _, u := range h.units {
-		u.radio.partition = 0
-	}
-
-	h.settle(120)
-	h.requireOneAP("after the split brain healed")
-}
-
-// IT-11: the case that looks most like a lease expiring elsewhere. A host is
-// cut off from its members without ever restarting, so it keeps beaconing and
-// — being in AP mode — cannot see that the others have given up on it and
-// elected a new host. It has to work out from its own empty membership list
-// that it is the stale one, and rejoin.
-//
-// Crucially the unit that took over must NOT be the one that yields: it is
-// serving a mirror, and dropping its network would cost that mirror an outage
-// for nothing.
+// IT-11: a host is cut off from its members without ever restarting — it
+// keeps beaconing, blind to the replacement that got elected behind its
+// back. Its members expire from its registry, its station count drops to
+// zero, and from that alone it works out that it should look around — while
+// the replacement, which is serving a member, holds. The wrong network never
+// yields.
 func TestStrandedHostRejoinsTheNetworkThatReplacedIt(t *testing.T) {
 	h := newHarness(t, distinctSlotIDs(t, 3))
 	h.settle(20)
 	stranded := h.requireOneAP("cold start")
 
-	// Cut the old host off without restarting it: it keeps beaconing, blind
-	// to everything, while the other two lose their association.
+	// Cut the old host off without restarting it.
 	h.find(stranded).radio.partition = 1
 	h.air.mu.Lock()
 	h.air.aps[stranded] = 1
@@ -472,7 +482,6 @@ func TestStrandedHostRejoinsTheNetworkThatReplacedIt(t *testing.T) {
 
 	h.settle(40)
 
-	// One of the survivors is now hosting on the original stretch of air.
 	var replacement string
 	for _, u := range h.units {
 		if u.id != stranded && u.mach.Role() == netrole.RolePrimary {
@@ -493,11 +502,11 @@ func TestStrandedHostRejoinsTheNetworkThatReplacedIt(t *testing.T) {
 		t.Fatalf("setup: %d units beaconing, want 2", h.air.count())
 	}
 
-	h.settle(160)
+	h.settle(200)
 
 	winner := h.requireOneAP("after the stranded host rejoined")
 	if winner != replacement {
-		t.Fatalf("network changed hands to %q; the host serving members (%q) must not be the one that yields",
+		t.Fatalf("network changed hands to %q; the host serving a member (%q) must not be the one that yields",
 			winner, replacement)
 	}
 	if role := h.find(stranded).mach.Role(); role != netrole.RoleMember {
@@ -505,21 +514,115 @@ func TestStrandedHostRejoinsTheNetworkThatReplacedIt(t *testing.T) {
 	}
 }
 
-// IT-11: a lone appliance in a fleet of one keeps its network up forever. It
-// has no peers to be short of, so the self-heal must never touch it — this
-// is the pre-existing single-unit behaviour (E-7) and it must not regress.
-func TestSingleUnitFleetKeepsItsNetworkUp(t *testing.T) {
+// IT-11: a cold-boot 0+0 split — two units up on separate stretches of air,
+// both hosting, neither serving anyone. When the air merges, the first
+// prober finds the other network and joins it.
+func TestEmptySplitBrainSelfHeals(t *testing.T) {
+	h := &harness{
+		t:   t,
+		clk: synth.NewFakeClock(time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)),
+		air: newAirspace(),
+	}
+	ids := distinctSlotIDs(t, 2)
+	h.units = []*unit{h.build(ids[0], 0), h.build(ids[1], 1)} // separate partitions
+
+	// Long enough for every stagger slot, short of the first idle probe —
+	// the point of this test is the split, not the probing.
+	h.settle(10)
+	if n := h.air.count(); n != 2 {
+		t.Fatalf("setup: %d units beaconing, want 2 (a split brain)", n)
+	}
+
+	// One channel again. Neither unit can see the other — both are
+	// beaconing, and a beaconing radio cannot scan.
+	h.air.mu.Lock()
+	for id := range h.air.aps {
+		h.air.aps[id] = 0
+	}
+	h.air.mu.Unlock()
+	for _, u := range h.units {
+		u.radio.partition = 0
+	}
+
+	h.settle(250)
+	h.requireOneAP("after the split brain healed")
+}
+
+// IT-11: the property the whole redesign exists for — a solo host with an
+// audience (here: a dancer's phone, modelled as a phantom station) NEVER
+// takes its network down, no matter how long it runs and no matter that no
+// other Zeitspiegel unit ever appears. This is what was broken by
+// fleet_size: a lone unit of a fleet-of-3 image dropped its AP every ~12
+// minutes forever.
+func TestLoneHostWithAPhoneNeverDropsItsNetwork(t *testing.T) {
 	h := newHarness(t, []string{"solo"})
+	h.units[0].radio.phantom = 1 // one phone on the AP
+
 	ctx := context.Background()
-	for i := 0; i < 200; i++ {
+	// ~2.5 simulated hours — far beyond every heal window and backoff cap.
+	for i := 0; i < 1800; i++ {
 		h.units[0].sup.Tick(ctx)
 		h.clk.Advance(roundStep)
-		if i > 2 && h.air.count() != 1 {
-			t.Fatalf("round %d: lone unit dropped its network", i)
+		if i > 3 && h.air.count() != 1 {
+			t.Fatalf("round %d (t+%v): the lone host dropped its network with a phone attached",
+				i, time.Duration(i)*roundStep)
 		}
 	}
 	if h.units[0].mach.Role() != netrole.RolePrimary {
 		t.Fatalf("role = %v, want primary", h.units[0].mach.Role())
+	}
+}
+
+// IT-11: a solo host with NO audience probes occasionally — and always comes
+// back up. The probe is free (nobody attached to kick) and is what heals a
+// 0+0 split; a truly lonely unit converges to a quiet, capped cadence.
+func TestLoneIdleHostProbesAndAlwaysReturns(t *testing.T) {
+	h := newHarness(t, []string{"solo"})
+
+	ctx := context.Background()
+	probes, wasDown := 0, false
+	for i := 0; i < 1800; i++ {
+		h.units[0].sup.Tick(ctx)
+		if h.air.count() == 0 {
+			wasDown = true
+		} else if wasDown {
+			wasDown = false
+			probes++
+		}
+		h.clk.Advance(roundStep)
+	}
+	if probes == 0 {
+		t.Fatal("an idle host never probed — a 0+0 split brain would never heal")
+	}
+	if h.air.count() != 1 {
+		t.Fatal("the host did not return after its last probe")
+	}
+	// The backoff must keep a lonely unit quiet, not flapping: over 2.5
+	// simulated hours the capped cadence allows only a handful of probes.
+	if probes > 15 {
+		t.Fatalf("%d probes in 2.5 h — the backoff is not damping", probes)
+	}
+}
+
+// IT-11: a phone showing up between probes stops the probing — the audience
+// rule works with real arrival times, not just in the pure table test.
+func TestPhoneArrivingStopsProbing(t *testing.T) {
+	h := newHarness(t, []string{"solo"})
+	ctx := context.Background()
+	h.settle(8) // past every stagger slot
+	if h.air.count() != 1 {
+		t.Fatal("setup: host not up")
+	}
+
+	// A dancer connects.
+	h.units[0].radio.phantom = 1
+
+	for i := 0; i < 1200; i++ {
+		h.units[0].sup.Tick(ctx)
+		h.clk.Advance(roundStep)
+		if i > 3 && h.air.count() != 1 {
+			t.Fatalf("round %d: probed despite an attached phone", i)
+		}
 	}
 }
 
