@@ -44,12 +44,12 @@ type Status struct {
 	UptimeS       float64      `json:"uptime_s"`
 
 	// Fleet identity (FR-15, E-8). A single appliance reports its own id and
-	// name with role "primary" and fleet_size 1, so the shape is the same
-	// whether one unit is running or three.
-	UnitID    string `json:"unit_id"`
-	Name      string `json:"name"`
-	Role      string `json:"role"`
-	FleetSize int    `json:"fleet_size"`
+	// name with role "primary", so the shape is the same whether one unit is
+	// running or five. There is no fleet-size field: how many units share
+	// the network is discovered, not configured.
+	UnitID string `json:"unit_id"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
 }
 
 // StatusProvider supplies the composed system status (wired in cmd).

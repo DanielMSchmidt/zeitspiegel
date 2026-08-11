@@ -58,7 +58,6 @@ func (s *sysStatus) Status() httpapi.Status {
 		out.UnitID = s.fleet.unit.ID
 		out.Name = s.fleet.unit.Name
 		out.Role = s.fleet.Role()
-		out.FleetSize = s.fleet.fleetSize
 	}
 	return out
 }

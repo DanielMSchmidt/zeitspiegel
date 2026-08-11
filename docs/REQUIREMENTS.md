@@ -18,7 +18,7 @@
 | FR-12 | Boot to full-screen mirror ≤ 25 s, no login/desktop: Pi OS Lite (no desktop), SDL/KMSDRM fullscreen, getty@tty1 masked, quiet boot (`quiet logo.nologo vt.global_cursor_default=0`, `disable_splash`), unit starts without waiting on the network | Boot timing on target (M4) |
 | FR-13 | On-screen delay indicator: top-right badge showing current delay as `Ns delay` (whole seconds), white on opaque black, always visible, not mirror-flipped | UT-11 + manual visual check |
 | FR-14 | Several appliances on one network are controlled from one page, each with its own independently settable delay; changing one must not affect another. A lone appliance's page is unchanged | IT-10, ST-8; ST-7 for the listing |
-| FR-15 | Role election: on boot a unit looks for the shared `zeitspiegel` network and joins it, or hosts it if nobody does. If the host disappears exactly one survivor takes over; a returning ex-host rejoins as an ordinary member without preempting. Every card runs the identical image (E-8) | UT-19, IT-11, ST-7/9/10/11 |
+| FR-15 | Role election, dynamic: on boot a unit looks for the shared `zeitspiegel` network and joins it, or hosts it if nobody does — units are added to and removed from an installation at any time, always by cutting power, and there is no configured fleet size anywhere. If the host disappears exactly one survivor takes over within seconds; a returning ex-host rejoins as an ordinary member without preempting; a host serving anyone (a member unit or just a guest's phone) never takes the network down | UT-19, IT-11, ST-7/9/10/11/13 |
 
 ## 2. Non-functional requirements
 
@@ -33,7 +33,7 @@
 | NFR-7 | Core logic 100 % testable without hardware |
 | NFR-8 | Structured logs (persistent journal at `/var/log/journal`, so a no-AP / no-screen field appliance can still be post-mortem-debugged after a power cycle) + expvar metrics (drops, fill, export duration [stream-complete, download-inclusive] + export time-to-first-byte, render duration / over-budget ticks, tick overruns, buffer misses, held-frame streaks, capture gaps, frame-size / bitrate, renderer + display info) |
 | NFR-9 | Unplug tolerance: read-only root (overlayfs); clips are streamed to the client and never written to storage. Persistent journal at `/var/log/journal` is the one allowed write path (NFR-8); ext4 journaling keeps it crash-consistent on power loss |
-| NFR-10 | Discoverable as `zeitspiegel.local` (mDNS) on the appliance's own AP; fallback address `http://10.42.0.1` (the AP gateway). Whichever unit is hosting answers to `zeitspiegel.local` and takes `10.42.0.1`, so both stay valid across a failover; the others answer to `zeitspiegel-<unit id>.local`. Hostnames are set transiently (`hostnamectl --transient`) because `/etc/hostname` is read-only once the overlay is sealed |
+| NFR-10 | Discoverable as `zeitspiegel.local` (mDNS) on the appliance's own AP; fallback address `http://10.42.0.1` (the AP gateway). Whichever unit is hosting answers to `zeitspiegel.local` and takes `10.42.0.1`, so both stay valid across a failover; the others answer to `zeitspiegel-<unit id>.local`. Hostnames are set transiently (`hostnamectl --transient`) because `/etc/hostname` is read-only once the overlay is sealed, and announced via `avahi-set-host-name` — Avahi does not follow kernel hostname changes, and the live rename is what moves `zeitspiegel.local` to the new host after a failover |
 
 ## 3. API contract (v1)
 
@@ -42,7 +42,7 @@ semantics; capture/display read atomic snapshots.
 
 | Method & path | Purpose | Responses |
 |---|---|---|
-| `GET /api/v1/status` | `delay_s, fps, resolution, buffer{capacity_s, filled_s, bytes}, dropped_frames, min_latency_ms, warming_up, uptime_s, unit_id, name, role(primary\|member\|unknown), fleet_size` | 200 |
+| `GET /api/v1/status` | `delay_s, fps, resolution, buffer{capacity_s, filled_s, bytes}, dropped_frames, min_latency_ms, warming_up, uptime_s, unit_id, name, role(primary\|member\|unknown)` | 200 |
 | `PUT /api/v1/delay` | body `{"seconds": 4.0}`, valid 0…capacity_s | 200 · 422 (limits in body) |
 | `GET /api/v1/clip?seconds=n&format=mp4|mjpeg` | last n seconds; clamped if under-buffered, actual length in `X-Clip-Duration` (sent before the body). Response streams while encoding: chunked, no `Content-Length`; a mid-stream failure truncates the download (no second status). `Retry-After: 2` is optimistic for slow clients — the slot is held for the whole download | 200 video/mp4 + Content-Disposition · 422 (n≤0 or >capacity) · 503 + Retry-After (empty buffer / export slots busy) |
 | `GET/PATCH /api/v1/config` | `mirror_flip, profile(auto|720p60|1080p30), buffer_max_s (0 < s ≤ 86400), focus_auto, focus_absolute, exposure_*`; profile change ⇒ pipeline restart + buffer cleared (signalled) | 200 · 422 |
@@ -52,10 +52,14 @@ semantics; capture/display read atomic snapshots.
 | `GET /healthz` | liveness | 200/503 |
 | `GET /` | web UI | 200 |
 
-Both `/api/v1/peers` routes exist only on a unit that keeps a membership list
-(`fleet_size > 1`); a lone appliance returns 404, which is how the page knows
-to stop asking. All API responses carry `Access-Control-Allow-Origin: *` and
-`OPTIONS` is answered with 204 (NFR-6).
+The `/api/v1/peers` routes are always on: a lone appliance answers
+`{"peers":[]}`, because "no peers yet" is an ordinary state in an
+installation that grows one unit at a time. All API responses carry
+`Access-Control-Allow-Origin: *` and `OPTIONS` is answered with 204 (NFR-6).
+The endpoint is as unauthenticated as the rest of the control API — anyone
+on the open LAN can register or replace a card entry, which adds nothing to
+what NFR-6 already accepts, and is noted here so the trade is a recorded
+one.
 
 ## 4. Decision log
 
@@ -67,5 +71,5 @@ to stop asking. All API responses carry `Access-Control-Allow-Origin: *` and
 | E-4 | Audio out of scope v1 (architecture admits a second ring later) |
 | E-5 | Appliance: Pi OS Lite, KMSDRM, systemd, read-only overlay, Avahi; clips stream to the client (no clip storage, tmpfs or otherwise) |
 | E-6 | *Superseded by E-7.* (Was: regular member Wi-Fi; no Pi-hosted AP) |
-| E-8 | **Self-electing fleet**, supplementing E-7 rather than superseding it — a lone unit still behaves exactly as E-7 describes. Every card carries the identical image; the role is elected at boot instead of baked, because per-card configuration is what makes an installation tedious to operate. A unit looks for the shared SSID and joins it, or hosts it if nobody does. There is only ever **one** SSID, so the printed poster, the QR codes and `zeitspiegel.local` stay valid whichever unit is hosting. The whole design is shaped by one hardware fact: a radio in AP mode cannot scan, so a host can never observe a second host on the same SSID. Two mechanisms cover that blind spot — an id-derived stagger before claiming, and a host that stays short of `fleet_size` demoting to look around, with exponential backoff so a switched-off peer costs a few brief interruptions rather than one every 90 s forever. The combined page talks to each unit directly (NFR-6 CORS) rather than being proxied, keeping clip downloads off a second wireless hop. `fleet_size` is the one configured value and is the same on every card; the display name comes from a file on the FAT32 boot partition, which stays writable when the root overlay is sealed |
+| E-8 | **Self-electing, dynamic fleet**, supplementing E-7 rather than superseding it — a lone unit still behaves exactly as E-7 describes. Every card carries the identical image and nothing about the fleet is configured, not even its size: units are bought and added over the years, and on any day the studio powers on whichever stations it needs, in any order, cutting power to stop them. A unit looks for the shared SSID and joins it, or hosts it if nobody does. There is only ever **one** SSID, so the printed poster, the QR codes and `zeitspiegel.local` stay valid whichever unit is hosting. The design is shaped by one hardware fact: a radio in AP mode cannot scan, so a host can never observe a second host on the same SSID — but it CAN count who is associated to it (`iw station dump` works in AP mode), member units and guests' phones alike. Hence the central rule: **a host serving anybody holds its network unconditionally; only a host serving nobody probes** — drops its AP, scans, joins what it finds or reclaims — after 90 s idle, with exponential backoff, and since nobody is attached the probe kicks no one. A short id-derived stagger (4 slots × 3 s) makes simultaneous cold-boot claims unlikely; when they happen anyway, the empty-audience probe heals the split. The accepted residual: two hosts each serving only phones hold a persistent split — each side fully functional, self-resolving on any power cycle. The combined page talks to each unit directly (NFR-6 CORS) rather than being proxied, keeping clip downloads off a second wireless hop. The display name comes from a file on the FAT32 boot partition, which stays writable when the root overlay is sealed |
 | E-7 | Appliance hosts its own **open** (passwordless) Wi-Fi AP (NetworkManager hotspot, `ipv4.method shared`): guests just pick the SSID and connect — no password to print or type. No venue Wi-Fi, no client-isolation issues, mDNS works with no router in between; the Pi never needs internet (packages baked into the image at build time, `make image`). Clients get no internet while connected, and the open AP carries only the no-auth LAN-only control UI (NFR-6) on an isolated network — acceptable for a single-purpose appliance. The join-venue-Wi-Fi variant lives on branch `wifi-client` |

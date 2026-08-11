@@ -165,13 +165,18 @@ func TestRegisterValidationErrors(t *testing.T) {
 	}
 }
 
-// UT-23: a unit with no registry wired (a plain single appliance) simply has
-// no fleet API, rather than serving an empty one.
-func TestPeerRoutesAbsentWithoutRegistry(t *testing.T) {
-	srv := newServer(t, nil)
-	h := &apiClient{t: t, base: srv.URL}
-	if resp, _ := h.get("/api/v1/peers"); resp.StatusCode != 404 {
-		t.Errorf("GET /api/v1/peers = %d, want 404 when no registry is wired", resp.StatusCode)
+// UT-23: the fleet API is always on — a unit with nobody registered reports
+// an empty list, not an error. The combined page polls this unconditionally,
+// and "no peers yet" is an ordinary answer in an installation that grows one
+// unit at a time (E-8).
+func TestPeersListEmptyIsOK(t *testing.T) {
+	h, _ := withRegistry(t)
+	resp, body := h.get("/api/v1/peers")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET /api/v1/peers on an empty registry = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(body, `"peers":[]`) {
+		t.Fatalf("body = %s, want an explicit empty list", body)
 	}
 }
 
@@ -182,7 +187,6 @@ func TestStatusCarriesIdentityAndRole(t *testing.T) {
 	st.UnitID = "b2"
 	st.Name = "Barre"
 	st.Role = "member"
-	st.FleetSize = 3
 	srv := newServer(t, func(d *httpapi.Deps) { d.Status = &fakeStatus{st: st} })
 
 	h := &apiClient{t: t, base: srv.URL}
@@ -191,10 +195,10 @@ func TestStatusCarriesIdentityAndRole(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.UnitID != "b2" || got.Name != "Barre" || got.Role != "member" || got.FleetSize != 3 {
+	if got.UnitID != "b2" || got.Name != "Barre" || got.Role != "member" {
 		t.Fatalf("status = %+v, want the identity fields preserved", got)
 	}
-	for _, key := range []string{`"unit_id"`, `"name"`, `"role"`, `"fleet_size"`} {
+	for _, key := range []string{`"unit_id"`, `"name"`, `"role"`} {
 		if !strings.Contains(body, key) {
 			t.Errorf("response is missing %s: %s", key, body)
 		}

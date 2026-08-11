@@ -83,32 +83,48 @@ so the poster and `zeitspiegel.local` survive a failover.
 The shape of the solution is forced by one hardware fact: **a Wi-Fi radio in AP
 mode cannot scan.** A host can therefore never observe a second host beaconing
 the same SSID, so a split brain is undetectable by observation. Two mechanisms
-cover it instead — an id-derived stagger that makes a simultaneous claim
-unlikely, and a blind self-heal: a host that has stayed short of `fleet_size`
-demotes, looks around, and either joins what it finds or comes back up. Each
-fruitless heal doubles the next wait, so a legitimately switched-off peer costs
-a few brief interruptions rather than one every 90 s forever. A refused scan is
-never read as "nobody is out there" — that is exactly how a split brain gets
-made.
+cover it instead — a short id-derived stagger that makes a simultaneous claim
+unlikely, and a blind self-heal. A refused scan is never read as "nobody is
+out there" — that is exactly how a split brain gets made.
 
-**Only a host serving a minority of the fleet may yield** (`2·peers < fleet−1`).
-This is what makes it comparable to a lease system: membership *is* leased
-(members renew every 10 s, entries expire after 30 s), but leadership cannot
-be, because there is no arbiter — nothing can fence a stale host, which is why
-the recovery has to be a *self*-heal. Deciding who yields by majority rather
-than by whichever host's timer expires first matters because those timers start
-at unrelated moments: a host that had already been short for a while could
-otherwise yield ahead of a genuinely stranded one and drop a working network
-for nothing. A majority is a predicate, not a race, so it cannot be lost to a
-head start. For two or three units this always converges — the split is 0+0 or
-1+0 members, so someone is in the minority. It also means the common "one unit
-is switched off" case costs no interruption at all: the host still serving the
-other mirror holds a majority and never yields.
+What a host CAN see, cheaply and even in AP mode, is **who is associated to
+it**: `iw dev wlan0 station dump` enumerates every client — member units and
+guests' phones alike (standard nl80211; verified for the Pi's brcmfmac, with
+the caveat that frequent dumps have been reported to cause momentary drops in
+noisy RF, so the supervisor polls it only while the registry is empty and at
+most every 10 s, and a failed query keeps the last known count rather than
+inventing an empty room). That observation replaces any notion of a
+configured fleet size and yields the central rule:
+
+**A host serving anybody holds its network unconditionally. Only a host
+serving nobody probes** — after 90 s of empty audience it drops its AP,
+scans, joins what it finds, otherwise reclaims. With zero stations there is
+nobody to kick, so probing is free by construction; each fruitless probe
+doubles the next wait (capped at 8×, offset by the unit's stagger slot), so
+a genuinely lonely unit converges to a quiet cadence. Any station or member
+appearing resets both the timer and the backoff.
+
+The comparison with lease systems is worth writing down: membership *is*
+leased (members renew every 10 s, entries expire after 30 s), but leadership
+cannot be, because there is no arbiter — nothing can fence a stale host,
+which is why recovery has to be a *self*-heal. The audience rule makes the
+convergence audit short: a 0+0 split (cold-boot collision) heals when the
+first prober sees the other's beacon; a 1+0 split heals because only the
+empty side probes; a solo host with a phone attached never probes at all —
+so a single station running for a whole afternoon never once takes the
+Wi-Fi away from the dancer using it. The accepted residual is a phone+phone
+split: both sides hold, each fully functional for its own users, and any
+power cycle resolves it.
 
 Promotion generalises "the second one takes over" to "the lowest surviving id
-goes first, at position × PromoteStep", so the fleet cannot deadlock waiting
-for a designated successor that is also dead. A returning ex-host never
-preempts: a handback would cost the room a second outage for nothing.
+goes first, at position × PromoteStep (10 s)", so the fleet cannot deadlock
+waiting for a designated successor that is also dead — after a host's power
+is cut the network is typically back in 15–20 s and phones rejoin the same
+open SSID on their own. A member waiting its promotion turn that sees the
+SSID reappear joins immediately (rejoining can never create a second AP), so
+a transient Wi-Fi blip costs seconds, not a promotion slot. A returning
+ex-host never preempts: a handback would cost the room a second outage for
+nothing.
 
 The decision logic is pure (`internal/netrole`: injected clock, no I/O) and the
 radio sits behind an interface (`internal/fleet`), so cold start, failover and

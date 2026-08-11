@@ -86,6 +86,9 @@ numbers recorded in docs/ARCHITECTURE.md §7.
   made (ARCHITECTURE D8).
 - Making a returning ex-host take the network back — a handback costs the room
   a second outage for no benefit. Promotion never preempts.
-- Baking a per-card role or address. Every card ships the identical image;
-  `fleet_size` is the same on all of them and the name comes off the boot
-  partition.
+- Baking a per-card role, address, or fleet size. Every card ships the
+  byte-identical image; how many units exist is discovered at runtime and
+  the name comes off the boot partition.
+- Making a host with an empty peer registry give up its network — guests'
+  phones are stations too, and a solo mirror serving a dancer must hold its
+  Wi-Fi unconditionally. Only a host serving nobody at all may probe (D8).

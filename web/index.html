@@ -284,9 +284,16 @@
   var localCapS = 60;
   dlBtn.dataset.label = "Download last 60 s";
 
+  // The unit's own name and role, remembered so the peers poll can label
+  // the local section once other mirrors show up.
+  var localName = "";
+  var localRole = "";
+
   function applyStatus(st) {
     offBadge.hidden = true;
     warmBadge.hidden = !st.warming_up;
+    localName = st.name || "";
+    localRole = st.role || "";
 
     var cap = (st.buffer && st.buffer.capacity_s) || 0;
     // The download button always grabs the full buffer; keep its label and
@@ -295,15 +302,6 @@
       localCapS = cap;
       dlBtn.dataset.label = "Download last " + Math.round(cap) + " s";
       if (!dlBtn.disabled) dlBtn.textContent = dlBtn.dataset.label;
-    }
-    // Once there is more than one mirror, say which one this page is, and
-    // start asking who else is here.
-    if (st.fleet_size > 1) {
-      peersEnabled = true;
-      if (st.name) {
-        localTitle.textContent = "Delay — " + st.name +
-          (st.role === "primary" ? " (this network)" : "");
-      }
     }
     localDelay.apply(st);
   }
@@ -412,6 +410,15 @@
   function applyPeers(list) {
     fleetBox.hidden = list.length === 0;
 
+    // With other mirrors around, say which one this page belongs to; alone,
+    // the page reads exactly as it always has.
+    if (list.length > 0 && localName) {
+      localTitle.textContent = "Delay — " + localName +
+        (localRole === "primary" ? " (this network)" : "");
+    } else {
+      localTitle.textContent = "Delay";
+    }
+
     var seen = {};
     list.forEach(function (peer) {
       seen[peer.id] = true;
@@ -438,19 +445,13 @@
     });
   }
 
-  // A lone Zeitspiegel serves no fleet API at all, so there is nothing to
-  // ask it for. Polling is gated on the fleet size this unit reports, and
-  // switched off for good on a 404 — otherwise a single mirror would spend
-  // the rest of its life issuing a request a second that can only fail.
-  var peersEnabled = false;
-
+  // The fleet API is always on: a lone mirror reports an empty list, and
+  // mirrors can be added — or disappear — at any moment, so the page simply
+  // asks every second and follows whatever the answer is.
   function pollPeers() {
-    if (!peersEnabled) return;
     fetchJSON("/api/v1/peers").then(function (body) {
       applyPeers((body && body.peers) || []);
-    }).catch(function (err) {
-      if (String(err.message).indexOf("404") >= 0) peersEnabled = false;
-    });
+    }).catch(function () { /* briefly unreachable — keep the last view */ });
   }
 
   function poll() {

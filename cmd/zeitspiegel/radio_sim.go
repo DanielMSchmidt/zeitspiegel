@@ -134,11 +134,18 @@ func (r *simRadio) writeBeacon() error {
 	return nil
 }
 
+func (r *simRadio) staPath() string { return filepath.Join(r.dir, r.id+".sta") }
+
 func (r *simRadio) ActivateSTA(context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.stopBeaconLocked()
 	r.mode = "sta"
+	// Record which network was joined, so the AP side can count its
+	// stations — the signal the whole hold-the-network rule rests on.
+	if url, ok := r.liveAP(); ok {
+		_ = os.WriteFile(r.staPath(), []byte(url), 0o644)
+	}
 	return nil
 }
 
@@ -146,6 +153,7 @@ func (r *simRadio) Down(context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.stopBeaconLocked()
+	_ = os.Remove(r.staPath())
 	r.mode = ""
 	return nil
 }
@@ -166,7 +174,49 @@ func (r *simRadio) Associated(context.Context) (bool, error) {
 		return false, nil
 	}
 	_, ok := r.liveAP()
+	if ok {
+		// Refresh the association marker; like a beacon, a marker that
+		// stops being refreshed belongs to a dead process and goes stale.
+		if url, live := r.liveAP(); live {
+			_ = os.WriteFile(r.staPath(), []byte(url), 0o644)
+		}
+	} else {
+		_ = os.Remove(r.staPath())
+	}
 	return ok, nil
+}
+
+// Stations counts the clients associated to this unit's AP, exactly as `iw
+// station dump` does on the appliance: fresh .sta markers naming this unit's
+// network. (The sim has no phones; the phone case is covered at the IT tier
+// with a phantom-station knob.)
+func (r *simRadio) Stations(context.Context) (int, error) {
+	r.mu.Lock()
+	mode := r.mode
+	r.mu.Unlock()
+	if mode != "ap" {
+		return 0, nil
+	}
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		return 0, fmt.Errorf("net-sim stations: %w", err)
+	}
+	n := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".sta") {
+			continue
+		}
+		path := filepath.Join(r.dir, e.Name())
+		info, err := os.Stat(path)
+		if err != nil || time.Since(info.ModTime()) > simBeaconStale {
+			continue // a dead process's marker
+		}
+		body, err := os.ReadFile(path)
+		if err == nil && strings.TrimSpace(string(body)) == r.baseURL {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (r *simRadio) Gateway(context.Context) (string, error) {

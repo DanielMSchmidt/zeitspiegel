@@ -35,6 +35,11 @@ type Radio interface {
 	Down(ctx context.Context) error
 	// Associated reports whether the station link is up.
 	Associated(ctx context.Context) (bool, error)
+	// Stations is the number of clients currently associated to this unit's
+	// AP — member units and guests' phones alike. Unlike scanning, this
+	// works IN AP mode, which is what lets a host know whether anyone is
+	// using its network without ever taking it down (ARCHITECTURE D8).
+	Stations(ctx context.Context) (int, error)
 	// Gateway is the base URL of the unit hosting the network — the default
 	// route, which is the primary by construction.
 	Gateway(ctx context.Context) (string, error)
@@ -80,9 +85,21 @@ type Supervisor struct {
 	OnRole  func(netrole.Role)
 	OnError func(error)
 
+	// StationEvery throttles Stations queries. Station dumps are cheap but
+	// not free — frequent ones have been reported to cause momentary drops
+	// on brcmfmac in noisy RF — and they only matter when the registry is
+	// empty, so they are polled sparingly. Zero means a 10 s default.
+	StationEvery time.Duration
+
 	lastRole     netrole.Role
 	lastAnnounce time.Time
 	started      bool
+
+	// lastStations caches the most recent station count between throttled
+	// queries, so the machine keeps seeing a steady value rather than
+	// flickering to zero whenever a query is skipped.
+	lastStations    int
+	lastStationScan time.Time
 }
 
 // Run drives the election until ctx is done. No radio error ends the loop:
@@ -140,7 +157,7 @@ func (s *Supervisor) observe(ctx context.Context) netrole.Observation {
 		if s.Peers != nil {
 			n = s.Peers.Count()
 		}
-		return netrole.Observation{Peers: n}
+		return netrole.Observation{Peers: n, Stations: s.stations(ctx, n)}
 
 	case netrole.RoleMember:
 		up, err := s.Radio.Associated(ctx)
@@ -168,6 +185,36 @@ func (s *Supervisor) observe(ctx context.Context) netrole.Observation {
 		}
 		return netrole.Observation{}
 	}
+}
+
+// stations reports how many clients this AP is serving. With registered
+// members the answer cannot matter (the machine holds either way), so the
+// radio is only asked when the registry is empty — and then at most once per
+// StationEvery, with the last answer cached in between so the machine sees a
+// steady value instead of one that flickers to zero between polls.
+func (s *Supervisor) stations(ctx context.Context, peers int) int {
+	if peers > 0 {
+		return s.lastStations
+	}
+	every := s.StationEvery
+	if every <= 0 {
+		every = 10 * time.Second
+	}
+	now := s.Clock.Now()
+	if !s.lastStationScan.IsZero() && now.Sub(s.lastStationScan) < every {
+		return s.lastStations
+	}
+	s.lastStationScan = now
+	n, err := s.Radio.Stations(ctx)
+	if err != nil {
+		// An unanswerable question is not an empty room: keep the last
+		// known count rather than inventing an audience of zero, for the
+		// same reason a failed scan never claims the SSID.
+		s.fail(err)
+		return s.lastStations
+	}
+	s.lastStations = n
+	return n
 }
 
 func (s *Supervisor) perform(ctx context.Context, act netrole.Action) {

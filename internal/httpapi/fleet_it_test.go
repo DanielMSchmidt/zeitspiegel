@@ -75,7 +75,7 @@ func newFleetUnit(t *testing.T, id, name, role string, withRegistry bool) *fleet
 	}
 
 	st := defaultStatus()
-	st.UnitID, st.Name, st.Role, st.FleetSize = id, name, role, 2
+	st.UnitID, st.Name, st.Role = id, name, role
 
 	deps := httpapi.Deps{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),

@@ -97,9 +97,8 @@ then run the same checklist against `http://zeitspiegel.local`
 
 ### Several mirrors (E-8, needs 2–3 units)
 
-Bake once with `FLEET_SIZE=3 make sd` and write that same image to every
-card; optionally name two of them via `zeitspiegel-name.txt` on the FAT32
-`bootfs` partition. Then, with all of them on one power strip:
+`make sd` once and write that same image to every card; optionally name two
+of them via `zeitspiegel-name.txt` on the FAT32 `bootfs` partition. Then:
 
 - MT-12: power everything on at once → after ~30 s exactly one unit is
   hosting; `http://zeitspiegel.local` lists all of them. Set three different
@@ -117,3 +116,19 @@ card; optionally name two of them via `zeitspiegel-name.txt` on the FAT32
   http://10.42.0.x/healthz` against a *member's* address. If clients cannot
   reach each other, the cards for other mirrors will show Offline even though
   the units are fine.
+- MT-16: **the studio day.** Power on ONE unit and join its Wi-Fi with a
+  phone; leave it ≥ 30 minutes and confirm the phone never gets kicked (the
+  host is serving someone, so it must never probe — check `heal_probes` stays
+  0 in `/debug/vars` `zeitspiegel_fleet`). Then add the second and third unit
+  one at a time — each must appear on the page without touching the first.
+  Pull the host's plug mid-use: stopwatch how long until the Wi-Fi is back
+  (expect ~15–20 s; record the number in DEPLOYMENT.md) and confirm the
+  survivors' delays did not move. Replug the old unit: it must come back as a
+  member card. Finally verify `iw dev wlan0 station dump` on the host (SSH
+  escape hatch) counts an attached phone — the audience rule rests on it.
+  Two more checks while everything is set up: after the failover,
+  `http://zeitspiegel.local` must resolve to the **new** host (the live
+  Avahi rename — if it dead-ends, only `10.42.0.1` works and the poster URL
+  is broken); and connect phones one at a time until one fails to join, to
+  record the real client ceiling next to the ~8-station firmware limit in
+  DEPLOYMENT.md.

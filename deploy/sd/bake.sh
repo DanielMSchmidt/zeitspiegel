@@ -11,10 +11,6 @@
 set -euo pipefail
 
 : "${AP_SSID:?}" "${ADMIN_HASH:?}" "${WIFI_COUNTRY:?}"
-# How many appliances share this network (E-8). Identical on every card: the
-# role is elected at boot, not baked, so one image serves the whole
-# installation. 1 keeps the classic single-appliance behaviour.
-FLEET_SIZE="${FLEET_SIZE:-1}"
 # 2.4 GHz channel 6 by default for maximum device compatibility. With several
 # units in one room, band=a on a non-DFS channel (36) gives clip downloads a
 # lot more headroom -- worth measuring on site before switching.
@@ -76,19 +72,18 @@ rm -f "$ROOT/etc/resolv.conf"; echo "nameserver 1.1.1.1" > "$ROOT/etc/resolv.con
 echo "==> install runtime packages into the image"
 chroot "$ROOT" apt-get update -qq
 chroot "$ROOT" apt-get install -y -qq ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 \
-    network-manager dnsmasq-base iptables rfkill iw >/dev/null
+    network-manager dnsmasq-base iptables rfkill iw avahi-utils >/dev/null
 # dnsmasq-base + iptables: required by NM's `ipv4.method=shared` AP profile
 # (DHCP to clients + NAT rules). rfkill + iw: lightweight tools for in-place
-# debugging when the appliance won't broadcast.
+# debugging when the appliance won't broadcast, and `iw station dump` is how
+# a host counts its audience (D8). avahi-utils: avahi-set-host-name is the
+# only way to rename a running Avahi -- the daemon does not follow kernel
+# hostname changes, and without the rename zeitspiegel.local would not move
+# to the new host after a failover.
 
 echo "==> install zeitspiegel binary / config / unit"
 install -D -m0755 "$PAYLOAD/zeitspiegel"          "$ROOT/usr/local/bin/zeitspiegel"
 install -D -m0644 "$PAYLOAD/config.toml"          "$ROOT/etc/zeitspiegel/config.toml"
-# The one value that differs between installations, and it is the same on
-# every card of a given one (E-8).
-sed -i "s/^fleet_size = .*/fleet_size = ${FLEET_SIZE}/" "$ROOT/etc/zeitspiegel/config.toml"
-grep -q "^fleet_size = ${FLEET_SIZE}\$" "$ROOT/etc/zeitspiegel/config.toml" \
-    || { echo "error: fleet_size not set in config.toml" >&2; exit 1; }
 install -D -m0644 "$PAYLOAD/zeitspiegel.service"  "$ROOT/etc/systemd/system/zeitspiegel.service"
 install -D -m0755 "$PAYLOAD/seal.sh"              "$ROOT/usr/local/sbin/zeitspiegel-seal"
 install -D -m0644 "$PAYLOAD/zeitspiegel-seal.service" "$ROOT/etc/systemd/system/zeitspiegel-seal.service"
@@ -221,6 +216,12 @@ autoconnect=false
 [wifi]
 mode=infrastructure
 ssid=${AP_SSID}
+# 2 = disable Wi-Fi powersave. Pi OS leaves it on by default, and a member
+# unit is an HTTP server on this link (1 Hz status polls from every open
+# page, whole clip downloads) -- the documented failure mode is added
+# latency and the link dropping offline after hours. Wall power, nothing
+# to save.
+powersave=2
 
 [ipv4]
 method=auto
