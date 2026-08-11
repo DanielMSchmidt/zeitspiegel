@@ -277,6 +277,9 @@ footer a { color: var(--muted); }
   display: grid;
   grid-template-columns: 1fr;
   gap: 14px;
+  /* Each card is as tall as its own contents. Without this a running preview
+     stretches every card in its row into a wall of empty panel. */
+  align-items: start;
 }
 #units .unit-card { margin: 0; }
 .unit-head {

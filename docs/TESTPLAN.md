@@ -72,6 +72,7 @@ harness under `web/uitest/` is the only thing that needs Node.
 | UI-8 | Three cards on a 390 px phone: no sideways scroll, one column, every control ≥ 44 px tall and on-screen |
 | UI-9 | Each card's slider range follows that mirror's own `buffer.capacity_s` |
 | UI-10 | A rejected delay surfaces the server's problem+json `detail` in the toast (FR-11) |
+| UI-11 | Cards are as tall as their own contents: a running preview must not stretch the cards beside it into empty panel |
 
 ## 2. Tier 2 — integration (SyntheticSource, seconds, every PR)
 
@@ -113,11 +114,11 @@ real studio lighting**, since sensor noise in a dim room inflates it and
 | 6 | camera + screen adapters (thin), reconnect supervisor | UT-11,26,27; IT-7; ST-1 |
 | 7 | wiring, web UI, deploy artifacts, soak | ST-2..6 |
 | 8 | observability + stutter hardening (render metrics, capture gaps, streaming texture, export nice, 60 s capacity) | UT-12..17; ST-4 |
-| 9 | multi-unit: dynamic election, membership, combined page, one image (E-8) | UT-19..25; UI-1..10; IT-10,11; ST-7..13 |
+| 9 | multi-unit: dynamic election, membership, combined page, one image (E-8) | UT-19..25; UI-1..11; IT-10,11; ST-7..13 |
 
 Step 9 in order: netrole (UT-19) → config + identity (UT-20, UT-21) → peers
 (UT-22, UT-25) → httpapi (UT-23, UT-24) → the fleet supervisor and IT-11 →
-IT-10 → cmd wiring and the radio adapters → the combined page (UI-1..10) →
+IT-10 → cmd wiring and the radio adapters → the combined page (UI-1..11) →
 ST-7..12.
 The election is built before anything can call it, and the E2E lane last,
 because it exercises the whole thing through real processes.
@@ -127,7 +128,7 @@ because it exercises the whole thing through real processes.
 | ID | Case |
 |---|---|
 | ST-1 | API contract suite vs running process with v4l2loopback (CI, no camera) |
-| ST-2 | UI smoke (Playwright) **against the real binary**: slider ⇒ PUT /delay; download ⇒ a file ffprobe accepts as MP4. **Not implemented** — the repo has no such lane. UI-1..10 now cover the page's behaviour with the API stubbed, so what is still missing here is only the page against a live server and a real encode |
+| ST-2 | UI smoke (Playwright) **against the real binary**: slider ⇒ PUT /delay; download ⇒ a file ffprobe accepts as MP4. **Not implemented** — the repo has no such lane. UI-1..11 now cover the page's behaviour with the API stubbed, so what is still missing here is only the page against a live server and a real encode |
 | ST-3 | 24 h soak (synth): RSS growth < 5 %, drops < 0.1 % (NFR-1/2) |
 | ST-4 | Load: export loop + preview client ⇒ NFR-3/4 held: `zeitspiegel_render.render_over_budget/ticks < 1 %`, `tick_overruns ≈ 0`, `miss_too_early = miss_empty = 0`, `held_streak_max ≤ 2` |
 | ST-5 | systemd kill -9 ⇒ restart, /healthz green < 10 s |

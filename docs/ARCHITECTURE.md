@@ -69,7 +69,7 @@ tabs: with two or three mirrors in a room the delays have to be comparable
 at a glance, and a mirror hidden behind a tab is one nobody notices has gone
 Offline. Each card is built once and then only updated, which is what lets a
 slider survive the 1 Hz poll and keep its own hold-off state. Node and
-Playwright appear only under `web/uitest` (UI-1..10); the shipped page
+Playwright appear only under `web/uitest` (UI-1..11); the shipped page
 depends on neither.
 
 ### D6 — Testability as architecture

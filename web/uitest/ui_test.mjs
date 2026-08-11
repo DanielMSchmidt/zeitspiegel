@@ -266,6 +266,28 @@ test("UI-8 three cards fit a phone: no sideways scroll, thumb-sized controls", a
   assert.equal(new Set(lefts).size, 1, "cards must stack in one column on a phone");
 });
 
+// UI-11: a card is as tall as its own contents. Side by side, a card whose
+// preview is running must not stretch its neighbour into a wall of empty
+// panel — which is exactly what a grid row does if you let it.
+test("UI-11 opening one card's preview does not stretch the cards beside it", async (t) => {
+  const ui = await openUI({
+    viewport: { width: 1100, height: 900 },
+    local: { unit_id: "unit-a", name: "Corner" },
+    peers: [{ id: "unit-b", name: "Barre" }, { id: "unit-c", name: "Window" }],
+  });
+  t.after(() => ui.close());
+
+  await until(async () => (await ui.cards().count()) === 3, "three cards");
+  const heightOf = (id) => ui.card(id).evaluate((el) => el.getBoundingClientRect().height);
+  const before = await heightOf("unit-b"); // the card sharing this one's row
+
+  await ui.localCard().locator(".unit-preview-toggle").click();
+  await until(async () => (await ui.localCard().locator(".unit-preview").getAttribute("src")) !== null, "the stream");
+
+  const after = await heightOf("unit-b");
+  assert.equal(Math.round(after), Math.round(before), "a neighbour's card grew with someone else's preview");
+});
+
 // UI-9: each card's slider spans that mirror's own buffer.
 test("UI-9 a card's slider range follows that mirror's buffer capacity", async (t) => {
   const ui = await openUI({
