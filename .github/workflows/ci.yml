@@ -94,9 +94,11 @@ jobs:
       # dummy video driver -- no display needed.
       - run: SDL_VIDEODRIVER=dummy go test -tags sdl ./internal/screen/
 
-  # Guard: deploy/poster/zeitspiegel-poster.svg (print master) and
-  # site/poster.svg (embedded by site/guests.html) must stay in sync.
-  # make-poster.py writes both; this job re-runs it and fails on drift.
+  # Guard: the print masters (deploy/poster/zeitspiegel-poster*.svg) and the
+  # site copies (site/poster*.svg, embedded by site/guests.html) must stay in
+  # sync -- bilingual, German-only and English-only. make-poster.py writes all
+  # of them; this job runs UT-26 and then re-runs the generator, failing on
+  # drift.
   poster:
     runs-on: ubuntu-latest
     steps:
