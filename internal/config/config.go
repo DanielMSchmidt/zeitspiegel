@@ -40,7 +40,7 @@ func Default() Config {
 	return Config{
 		Bind:           ":8080",
 		Source:         "camera",
-		Device:         "auto", // first device that actually streams (the Kiyo also enumerates a metadata-only node)
+		Device:         "auto", // first device that actually streams (UVC cameras also enumerate a metadata-only node)
 		Profile:        "auto", // highest MJPEG resolution the camera offers, capped at 1080p (E-2 rev)
 		BufferMaxS:     120,
 		BufferMaxBytes: 1536 << 20, // 1.5 GiB

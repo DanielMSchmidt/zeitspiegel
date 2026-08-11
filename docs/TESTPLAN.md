@@ -45,6 +45,8 @@ so a full failover takes seconds.
 | UT-23 | httpapi | `POST /api/v1/peers` derives `base_url` from the connection; roster + position in the reply; 422 table (bad id, blank name, self id, port range, malformed JSON); `GET /api/v1/peers` shape, `{"peers":[]}` on an empty registry (the API is always on); status carries `unit_id`/`name`/`role` |
 | UT-24 | httpapi | CORS headers on API responses; `OPTIONS` preflight ⇒ 204 with the PUT method and Content-Type header allowed; a real PUT still works through the wrapper |
 | UT-25 | peers | Announcer posts to the gateway with no address of its own; missing gateway and non-200 surface as errors; `Run` announces immediately and keeps announcing after failures |
+| UT-26 | camera | `plannedControls` table per config (pinned focus / auto focus / everything pinned); a device implementing no focus controls still opens, both are reported by `SkippedControls()`, and the controls it *does* implement are still applied; a genuine failure (I/O error, out-of-range value) still aborts and names the control (FR-9, E-9). Tag-free: the cgo `SetControlValue` stays behind the `v4l2` tag, the skip decision does not |
+| UT-27 | screen | `fitRect` table: same aspect ⇒ full bleed; 4:3 into 16:9 ⇒ pillarbox; 16:9 into 4:3 ⇒ letterbox; square and 1×1 sources; non-positive source or destination ⇒ fill (never divide by zero, never blank the screen). Plus a sweep asserting the rect never escapes the destination and never inverts the source aspect (FR-16) |
 | UT-18 | httpapi | Streaming clip handler: headers (`X-Clip-Duration`, no `Content-Length`) precede the chunked body; pre-flight busy/empty still 503; exporter failing before the first body byte ⇒ 500 problem+json; failure mid-stream ⇒ truncated body, no second response; the stream is Closed exactly once |
 
 ## 2. Tier 2 — integration (SyntheticSource, seconds, every PR)
@@ -67,9 +69,15 @@ so a full failover takes seconds.
 
 Spikes (time-boxed throwaway, as soon as hardware exists, parallel to M1):
 S-1 = SDL2/KMSDRM decode+render benchmark on Pi (720p60, 1080p30);
-S-2 = Kiyo `v4l2-ctl --list-formats-ext` + minimal go4vl capture (validates
-MJPEG assumption, documents controls, measures bitrates). Record results in
-ARCHITECTURE.md §7.
+S-2 = the candidate camera (docs/HARDWARE.md §6 — the shortlist is provisional
+until this runs): `v4l2-ctl --list-formats-ext` to validate the native-MJPEG
+assumption and confirm a discrete 1920×1080@30 mode; `v4l2-ctl --list-ctrls` to
+record which controls exist (a fixed-focus device has no focus controls — that
+is expected and UT-26 makes it survivable) and the achievable `focus_absolute`
+if it has them; then minimal go4vl capture to measure MJPEG bitrate **under
+real studio lighting**, since sensor noise in a dim room inflates it and
+`buffer_max_bytes` depends on that number. Record results in ARCHITECTURE.md
+§7 before the BOM stops being provisional.
 
 | Step | Content | Tests |
 |---|---|---|
@@ -78,7 +86,7 @@ ARCHITECTURE.md §7.
 | 3 | engine: tick logic, hard-cut semantics, warm-up | UT-6,7; IT-1, IT-6 |
 | 4 | window + export vs real ffmpeg (`integration` tag) | UT-8; IT-3,4,9 |
 | 5 | httpapi + config | UT-9,10,18; IT-2,5,8 |
-| 6 | camera + screen adapters (thin), reconnect supervisor | UT-11; IT-7; ST-1 |
+| 6 | camera + screen adapters (thin), reconnect supervisor | UT-11,26,27; IT-7; ST-1 |
 | 7 | wiring, web UI, deploy artifacts, soak | ST-2..6 |
 | 8 | observability + stutter hardening (render metrics, capture gaps, streaming texture, export nice, 60 s capacity) | UT-12..17; ST-4 |
 | 9 | multi-unit: dynamic election, membership, combined page, one image (E-8) | UT-19..25; IT-10,11; ST-7..13 |

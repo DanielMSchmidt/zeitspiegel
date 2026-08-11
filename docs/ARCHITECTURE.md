@@ -3,9 +3,13 @@
 ## 1. Context
 
 One Go process on a Raspberry Pi 5 turns a UVC webcam + HDMI display into a
-time-delayed mirror, controlled over HTTP. Reference camera: Razer Kiyo
-(native MJPEG, 720p@60 / 1080p@30, hardware ring light). Prior-art research
-and rejected approaches are summarized inline with each decision.
+time-delayed mirror, controlled over HTTP. Reference camera: a wide-angle
+(~100-110° diagonal) fixed-focus UVC webcam with native MJPEG at 1080p30 and
+no in-camera AI processing — see E-9 and docs/HARDWARE.md for the selection
+criteria and the shortlist, which stays provisional until spike S-2 measures a
+real device. (The Razer Kiyo was the original reference; it is discontinued and
+its successor is an auto-framing camera, which a mirror cannot use.) Prior-art
+research and rejected approaches are summarized inline with each decision.
 
 ## 2. Design decisions
 
@@ -173,7 +177,10 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   persistent `SDL_TEXTUREACCESS_STREAMING` texture (recreated only on a
   dimension/format change — per-frame texture create/destroy causes
   periodic driver hitches on KMSDRM/GLES), render with
-  `RenderCopyEx(..., FLIP_HORIZONTAL)`. The negotiated renderer (name,
+  `RenderCopyEx(..., FLIP_HORIZONTAL)` into an aspect-preserving destination
+  rect — the frame is fitted and centred, not stretched to fill, and the
+  remainder is cleared to black (FR-16); a mirror used to judge body line must
+  not distort proportion. The negotiated renderer (name,
   software fallback, display refresh rate) is logged at startup and
   published via expvar. Budget @60 fps = 16.7 ms; expected on Pi 5: 720p
   decode 4–8 ms + present 2–4 ms (validate in spike S-1). Fallbacks:
@@ -247,7 +254,10 @@ Exposure + USB + decode + render + vsync ≈ 60–120 ms. `delay = 0` means
 
 | Measurement | Spike | Value |
 |---|---|---|
-| Kiyo MJPEG bitrate @720p60 / @1080p30 | S-2 | _tbd_ |
+| Camera MJPEG bitrate @1080p30, **well-lit** studio | S-2 | _tbd_ |
+| Camera MJPEG bitrate @1080p30, **dim** studio (high gain ⇒ noise ⇒ bitrate; this is what sizes `buffer_max_bytes`) | S-2 | _tbd_ |
+| Camera controls actually implemented (`v4l2-ctl --list-ctrls`); focus controls absent on a fixed-focus device is the expected result (E-9) | S-2 | _tbd_ |
+| Discrete MJPEG modes offered (`--list-formats-ext`), and the frame rate of the largest — guards the known `probeMaxMJPEG` area-vs-rate issue | S-2 | _tbd_ |
 | 720p JPEG decode+render per frame (Pi 5) | S-1 | _tbd_ |
 | x264 ultrafast export speed, 30 s clip (Pi 5) — encode wall time (`zeitspiegel_export_seconds` to a fast client) + time to first byte (`zeitspiegel_export_ttfb_seconds`) | M3 | _tbd_ |
 | Bright-scene MJPEG bitrate @1080p30 (`zeitspiegel_buffer.bytes_per_s` peak) | prod | _tbd_ |
