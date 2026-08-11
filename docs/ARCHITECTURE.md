@@ -218,8 +218,14 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
 - render loop ticks at a fixed 60 Hz (the highest nominal profile rate):
   the ticker is created once but the profile can change at runtime; extra
   ticks are nearly free because the engine renders only when the selected
-  frame changed. The exporter reads the nominal fps from the runtime
-  profile per export for the same reason. Frame selection uses each tick's
+  frame changed. The exporter reads the fps per export for the same
+  reason — and reads it from the mode the camera **actually opened**
+  (`modeStore`, fed by the capture supervisor on every source open),
+  falling back to the runtime profile's nominal only when the source
+  reports no mode. `auto` can legitimately open 60 fps or a smaller
+  geometry than the profile names (E-2), and encoding such a capture at a
+  nominal 30 would halve clip playback speed; gap detection and
+  `/api/v1/status` read the same store. Frame selection uses each tick's
   fire time (the value delivered on the ticker channel), not the wall
   clock at processing time, so a render that overruns does not also skew
   which frame the next tick picks; tick overruns, over-budget renders,
@@ -257,7 +263,7 @@ Exposure + USB + decode + render + vsync ≈ 60–120 ms. `delay = 0` means
 | Camera MJPEG bitrate @1080p30, **well-lit** studio | S-2 | _tbd_ |
 | Camera MJPEG bitrate @1080p30, **dim** studio (high gain ⇒ noise ⇒ bitrate; this is what sizes `buffer_max_bytes`) | S-2 | _tbd_ |
 | Camera controls actually implemented (`v4l2-ctl --list-ctrls`); focus controls absent on a fixed-focus device is the expected result (E-9) | S-2 | _tbd_ |
-| Discrete MJPEG modes offered (`--list-formats-ext`), and the frame rate of the largest — guards the known `probeMaxMJPEG` area-vs-rate issue | S-2 | _tbd_ |
+| Every MJPEG mode offered with its rate (`--list-formats-ext`), and which one `selectMode` opens — they must agree with the `source opened` log | S-2 | _tbd_ |
 | 720p JPEG decode+render per frame (Pi 5) | S-1 | _tbd_ |
 | x264 ultrafast export speed, 30 s clip (Pi 5) — encode wall time (`zeitspiegel_export_seconds` to a fast client) + time to first byte (`zeitspiegel_export_ttfb_seconds`) | M3 | _tbd_ |
 | Bright-scene MJPEG bitrate @1080p30 (`zeitspiegel_buffer.bytes_per_s` peak) | prod | _tbd_ |

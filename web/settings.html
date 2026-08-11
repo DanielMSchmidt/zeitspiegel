@@ -101,7 +101,9 @@
     warmBadge.hidden = !st.warming_up;
 
     $("st-delay").textContent      = fmtSecs(st.delay_s) + " s";
-    $("st-fps").textContent        = st.fps + " fps";
+    // fps is the camera's real rate now, not a round profile nominal — a
+    // 30000/1001 device reports 29.97002997…, so trim it to one decimal.
+    $("st-fps").textContent        = (Math.round(st.fps * 10) / 10) + " fps";
     $("st-resolution").textContent = st.resolution || "–";
     $("st-dropped").textContent    = String(st.dropped_frames);
     $("st-latency").textContent    = st.min_latency_ms + " ms";

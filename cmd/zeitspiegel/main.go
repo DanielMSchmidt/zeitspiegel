@@ -107,14 +107,19 @@ func run() error {
 	// with the render loop's decode budget exactly when frames are biggest.
 	// A rejected guest gets 503 + Retry-After for the few seconds a clip
 	// takes (NFR-4).
+	// The mode the capture source actually opened. On "auto" the camera
+	// probes for it, so it can differ from the profile nominal in both
+	// geometry and rate (E-2); the writer is the capture supervisor's Open.
+	capMode := &modeStore{}
+
 	exporter := export.New(1)
 	exporter.Nice = 10
 	clipper := &meteredClipper{
 		inner: &httpapi.Clipper{Buffer: buf, Exporter: httpapi.StreamExporter{E: exporter}, Clock: sysClock{},
 			// per export: a runtime profile change (PATCH /config) changes
-			// the nominal rate, and a stale fps makes clips play at the
-			// wrong speed (FR-5)
-			FPS: func() float64 { return profileFPS(store.Current().Profile) }},
+			// the rate, and a stale fps makes clips play at the wrong speed
+			// (FR-5) — as would encoding a 60 fps capture at the nominal 30
+			FPS: func() float64 { return capMode.fps(store.Current().Profile) }},
 		total: expvar.NewFloat("zeitspiegel_export_seconds"),
 		ttfb:  expvar.NewFloat("zeitspiegel_export_ttfb_seconds"),
 	}
@@ -156,9 +161,23 @@ func run() error {
 			if err != nil {
 				return nil, err
 			}
-			logger.Info("source opened",
+			// Record what this source actually opened, so status, gap
+			// detection and clip encoding use the real rate rather than the
+			// profile nominal. Sources that do not report one (synth, the
+			// ffmpeg dev camera) clear it, so a reopen never inherits the
+			// previous camera's mode.
+			opened := []any{
 				"took", time.Since(t).Round(time.Millisecond),
-				"source", cfg.Source)
+				"source", cfg.Source,
+			}
+			if m, ok := src.(interface{ SelectedMode() (int, int, float64) }); ok {
+				w, h, fps := m.SelectedMode()
+				capMode.Set(w, h, fps)
+				opened = append(opened, "width", w, "height", h, "fps", fps)
+			} else {
+				capMode.Clear()
+			}
+			logger.Info("source opened", opened...)
 			// Expected on a fixed-focus camera (E-9), which implements no
 			// focus controls at all — but a config key that silently had no
 			// effect must still be visible in the journal (NFR-8).
@@ -176,7 +195,7 @@ func run() error {
 		// A hole wider than two nominal frame intervals means capture lost
 		// frames — it will replay on screen `delay` seconds later (FR-1).
 		GapThreshold: func() time.Duration {
-			return 2 * time.Duration(float64(time.Second)/profileFPS(store.Current().Profile))
+			return 2 * time.Duration(float64(time.Second)/capMode.fps(store.Current().Profile))
 		},
 		OnGap: func(delta time.Duration) { // rate-limited: ≥ 1 s between lines
 			now := time.Now().UnixNano()
@@ -186,7 +205,7 @@ func run() error {
 		},
 	})
 
-	status := &sysStatus{start: start, cfg: cfg, store: store, buf: buf, eng: eng, sup: sup, fleet: fleetRT}
+	status := &sysStatus{start: start, cfg: cfg, store: store, buf: buf, eng: eng, sup: sup, fleet: fleetRT, mode: capMode}
 	loopM := &loopMetrics{}
 	expvar.Publish("zeitspiegel_dropped_frames", expvar.Func(func() any { return sup.Dropped() }))
 	expvar.Publish("zeitspiegel_buffer", expvar.Func(func() any {

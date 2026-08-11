@@ -47,6 +47,8 @@ so a full failover takes seconds.
 | UT-25 | peers | Announcer posts to the gateway with no address of its own; missing gateway and non-200 surface as errors; `Run` announces immediately and keeps announcing after failures |
 | UT-26 | camera | `plannedControls` table per config (pinned focus / auto focus / everything pinned); a device implementing no focus controls still opens, both are reported by `SkippedControls()`, and the controls it *does* implement are still applied; a genuine failure (I/O error, out-of-range value) still aborts and names the control (FR-9, E-9). Tag-free: the cgo `SetControlValue` stays behind the `v4l2` tag, the skip decision does not |
 | UT-27 | screen | `fitRect` table: same aspect ⇒ full bleed; 4:3 into 16:9 ⇒ pillarbox; 16:9 into 4:3 ⇒ letterbox; square and 1×1 sources; non-positive source or destination ⇒ fill (never divide by zero, never blank the screen). Plus a sweep asserting the rect never escapes the destination and never inverts the source aspect (FR-16) |
+| UT-28 | camera | `selectMode` table (E-2, NFR-1): 1080p15 + 720p30 ⇒ 720p30 (rate is the constraint); 1080p30 + 720p60 ⇒ 1080p30 (area wins once the rate is met); equal area ⇒ faster wins; 29.97 counts as reaching 30; modes above `MaxAuto{Width,Height}` filtered; nothing reaching the target ⇒ fastest available, never an error; a device enumerating sizes but not intervals still selectable; empty/degenerate ⇒ error; selection stable across every rotation of the input |
+| UT-29 | cmd | `modeStore`: status/gap/export read the mode the source actually opened, and fall back to the profile nominal when it reports none (synth) or its rate is unknown; `Clear` stops a reopen inheriting the previous camera's mode; `/status` carries the live geometry and rate — a 60 fps capture must not reach the exporter as the nominal 30 (FR-5 half-speed clips) |
 | UT-18 | httpapi | Streaming clip handler: headers (`X-Clip-Duration`, no `Content-Length`) precede the chunked body; pre-flight busy/empty still 503; exporter failing before the first body byte ⇒ 500 problem+json; failure mid-stream ⇒ truncated body, no second response; the stream is Closed exactly once |
 
 ## 2. Tier 2 — integration (SyntheticSource, seconds, every PR)
@@ -71,7 +73,10 @@ Spikes (time-boxed throwaway, as soon as hardware exists, parallel to M1):
 S-1 = SDL2/KMSDRM decode+render benchmark on Pi (720p60, 1080p30);
 S-2 = the candidate camera (docs/HARDWARE.md §6 — the shortlist is provisional
 until this runs): `v4l2-ctl --list-formats-ext` to validate the native-MJPEG
-assumption and confirm a discrete 1920×1080@30 mode; `v4l2-ctl --list-ctrls` to
+assumption and record **every mode with its frame rate** — that whole list is
+what `selectMode` consumes (UT-28), so the interesting result is which mode it
+picks and whether it agrees with the `source opened` log line, not just whether
+1920×1080@30 exists; `v4l2-ctl --list-ctrls` to
 record which controls exist (a fixed-focus device has no focus controls — that
 is expected and UT-26 makes it survivable) and the achievable `focus_absolute`
 if it has them; then minimal go4vl capture to measure MJPEG bitrate **under
@@ -86,7 +91,7 @@ real studio lighting**, since sensor noise in a dim room inflates it and
 | 3 | engine: tick logic, hard-cut semantics, warm-up | UT-6,7; IT-1, IT-6 |
 | 4 | window + export vs real ffmpeg (`integration` tag) | UT-8; IT-3,4,9 |
 | 5 | httpapi + config | UT-9,10,18; IT-2,5,8 |
-| 6 | camera + screen adapters (thin), reconnect supervisor | UT-11,26,27; IT-7; ST-1 |
+| 6 | camera + screen adapters (thin), reconnect supervisor | UT-11,26,27,28,29; IT-7; ST-1 |
 | 7 | wiring, web UI, deploy artifacts, soak | ST-2..6 |
 | 8 | observability + stutter hardening (render metrics, capture gaps, streaming texture, export nice, 60 s capacity) | UT-12..17; ST-4 |
 | 9 | multi-unit: dynamic election, membership, combined page, one image (E-8) | UT-19..25; IT-10,11; ST-7..13 |

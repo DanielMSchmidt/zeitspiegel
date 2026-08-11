@@ -5,7 +5,7 @@
 bind = ":80"                      # web UI on plain http://zeitspiegel.local (NFR-6, LAN-only)
 source = "camera"                 # real capture; "synth" only for development
 device = "auto"                   # first node that streams (UVC cameras also expose a metadata-only node)
-profile = "auto"                  # probe the camera's highest MJPEG mode, capped at 1080p (E-2 rev); or "720p60"/"1080p30"
+profile = "auto"                  # largest MJPEG mode that still sustains ~30 fps, capped at 1080p (E-2); or pin "720p60"/"1080p30"
 buffer_max_s = 60.0               # ring buffer length; delay in practice ≤ 30 s — a longer buffer only inflates heap + GC pauses
 buffer_max_bytes = 1073741824     # 1 GiB hard cap; bright-scene 1080p30 MJPEG can spike to ~15 MB/s ⇒ 60 s ≈ 900 MB worst case (§7)
 mirror_flip = true                # horizontal flip — it is a mirror (FR-2)
