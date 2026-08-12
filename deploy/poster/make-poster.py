@@ -23,7 +23,7 @@ Options (env):
     URL    what the controls QR opens   (default http://zeitspiegel.local)
     IP     always-works typed address   (default 10.42.0.1)
     SSID   Wi-Fi network name shown     (default zeitspiegel)
-    DELAY  boot delay shown, seconds    (default 15, = config default_delay_s)
+    DELAY  boot delay shown, seconds    (default 25, = config default_delay_s)
 
 Writes deploy/poster/zeitspiegel-poster[-de|-en].svg (the print masters) and
 site/poster[-de|-en].svg (embedded by site/guests.html). Each pair is
@@ -39,7 +39,7 @@ import segno
 URL = os.environ.get("URL", "http://zeitspiegel.local")
 IP = os.environ.get("IP", "10.42.0.1")
 SSID = os.environ.get("SSID", "zeitspiegel")
-DELAY = os.environ.get("DELAY", "15")
+DELAY = os.environ.get("DELAY", "25")
 
 # German leads, English follows. Every key must exist in both languages and
 # be rendered on the poster — UT-30 asserts both.

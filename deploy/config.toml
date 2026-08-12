@@ -9,7 +9,7 @@ profile = "auto"                  # largest MJPEG mode clearing a 25 fps floor, 
 buffer_max_s = 60.0               # ring buffer length; delay in practice ≤ 30 s — a longer buffer only inflates heap + GC pauses
 buffer_max_bytes = 1073741824     # 1 GiB hard cap; bright-scene 1080p30 MJPEG can spike to ~15 MB/s ⇒ 60 s ≈ 900 MB worst case (§7)
 mirror_flip = true                # horizontal flip — it is a mirror (FR-2)
-default_delay_s = 15.0            # FR-3 boot delay; runtime slider overrides via PUT /api/v1/delay
+default_delay_s = 25.0            # FR-3 boot delay; runtime slider overrides via PUT /api/v1/delay
 
 # Network (FR-15, E-8). Identical on every card — the role is elected at boot
 # and the fleet's size is discovered, not configured, so this same image
