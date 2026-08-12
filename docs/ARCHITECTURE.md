@@ -113,9 +113,22 @@ configured fleet size and yields the central rule:
 serving nobody probes** — after 90 s of empty audience it drops its AP,
 scans, joins what it finds, otherwise reclaims. With zero stations there is
 nobody to kick, so probing is free by construction; each fruitless probe
-doubles the next wait (capped at 8×, offset by the unit's stagger slot), so
-a genuinely lonely unit converges to a quiet cadence. Any station or member
-appearing resets both the timer and the backoff.
+doubles the next wait (capped at 8×, offset by a fresh id-and-attempt-derived
+stagger each round), so a genuinely lonely unit converges to a quiet cadence.
+Any station or member appearing resets both the timer and the backoff.
+
+The probe offset is deliberately **not** the claim-stagger slot. The cold
+boot that most needs healing — two units on one power strip, powered in the
+same instant, whose ids hash into the same slot — is exactly the case where
+a slot-derived offset is identical on both sides, so the two hosts would
+demote, scan into the shared darkness, and reclaim in perfect lockstep
+forever. Re-deriving the offset from the id *and* the attempt number makes
+every round an independent draw (the hash's high bits are folded down first;
+FNV-1a's low bits alone stay congruent under a shared salt): the first round
+in which the draws differ, the earlier prober scans while the later host is
+still beaconing, and joins it. In expectation that is the first probe, so a
+same-slot cold-boot collision costs the room roughly the 90 s heal window,
+once.
 
 The comparison with lease systems is worth writing down: membership *is*
 leased (members renew every 10 s, entries expire after 30 s), but leadership
