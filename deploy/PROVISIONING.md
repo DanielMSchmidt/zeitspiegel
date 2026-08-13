@@ -11,15 +11,22 @@ appliance model and hardware checklist. The appliance hosts its own Wi-Fi
 Insert the micro-SD into your computer, then:
 
 ```
-make sd                      # auto-detects the card, asks before erasing
-SSID=studio-mirror make sd   # choose the Wi-Fi network name
-DISK=/dev/disk4 make sd      # pick the card yourself (see `diskutil list`)
+make sd NAME="Long Side"                    # auto-detects the card, asks before erasing
+SSID=studio-mirror make sd NAME="Long Side" # choose the Wi-Fi network name too
+DISK=/dev/disk4 make sd NAME="Long Side"    # pick the card yourself (see `diskutil list`)
 ```
 
 Auto-detection accepts any removable disk, whether the card sits in a built-in
 reader or a USB one. It refuses to write to fixed disks and to the disk your
 Mac booted from; if it finds more than one candidate it stops and asks you to
 name the card with `DISK=`.
+
+`NAME` is required: it is the label this mirror shows in the UI, so the
+combined page says "Long Side" and "Window seat" instead of two hex ids. It is
+written onto the card's boot partition *after* the image lands, so the image
+itself stays byte-identical. Up to 32 characters; longer labels are truncated
+by the unit and `make sd` warns before it writes anything. To ship a card that
+names itself, pass `NAME=auto`.
 
 **Several mirrors?** Nothing changes: write that same image to every card —
 including cards you buy years later. The role is elected at boot and the
@@ -28,11 +35,12 @@ fleet's size is discovered, not configured, so there is no per-card build, no
 the network; the rest join it; if the host is unplugged another takes over by
 itself. Power-on order does not matter.
 
-To give a unit a human name, plug its card into any computer afterwards and
-write one line into `zeitspiegel-name.txt` on the FAT32 `bootfs` partition:
+Give each card its own `NAME` as you write it. To rename a unit later, or to
+name a card that was written with `NAME=auto`, plug it into any computer and
+stage the label onto the FAT32 `bootfs` partition — no re-flash:
 
 ```
-echo "Barre" > /Volumes/bootfs/zeitspiegel-name.txt
+scripts/stage-name.sh "Long Side" /Volumes/bootfs   # or: echo "Long Side" > /Volumes/bootfs/zeitspiegel-name.txt
 ```
 
 Unnamed units call themselves `Zeitspiegel <ID>` after their CPU serial. The
@@ -88,7 +96,7 @@ overlay is not enabled — check `sudo raspi-config nonint get_overlay_now`
 Re-flash the card. SSH is off by default and the root is read-only
 (NFR-9), so the supported update path is to edit
 `deploy/config.toml` (or whatever else) in your local checkout,
-re-run `make sd`, and swap the card. Boot is fast enough that this
+re-run `make sd NAME="…"`, and swap the card. Boot is fast enough that this
 is genuinely simpler than logging in.
 
 ### Emergency SSH escape hatch
@@ -110,12 +118,13 @@ sudo raspi-config nonint enable_overlayfs && sudo reboot
 ```
 
 To rename the Wi-Fi: unseal, `SSID=new-name sudo -E ./setup.sh`, re-seal.
-Easier: just re-bake the card with `SSID=new-name make sd`.
+Easier: just re-bake the card with `SSID=new-name make sd NAME="…"`.
 
 Renaming a *mirror* needs none of that: the display name is read from
 `zeitspiegel-name.txt` on the FAT32 `bootfs` partition, which stays writable
-while the root overlay is sealed. Pull the card, edit the file on any
-computer, put it back.
+while the root overlay is sealed. Pull the card, run
+`scripts/stage-name.sh "New name" /Volumes/bootfs` on any computer, put it
+back.
 
 ## 6. Troubleshooting
 

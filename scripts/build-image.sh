@@ -83,8 +83,9 @@ Zeitspiegel appliance credentials
   More mirrors:  write this SAME image to every card, now or years from
                  now — whichever unit is on first hosts the network,
                  the rest join it, and if the host is unplugged another
-                 takes over by itself. Name a card by writing a line
-                 into zeitspiegel-name.txt on its bootfs partition.
+                 takes over by itself. Each card gets its own label from
+                 'make sd NAME=...'; rename later with
+                 scripts/stage-name.sh "New name" /Volumes/bootfs.
   Console login: zeitspiegel / $ADMIN_PASS
                  (HDMI + keyboard only — SSH is off by default.
                   sudo is passwordless. Escape hatch: touch ssh on
@@ -98,4 +99,4 @@ echo
 echo "Image ready: build/zeitspiegel-appliance.img"
 cat build/credentials.txt
 echo
-echo "Write it to a card with:  make sd"
+echo "Write it to a card with:  make sd NAME=\"Long Side\""

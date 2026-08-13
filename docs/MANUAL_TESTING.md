@@ -97,8 +97,9 @@ then run the same checklist against `http://zeitspiegel.local`
 
 ### Several mirrors (E-8, needs 2–3 units)
 
-`make sd` once and write that same image to every card; optionally name two
-of them via `zeitspiegel-name.txt` on the FAT32 `bootfs` partition. Then:
+Write one card per unit with `make sd NAME="…"`, giving each a different
+label (the image is identical; only the label differs) — or `NAME=auto` for a
+unit you want to see name itself. Then:
 
 - MT-12: power everything on at once → after ~30 s exactly one unit is
   hosting; `http://zeitspiegel.local` lists all of them. Set three different
