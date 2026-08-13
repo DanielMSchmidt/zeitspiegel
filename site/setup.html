@@ -139,7 +139,9 @@
   is the only Mac-specific bit (<code>make sd</code>); on Linux, after
   <code>make image</code>, write the resulting <code>build/zeitspiegel-appliance.img</code>
   with <code>dd</code> or with the Raspberry Pi Imager's "Use custom image"
-  option.
+  option. Then mount the card's FAT32 <code>bootfs</code> partition and name
+  the unit with <code>scripts/stage-name.sh "Long Side" /path/to/bootfs</code>
+  — skip that and the mirror names itself after the Pi's serial number.
 </p>
 
 <h2>3. Get the code and flash a card</h2>
@@ -147,9 +149,10 @@
 <pre><code>git clone https://github.com/DanielMSchmidt/zeitspiegel.git
 cd zeitspiegel</code></pre>
 
-<p>Insert your micro-SD card into your Mac, then:</p>
+<p>Insert your micro-SD card into your Mac, then give the mirror a name and
+write the card:</p>
 
-<pre><code>make sd</code></pre>
+<pre><code>make sd NAME="Long Side"</code></pre>
 
 <p>
   That single command downloads Raspberry Pi OS Lite (cached for next time),
@@ -158,9 +161,31 @@ cd zeitspiegel</code></pre>
   writing the image.
 </p>
 
+<p>
+  <code>NAME</code> is required, and it's the label this unit shows in the web
+  page — pick whatever the room calls that corner: <code>Long Side</code>,
+  <code>Barre</code>, <code>Studio 2</code>. It only matters once you own more
+  than one mirror, but it is easier to set now than later. If you'd rather not
+  name it, <code>make sd NAME=auto</code> writes a card that calls itself
+  <code>Zeitspiegel &lt;ID&gt;</code> after the Pi's serial number.
+</p>
+
+<p>
+  The name is the <em>only</em> thing that differs between cards — the image
+  itself is byte-identical on every one. You can rename a card later without
+  re-flashing it: put it in any computer and run
+  <code>scripts/stage-name.sh "New Name" /Volumes/bootfs</code>.
+</p>
+
 <p>If you want a different Wi-Fi name than the default <code>zeitspiegel</code>:</p>
 
-<pre><code>SSID=studio-mirror make sd</code></pre>
+<pre><code>SSID=studio-mirror make sd NAME="Long Side"</code></pre>
+
+<p>
+  Before it erases anything, <code>make sd</code> checks that the card is big
+  enough for the image and that the image passed its runtime check at bake
+  time. If either fails it stops and tells you, with the card untouched.
+</p>
 
 <div class="callout">
   <strong>What gets baked in:</strong> the binary, ffmpeg, SDL2, the systemd
@@ -212,8 +237,8 @@ cd zeitspiegel</code></pre>
   <li><strong>To move it:</strong> it's a Pi, a camera and a cable. Pack it
     up, set it up somewhere else, plug it in. No reconfiguration needed.</li>
   <li><strong>To change settings or update:</strong> re-flash the SD card
-    from your computer (<code>make sd</code>) and swap it. The appliance
-    has no login on purpose.</li>
+    from your computer (<code>make sd NAME="Long Side"</code>) and swap it.
+    The appliance has no login on purpose.</li>
 </ul>
 
 <h2>7. When things go wrong</h2>
@@ -224,7 +249,7 @@ cd zeitspiegel</code></pre>
     Plug a USB keyboard into the Pi and look at the console on the HDMI
     output for error messages — the first-boot script logs there. The most
     common cause is a country code mismatch blocking the radio; re-bake the
-    card with <code>WIFI_COUNTRY=YourTwoLetterCode make sd</code>.
+    card with <code>WIFI_COUNTRY=YourTwoLetterCode make sd NAME="Long Side"</code>.
   </p>
 </details>
 
@@ -251,8 +276,9 @@ cd zeitspiegel</code></pre>
   <p>
     The appliance is read-only by design and SSH is off, so the supported
     way to change settings is to edit <code>deploy/config.toml</code> in
-    your local checkout, run <code>make sd</code> again, and swap the card.
-    Boot is fast enough that this is genuinely easier than logging in.
+    your local checkout, run <code>make sd NAME="Long Side"</code> again, and
+    swap the card. Boot is fast enough that this is genuinely easier than
+    logging in.
   </p>
 </details>
 
@@ -260,9 +286,9 @@ cd zeitspiegel</code></pre>
   <summary>How do I update to a new version?</summary>
   <p>
     Easiest: <code>git pull</code> in your local checkout, run
-    <code>make sd</code> again, swap the card. The Pi treats it as a fresh
-    boot. If you've configured anything custom on the device, back that up
-    first.
+    <code>make sd NAME="Long Side"</code> again, swap the card. The Pi treats
+    it as a fresh boot. If you've configured anything custom on the device,
+    back that up first.
   </p>
 </details>
 
