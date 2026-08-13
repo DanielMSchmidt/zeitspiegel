@@ -301,6 +301,22 @@ echo "==> persistent journal (post-mortem debug across reboots)"
 # script is the receipt for that trade.
 install -d -m2755 "$ROOT/var/log/journal"
 
+if [[ "$SEAL" != 1 ]]; then
+    echo "==> DEV IMAGE: pre-seeded machine id (journald persists from the first boot)"
+    # systemd generates the machine id on first boot, and until it is committed
+    # journald treats it as transient and keeps that boot's journal in RAM. On a
+    # bench card that costs a whole extra boot before anything is on disk.
+    # Seeding one removes the first-boot special case.
+    #
+    # Production images deliberately do not do this: every card ships the same
+    # image (E-8), and a fleet sharing one machine id shares everything derived
+    # from it — NetworkManager's stable MAC and DHCP identifiers among them.
+    # Bench cards run one at a time, so the trade is free there and not here.
+    head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$ROOT/etc/machine-id"
+    printf '\n' >> "$ROOT/etc/machine-id"
+    chmod 0444 "$ROOT/etc/machine-id"
+fi
+
 echo "==> Wi-Fi regulatory domain (${WIFI_COUNTRY}) via kernel cmdline"
 CMD="$ROOT/boot/firmware/cmdline.txt"
 grep -q ieee80211_regdom "$CMD" || sed -i "1 s|\$| cfg80211.ieee80211_regdom=${WIFI_COUNTRY}|" "$CMD"

@@ -155,13 +155,22 @@ back.
   at all rather than hand back a bundle with no journal in it (`--boot-only`
   overrides), and it reports whether the card is sealed — because a sealed
   card's journal ends at the seal.
+- One boot is enough. The 30 s capture snapshots that boot's entire journal to
+  `/boot/firmware/zeitspiegel-journal.log.gz`, which survives both cases where
+  the ext4 journal is empty — a first boot (journald keeps it in RAM until the
+  machine id is committed) and any boot of a sealed unit (the overlay sends it
+  to tmpfs). `make sd-logs` reads it out into the report.
 - A unit you are actively debugging belongs on a **development card**:
   `make sd-dev NAME="Bench"` bakes and flashes the same image with the
   first-boot seal left off. The root stays writable, so `/var/log/journal`
   survives reboots and `make sd-logs` reads *every* boot off it instead of
   only the first. It writes its own `build/zeitspiegel-appliance-dev.img` and
   `build/credentials-dev.txt`, so a bench card can never be flashed in place
-  of a production one. The trade is the one the overlay buys back (NFR-9): an
+  of a production one. Dev images also ship a pre-seeded machine id, so
+  journald writes to `/var/log/journal` from the very first boot; production
+  images deliberately do not, because every card ships the same image (E-8)
+  and a fleet sharing a machine id shares everything derived from it.
+  The trade is the one the overlay buys back (NFR-9): an
   unsealed card can be corrupted by a pulled plug, so it belongs on a desk,
   not in a venue. Seal it later with
   `sudo systemctl enable zeitspiegel-seal && sudo reboot`.

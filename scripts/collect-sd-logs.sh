@@ -557,9 +557,9 @@ fi
 # --- boot partition --------------------------------------------------------
 note "collecting the boot partition"
 mkdir -p "$BUNDLE/bootfs"
-for f in zeitspiegel-debug.log zeitspiegel-boot-profile.log zeitspiegel-name.txt \
-         zeitspiegel-version.txt cmdline.txt config.txt ssh userconf.txt \
-         zeitspiegel-authorized_keys; do
+for f in zeitspiegel-debug.log zeitspiegel-boot-profile.log zeitspiegel-journal.log.gz \
+         zeitspiegel-name.txt zeitspiegel-version.txt cmdline.txt config.txt ssh \
+         userconf.txt zeitspiegel-authorized_keys; do
     copy_into "$BOOTFS/$f" "$BUNDLE/bootfs/$f"
     redact "$BUNDLE/bootfs/$f"
 done
@@ -574,6 +574,20 @@ printf '\n%s files on the boot partition in total.\n' \
 
 emit "bootfs: zeitspiegel-debug.log (rfkill / NetworkManager, three boot stages)" "$BUNDLE/bootfs/zeitspiegel-debug.log" "/boot/firmware/zeitspiegel-debug.log"
 emit "bootfs: zeitspiegel-boot-profile.log (boot timing, first frame, HTTP listen)" "$BUNDLE/bootfs/zeitspiegel-boot-profile.log" "/boot/firmware/zeitspiegel-boot-profile.log"
+# The snapshot the on-unit capture leaves on the FAT partition. On a first
+# boot or a sealed card this is the only journal there is, so it is read out in
+# full rather than merely carried.
+section "bootfs: journal snapshot for the last boot (every unit, not just ours)"
+if [[ -f "$BUNDLE/bootfs/zeitspiegel-journal.log.gz" ]]; then
+    printf '# /boot/firmware/zeitspiegel-journal.log.gz\n\n' >> "$REPORT"
+    gunzip -c "$BUNDLE/bootfs/zeitspiegel-journal.log.gz" 2>/dev/null \
+        | head -n "$MAX_LINES" >> "$REPORT" \
+        || printf '(could not decompress it; the file itself is in the bundle)\n' >> "$REPORT"
+else
+    printf '(not present — this card predates the snapshot, or never booted far\n' >> "$REPORT"
+    printf 'enough for the 30 s capture to run)\n' >> "$REPORT"
+fi
+
 emit "bootfs: cmdline.txt (regdomain, overlay root, quiet boot)" "$BUNDLE/bootfs/cmdline.txt" "/boot/firmware/cmdline.txt"
 emit "bootfs: config.txt" "$BUNDLE/bootfs/config.txt" "/boot/firmware/config.txt"
 emit "bootfs: zeitspiegel-version.txt (which build this card carries)" "$BUNDLE/bootfs/zeitspiegel-version.txt" "/boot/firmware/zeitspiegel-version.txt"
@@ -669,8 +683,8 @@ if [[ -n "$ROOTFS" ]]; then
             printf 'did not use it. On a first boot that is expected — the machine id is\n' >> "$REPORT"
             printf 'generated during it, and journald keeps that boot in RAM. A card that has\n' >> "$REPORT"
             printf 'booted twice and still shows this has a real problem.\n' >> "$REPORT"
-            printf '\nWhat the unit said on its last boot is then only in the boot partition\n' >> "$REPORT"
-            printf 'captures above.\n' >> "$REPORT"
+            printf '\nWhat the unit said on its last boot is in the boot partition captures\n' >> "$REPORT"
+            printf 'above — the journal snapshot section carries it in full.\n' >> "$REPORT"
         else
         printf 'journal files carried in this bundle:\n' >> "$REPORT"
         find "$JDIR" -type f -name '*.journal*' -exec ls -la {} \; 2>/dev/null \

@@ -3,6 +3,7 @@
 package support
 
 import (
+	"compress/gzip"
 	"errors"
 	"io/fs"
 	"os"
@@ -88,6 +89,24 @@ func collectEnvFrom(t *testing.T, script string, env []string, args ...string) (
 		t.Fatalf("running %s: %v", script, err)
 	}
 	return out.String(), errb.String(), code
+}
+
+// writeGzip lays down a gzipped fixture — what the on-unit capture leaves on
+// the boot partition.
+func writeGzip(t *testing.T, path, body string) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("creating %s: %v", path, err)
+	}
+	defer f.Close()
+	zw := gzip.NewWriter(f)
+	if _, err := zw.Write([]byte(body)); err != nil {
+		t.Fatalf("compressing %s: %v", path, err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("closing %s: %v", path, err)
+	}
 }
 
 func repoPath(t *testing.T, rel string) string {
@@ -567,6 +586,32 @@ func TestCollectSaysWhenTheBuildIsUnknown(t *testing.T) {
 	report := readReport(t, unpack(t, artifact(t, out)))
 	if !strings.Contains(report, "unknown") {
 		t.Errorf("a card with no version stamp does not say so:\n%s", report)
+	}
+}
+
+// UT-32: on a card whose ext4 journal is empty — a first boot, or any boot of
+// a sealed unit — the journal snapshot the capture leaves on the boot
+// partition is the only record of what happened. The report reads it out, so
+// a bundle from a single boot still answers the question.
+func TestCollectReadsTheBootPartitionJournalSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	bootfs := writeTree(t, filepath.Join(dir, "bootfs"), map[string]string{"cmdline.txt": cmdline})
+	snapshot := "-- Boot 4c4926cf --\n" +
+		"[    9.481234] zeitspiegel[412]: level=ERROR msg=\"display open failed\"\n"
+	writeGzip(t, filepath.Join(bootfs, "zeitspiegel-journal.log.gz"), snapshot)
+	out := t.TempDir()
+
+	if _, stderr, code := collect(t, "--bootfs", bootfs, "--out", out); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	report := readReport(t, unpack(t, artifact(t, out)))
+	if !strings.Contains(report, "display open failed") {
+		t.Errorf("the snapshot's contents are not in the report:\n%s", report)
+	}
+	// And the compressed original travels too, for anyone who wants it whole.
+	unpacked := unpack(t, artifact(t, out))
+	if hits, _ := filepath.Glob(filepath.Join(unpacked, "*", "bootfs", "zeitspiegel-journal.log.gz")); len(hits) != 1 {
+		t.Errorf("the snapshot itself is not carried in the bundle: %v", hits)
 	}
 }
 

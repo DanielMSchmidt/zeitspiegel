@@ -26,6 +26,14 @@
 set -u
 OUT="${OUT:-/boot/firmware/zeitspiegel-boot-profile.log}"
 PROFILE_WAIT="${PROFILE_WAIT:-60}"
+# The whole boot's journal, snapshotted beside the profile. A first boot keeps
+# its journal in RAM — the machine id is generated during it, so journald will
+# not touch persistent storage — and a sealed unit keeps every boot in tmpfs.
+# In both cases the ext4 partition is empty and the boot the card was pulled
+# for is gone, unless it is copied here first. gzip because it is text, and
+# because this is a FAT32 card being written on every boot.
+JOURNAL_OUT="${JOURNAL_OUT:-/boot/firmware/zeitspiegel-journal.log.gz}"
+JOURNAL_LINES="${JOURNAL_LINES:-5000}"
 
 # Poll until the manager records a finished boot, capped so we always write
 # *something* even if a unit hangs. `systemctl show` returns
@@ -120,7 +128,20 @@ say() {
         systemctl list-unit-files --state=masked --no-legend --no-pager
 
     say "/proc/uptime (idle/total)" cat /proc/uptime
+
+    echo
+    echo "-- full journal for this boot --"
+    printf 'Snapshotted next to this file as %s\n' "$(basename "$JOURNAL_OUT")"
+    printf 'Read it with: gunzip -c %s\n' "$(basename "$JOURNAL_OUT")"
 } > "$OUT" 2>&1
+
+# Every unit's lines, not just ours: a display that never came up may be
+# explained by udev, vc4 or NetworkManager rather than by the mirror. Bounded,
+# because this goes onto the card on every boot.
+{
+    journalctl -b --no-pager --output=short-monotonic 2>&1 | tail -n "$JOURNAL_LINES"
+    echo "(snapshot taken at uptime $(awk '{print $1}' /proc/uptime 2>/dev/null)s, last $JOURNAL_LINES lines)"
+} | gzip -9 > "$JOURNAL_OUT" 2>/dev/null
 
 # FAT32 loses unflushed writes on a power cut, and surviving one is the entire
 # point of writing here.

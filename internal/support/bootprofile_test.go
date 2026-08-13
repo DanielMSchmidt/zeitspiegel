@@ -2,6 +2,7 @@ package support
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,6 +45,47 @@ func TestBootProfileCapturesEverySectionWithoutSystemd(t *testing.T) {
 		if !strings.Contains(log, want) {
 			t.Errorf("the profile has no %q section:\n%s", want, log)
 		}
+	}
+}
+
+// UT-34: a first boot keeps its journal in RAM — the machine id is generated
+// during it, so journald will not touch persistent storage — and a sealed card
+// keeps every later boot in tmpfs. Either way the ext4 partition is empty and
+// the boot the card was pulled for is gone. So the capture snapshots the whole
+// boot's journal onto the FAT partition, which survives both: one boot, one
+// power-off, and the card carries it.
+func TestBootProfileSnapshotsTheJournalToTheBootPartition(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "zeitspiegel-boot-profile.log")
+	snap := filepath.Join(dir, "zeitspiegel-journal.log.gz")
+
+	_, stderr, code := collectEnvFrom(t, "deploy/zeitspiegel-boot-profile.sh",
+		[]string{"OUT=" + out, "JOURNAL_OUT=" + snap, "PROFILE_WAIT=0"})
+	if code != 0 {
+		t.Fatalf("the capture aborted: exit %d: %s", code, stderr)
+	}
+
+	info, err := os.Stat(snap)
+	if err != nil {
+		t.Fatalf("no journal snapshot on the boot partition: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("the journal snapshot is empty; a zero-byte file is indistinguishable from a lost one")
+	}
+	// It has to be readable by whoever receives the card, so it is gzip — and
+	// on a machine with no journalctl what lands is that failure, which is
+	// itself the answer to "why is there no journal here".
+	body, err := exec.Command("gunzip", "-c", snap).Output()
+	if err != nil {
+		t.Fatalf("the snapshot is not readable gzip: %v", err)
+	}
+	if len(body) == 0 {
+		t.Error("the snapshot decompresses to nothing")
+	}
+	// The profile names it, so a reader of the profile knows to look.
+	profile, _ := os.ReadFile(out)
+	if !strings.Contains(string(profile), "zeitspiegel-journal.log.gz") {
+		t.Errorf("the profile does not mention the snapshot beside it:\n%s", profile)
 	}
 }
 
