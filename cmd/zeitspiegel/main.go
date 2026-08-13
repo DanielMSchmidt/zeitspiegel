@@ -60,7 +60,16 @@ func run() error {
 	unitName := flag.String("unit-name", "", "override the display name (dev/test; normally read from the boot partition)")
 	netSim := flag.String("net-sim", "", "drive a virtual radio backed by this directory instead of nmcli (dev/test)")
 	netScale := flag.Float64("net-scale", 1, "divide every election timing by this, so a failover takes seconds (dev/test)")
+	showVersion := flag.Bool("version", false, "print the build version and exit")
 	flag.Parse()
+
+	// Answering this without opening a camera or a screen is the point: it is
+	// how a unit on a bench is identified, and how the bake stamps the version
+	// onto the boot partition where a pulled card can be read.
+	if *showVersion {
+		fmt.Println(buildVersion())
+		return nil
+	}
 
 	cfg := config.Default()
 	if *configPath != "" {
@@ -81,6 +90,11 @@ func run() error {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	start := time.Now()
+	// First line of every boot: which build this is. Every card ships the
+	// same image, so a log with no version in it cannot be tied to a build
+	// after the fact (E-8).
+	logger.Info("zeitspiegel starting", "version", buildVersion())
+	expvar.NewString("zeitspiegel_version").Set(buildVersion())
 
 	// Who this unit is and, when there is a fleet, how it finds its place on
 	// the network (FR-15, E-8). Resolved before anything else so the id is

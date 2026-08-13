@@ -528,6 +528,48 @@ func TestCollectRedactionKeepsTimestamps(t *testing.T) {
 	}
 }
 
+// UT-32: the first question about a bundle is which build produced it. The
+// bake stamps the version onto the boot partition, where it survives a sealed
+// root and a card that never wrote a journal, and the report leads with it —
+// a bug report against an unknown build is a bug report against nothing.
+func TestCollectReportsTheBuildVersion(t *testing.T) {
+	dir := t.TempDir()
+	bootfs := writeTree(t, filepath.Join(dir, "bootfs"), map[string]string{
+		"cmdline.txt": cmdline,
+		"zeitspiegel-version.txt": "version=v1.4.2-3-gabc1234\n" +
+			"built=2026-08-13T14:37:02Z\n" +
+			"image=development (unsealed)\n",
+	})
+	out := t.TempDir()
+
+	if _, stderr, code := collect(t, "--bootfs", bootfs, "--out", out); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	report := readReport(t, unpack(t, artifact(t, out)))
+	for _, want := range []string{"v1.4.2-3-gabc1234", "2026-08-13T14:37:02Z", "development (unsealed)"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the report does not carry %q:\n%s", want, report)
+		}
+	}
+}
+
+// UT-32: cards baked before version stamping existed are still in circulation
+// and still come back broken. An absent stamp is reported as absent, not as a
+// blank field that reads like a build with no name.
+func TestCollectSaysWhenTheBuildIsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	bootfs := writeTree(t, filepath.Join(dir, "bootfs"), map[string]string{"cmdline.txt": cmdline})
+	out := t.TempDir()
+
+	if _, stderr, code := collect(t, "--bootfs", bootfs, "--out", out); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	report := readReport(t, unpack(t, artifact(t, out)))
+	if !strings.Contains(report, "unknown") {
+		t.Errorf("a card with no version stamp does not say so:\n%s", report)
+	}
+}
+
 // UT-32: pointing the collector at the wrong volume — a camera card, a stick
 // of holiday photos — must fail loudly. Silently bundling a stranger's files
 // is both a privacy leak and a debugging dead end.

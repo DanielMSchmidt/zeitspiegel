@@ -1,6 +1,14 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
+# The build's identity. Every card ships the byte-identical image (E-8), so a
+# unit cannot be asked which build it runs — the binary has to carry it, and
+# the bake stamps the same value onto the boot partition where a pulled card
+# can be read without booting it. Override for a reproducible build:
+# VERSION=v1.4.2 make image
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
+LDFLAGS := -X main.version=$(VERSION)
+
 .PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image image-dev sd sd-dev sd-logs check-name build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
 
 test: vet
@@ -35,11 +43,11 @@ vet:
 	$(GO) vet ./...
 
 build:
-	$(GO) build -o $(BIN) ./cmd/zeitspiegel
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/zeitspiegel
 
 # Native build on the Pi (or cross with CC=<aarch64 cc> set, e.g. zig cc target).
 build-pi:
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 $(GO) build -tags "v4l2 sdl" -o $(BIN) ./cmd/zeitspiegel
+	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 $(GO) build -tags "v4l2 sdl" -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/zeitspiegel
 
 # Pi binary cross-built in Docker against Debian trixie (= current Pi OS
 # userland; bookworm's 6.1 kernel headers are too old for go4vl), arm64 —
@@ -48,11 +56,11 @@ pi-binary:
 	docker run --rm --platform linux/arm64 -v "$(CURDIR)":/src -w /src \
 	  -e GOFLAGS=-buildvcs=false golang:1.25-trixie bash -c \
 	  "apt-get update -qq >/dev/null && apt-get install -y -qq libsdl2-dev libsdl2-image-dev >/dev/null \
-	   && go build -tags 'v4l2 sdl' -o bin/zeitspiegel-pi ./cmd/zeitspiegel"
+	   && go build -tags 'v4l2 sdl' -ldflags '$(LDFLAGS)' -o bin/zeitspiegel-pi ./cmd/zeitspiegel"
 
 # Bake a finished, network-free appliance image (no SD card needed).
 image: pi-binary
-	./scripts/build-image.sh
+	VERSION="$(VERSION)" ./scripts/build-image.sh
 
 # Write the baked image to an SD card (macOS) and name that unit. Plug-and-play,
 # no ethernet. NAME is the label the mirror shows in the UI; it is staged onto
@@ -76,7 +84,7 @@ sd-dev: check-name image-dev
 	IMG=build/zeitspiegel-appliance-dev.img NAME="$(NAME)" ./scripts/flash-sd.sh
 
 image-dev: pi-binary
-	SEAL=0 ./scripts/build-image.sh
+	SEAL=0 VERSION="$(VERSION)" ./scripts/build-image.sh
 
 # Reject a missing or unusable label before the (slow) image bake, not after.
 check-name:
@@ -105,7 +113,7 @@ manual-test:
 # Dev TV view: the real SDL display path in a desktop window.
 # macOS: brew install sdl2 sdl2_image pkgconf. Linux: libsdl2-dev libsdl2-image-dev.
 build-tv:
-	$(GO) build -tags sdl -o $(BIN)-tv ./cmd/zeitspiegel
+	$(GO) build -tags sdl -ldflags "$(LDFLAGS)" -o $(BIN)-tv ./cmd/zeitspiegel
 
 run-tv: build-tv
 	./$(BIN)-tv --source synth --windowed

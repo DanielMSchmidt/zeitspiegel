@@ -120,7 +120,7 @@ is_zeitspiegel_bootfs() {
     [[ -d "$d" ]] || return 1
     local f
     for f in zeitspiegel-name.txt zeitspiegel-debug.log zeitspiegel-boot-profile.log \
-             zeitspiegel-authorized_keys zeitspiegel-seal-done; do
+             zeitspiegel-version.txt zeitspiegel-authorized_keys zeitspiegel-seal-done; do
         [[ -e "$d/$f" ]] && return 0
     done
     grep -q 'ieee80211_regdom' "$d/cmdline.txt" 2>/dev/null && return 0
@@ -481,6 +481,8 @@ if [[ "$LIST_ONLY" == 1 ]]; then
     echo "bootfs: $BOOTFS"
     echo "rootfs: ${ROOTFS:-${ROOTPART:-(none found)}}"
     [[ -f "$BOOTFS/zeitspiegel-name.txt" ]] && echo "name:   $(head -1 "$BOOTFS/zeitspiegel-name.txt")"
+    [[ -f "$BOOTFS/zeitspiegel-version.txt" ]] \
+        && echo "build:  $(grep '^version=' "$BOOTFS/zeitspiegel-version.txt" | cut -d= -f2-)"
     exit 0
 fi
 
@@ -488,6 +490,13 @@ fi
 # land on top of each other.
 NAME="unnamed"
 [[ -f "$BOOTFS/zeitspiegel-name.txt" ]] && NAME=$(head -1 "$BOOTFS/zeitspiegel-name.txt" | tr -d '\r')
+
+# Which build this card carries. The bake stamps it onto the boot partition
+# precisely so the units that cannot boot can still be identified.
+BUILD="unknown (this card predates version stamping, or was not built by the bake)"
+if [[ -f "$BOOTFS/zeitspiegel-version.txt" ]]; then
+    BUILD=$(tr -d '\r' < "$BOOTFS/zeitspiegel-version.txt" | sed '/^[[:space:]]*$/d' | paste -sd'   ' -)
+fi
 SLUG=$(printf '%s' "${NAME:-unnamed}" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9' '-' | sed -E 's/-+/-/g; s/^-|-$//g')
 [[ -n "$SLUG" ]] || SLUG=unnamed
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
@@ -533,6 +542,7 @@ fi
     printf 'Zeitspiegel field log bundle\n'
     printf '============================\n\n'
     printf 'mirror name:   %s\n' "$NAME"
+    printf 'build:         %s\n' "$BUILD"
     printf 'collected:     %s (UTC)\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'collected on:  %s %s\n' "$(uname -s)" "$(uname -r)"
     printf 'source:        %s\n' "$SOURCE_DESC"
@@ -548,7 +558,8 @@ fi
 note "collecting the boot partition"
 mkdir -p "$BUNDLE/bootfs"
 for f in zeitspiegel-debug.log zeitspiegel-boot-profile.log zeitspiegel-name.txt \
-         cmdline.txt config.txt ssh userconf.txt zeitspiegel-authorized_keys; do
+         zeitspiegel-version.txt cmdline.txt config.txt ssh userconf.txt \
+         zeitspiegel-authorized_keys; do
     copy_into "$BOOTFS/$f" "$BUNDLE/bootfs/$f"
     redact "$BUNDLE/bootfs/$f"
 done
@@ -565,6 +576,7 @@ emit "bootfs: zeitspiegel-debug.log (rfkill / NetworkManager, three boot stages)
 emit "bootfs: zeitspiegel-boot-profile.log (boot timing, first frame, HTTP listen)" "$BUNDLE/bootfs/zeitspiegel-boot-profile.log" "/boot/firmware/zeitspiegel-boot-profile.log"
 emit "bootfs: cmdline.txt (regdomain, overlay root, quiet boot)" "$BUNDLE/bootfs/cmdline.txt" "/boot/firmware/cmdline.txt"
 emit "bootfs: config.txt" "$BUNDLE/bootfs/config.txt" "/boot/firmware/config.txt"
+emit "bootfs: zeitspiegel-version.txt (which build this card carries)" "$BUNDLE/bootfs/zeitspiegel-version.txt" "/boot/firmware/zeitspiegel-version.txt"
 emit "bootfs: zeitspiegel-name.txt (the label this mirror shows)" "$BUNDLE/bootfs/zeitspiegel-name.txt" "/boot/firmware/zeitspiegel-name.txt"
 
 # raspi-config's enable_overlayfs spells the seal `overlayroot=tmpfs` on

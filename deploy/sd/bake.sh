@@ -106,6 +106,20 @@ else
     echo "==> DEV IMAGE: first-boot seal NOT enabled — root stays writable, journal persists"
 fi
 
+echo "==> stamp the build version onto the boot partition"
+# The binary knows its own version (-X main.version), but reading it means
+# booting the unit — and the units that need identifying are the ones that
+# will not boot. The same string goes onto the FAT32 partition, which survives
+# a sealed overlay and can be read by pulling the card into any machine. The
+# binary's checksum is here too: it ties this file to the binary actually
+# installed, so a hand-copied binary cannot masquerade as the baked one.
+cat > "$ROOT/boot/firmware/zeitspiegel-version.txt" <<EOF
+version=${VERSION:-unknown}
+built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+image=$([ "$SEAL" = 1 ] && echo "production (sealed)" || echo "development (unsealed)")
+binary_sha256=$(sha256sum "$PAYLOAD/zeitspiegel" 2>/dev/null | awk '{print $1}')
+EOF
+
 echo "==> install + enable boot-time profile capture (→ /boot/firmware/zeitspiegel-boot-profile.log)"
 install -D -m0755 "$PAYLOAD/zeitspiegel-boot-profile.sh" \
     "$ROOT/usr/local/sbin/zeitspiegel-boot-profile"

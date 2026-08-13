@@ -130,6 +130,14 @@ back.
 
 ## 6. Troubleshooting
 
+- Which build is this? `cat /boot/firmware/zeitspiegel-version.txt` on the
+  card, `zeitspiegel --version` on the unit, `zeitspiegel_version` at
+  `/debug/vars`, or the first line of the unit's log. `make sd-logs` puts it
+  at the top of the report. The bake stamps the version onto the FAT32
+  partition on purpose: the units that need identifying are the ones that
+  will not boot. Override it for a reproducible build with
+  `VERSION=v1.4.2 make image`.
+
 - A unit that came back from a venue broken, with no screen and no Wi-Fi to
   log into: pull its card, put it in any reader and run `make sd-logs`. It
   finds the card (USB or built-in reader), reads it without writing to it, and

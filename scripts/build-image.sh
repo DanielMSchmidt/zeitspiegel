@@ -38,6 +38,9 @@ AP_CHANNEL="${AP_CHANNEL:-6}"
 # point of a dev card. It gets its own file names: a dev image that overwrote
 # the production one would be flashed later believing it was sealed.
 SEAL="${SEAL:-1}"
+# Normally handed down by the Makefile so the image and the binary in it
+# carry the same string; computed here too, for a direct call.
+VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo unknown)}"
 if [[ "$SEAL" == 1 ]]; then
     OUT_NAME=zeitspiegel-appliance.img
     CRED=build/credentials.txt
@@ -87,7 +90,7 @@ docker run --rm --privileged --platform linux/arm64 \
     -v "$PWD/build":/work -v "$PWD/deploy":/deploy:ro \
     -e AP_SSID="$AP_SSID" -e AP_BAND="$AP_BAND" -e AP_CHANNEL="$AP_CHANNEL" \
     -e ADMIN_HASH="$ADMIN_HASH" -e WIFI_COUNTRY="$WIFI_COUNTRY" \
-    -e SEAL="$SEAL" -e OUT_NAME="$OUT_NAME" \
+    -e SEAL="$SEAL" -e OUT_NAME="$OUT_NAME" -e VERSION="$VERSION" \
     golang:1.25-trixie bash /deploy/sd/bake.sh
 
 cat > "$CRED" <<EOF
@@ -121,7 +124,7 @@ fi
 
 rm -f build/raspios.img.xz
 echo
-echo "Image ready: build/$OUT_NAME"
+echo "Image ready: build/$OUT_NAME   (version $VERSION)"
 cat "$CRED"
 echo
 echo "Write it to a card with:  make sd NAME=\"Long Side\""
