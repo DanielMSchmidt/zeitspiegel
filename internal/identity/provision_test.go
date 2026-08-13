@@ -130,6 +130,41 @@ func TestStageNameWarnsOnTruncation(t *testing.T) {
 	}
 }
 
+// UT-31: macOS likes to mount a freshly written FAT32 boot partition
+// read-only, and a bare shell redirect reports that as
+// "line 59: /Volumes/bootfs/zeitspiegel-name.txt: Read-only file system" —
+// which says nothing about what to do. Diagnose it before writing, name the
+// partition, and say how to fix it.
+func TestStageNameReportsAnUnwritableBootfs(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the mode bits this test relies on")
+	}
+	bootfs := t.TempDir()
+	if err := os.Chmod(bootfs, 0o555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(bootfs, 0o755) })
+
+	_, errOut, code := stageName(t, "Long Side", bootfs)
+	if code == 0 {
+		t.Fatal("staged onto a read-only bootfs, want a refusal")
+	}
+	if !strings.Contains(errOut, bootfs) {
+		t.Errorf("stderr = %q, want the partition it could not write to", errOut)
+	}
+	if !strings.Contains(errOut, "cannot write to") {
+		t.Errorf("stderr = %q, want the problem stated in the operator's terms", errOut)
+	}
+	// A raw redirect failure names the script and a line number; a diagnosed
+	// one does not.
+	if strings.Contains(errOut, "line ") {
+		t.Errorf("stderr = %q, want a diagnosed error, not a shell redirect failure", errOut)
+	}
+	if entries, err := os.ReadDir(bootfs); err != nil || len(entries) != 0 {
+		t.Fatalf("bootfs entries = %v (err %v), want nothing written", entries, err)
+	}
+}
+
 // UT-31: `NAME=auto` is the documented way to ship a deliberately unnamed
 // card. Nothing lands on the boot partition and the unit falls back to naming
 // itself after its id — the image stays byte-identical either way (E-8).

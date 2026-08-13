@@ -137,3 +137,9 @@ back.
   (`cfg80211.ieee80211_regdom=`, default DE, `WIFI_COUNTRY=` at build time).
 - `zeitspiegel.local` not resolving but Wi-Fi joined → use
   `http://10.42.0.1`.
+- `make sd` says the bootfs is mounted read-only → macOS auto-mounts the
+  partitions the instant `dd` finishes, and that mount is sometimes read-only.
+  The script unmounts, runs `fsck_msdos` and remounts to clear it, and if that
+  still fails it asks you to re-seat the card, which always works. The card is
+  already flashed at that point; the only thing missing is the label, so
+  `scripts/stage-name.sh "Long Side" /Volumes/bootfs` finishes the job.
