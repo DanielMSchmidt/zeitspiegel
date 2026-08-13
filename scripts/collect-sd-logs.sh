@@ -392,6 +392,10 @@ redact() {
         -e 's/(\$[0-9y][a-z]*\$[^:[:space:]]+)/<REDACTED-PASSWORD-HASH>/g' \
         "$f" > "$tmp" 2>/dev/null
     then
+        # Keep the file's timestamp: on a unit with no battery-backed clock,
+        # mtimes are among the few things that order events, and the step that
+        # makes the bundle safe to send must not destroy the evidence in it.
+        touch -r "$f" "$tmp" 2>/dev/null || true
         mv "$tmp" "$f"
     else
         rm -f "$tmp" 2>/dev/null || true
@@ -419,7 +423,11 @@ copy_into() {
     local src="$1" dest="$2" f rel
     [[ -e "$src" ]] || return 0
     mkdir -p "$(dirname "$dest")"
-    cp -R "$src" "$dest" 2>/dev/null || true
+    # -p: keep timestamps. A unit with no RTC leaves mtimes as the only
+    # ordering evidence there is, and a copy stamped "now" erases it. Setting
+    # ownership will fail when this is not root; the comparison below is what
+    # catches anything that actually failed to copy.
+    cp -Rp "$src" "$dest" 2>/dev/null || true
     if [[ -d "$src" ]]; then
         while IFS= read -r f; do
             rel="${f#"$src"}"
@@ -639,9 +647,23 @@ if [[ -n "$ROOTFS" ]]; then
     section "rootfs: persistent journal (/var/log/journal)"
     JDIR="$BUNDLE/rootfs/var/log/journal"
     if [[ -d "$JDIR" ]]; then
+        JCOUNT=$(find "$JDIR" -type f -name '*.journal*' 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$JCOUNT" == 0 ]]; then
+            # The directory without the files is its own finding: the bake
+            # creates /var/log/journal, so an empty one means journald never
+            # wrote persistently — not that the unit had nothing to say.
+            printf 'The directory exists but holds no journal files.\n\n' >> "$REPORT"
+            printf 'The bake creates /var/log/journal, so journald had somewhere to write and\n' >> "$REPORT"
+            printf 'did not use it. On a first boot that is expected — the machine id is\n' >> "$REPORT"
+            printf 'generated during it, and journald keeps that boot in RAM. A card that has\n' >> "$REPORT"
+            printf 'booted twice and still shows this has a real problem.\n' >> "$REPORT"
+            printf '\nWhat the unit said on its last boot is then only in the boot partition\n' >> "$REPORT"
+            printf 'captures above.\n' >> "$REPORT"
+        else
         printf 'journal files carried in this bundle:\n' >> "$REPORT"
         find "$JDIR" -type f -name '*.journal*' -exec ls -la {} \; 2>/dev/null \
             | sed "s|$BUNDLE/rootfs||" >> "$REPORT" || true
+        fi
         # An overlay root sends every write after the seal to tmpfs, journald
         # included. What is on the card is then the pre-seal boots only —
         # believing otherwise turns "the journal says nothing" into a wrong
@@ -659,7 +681,7 @@ if [[ -n "$ROOTFS" ]]; then
         printf 'to write one, or the root filesystem could not be read here)\n' >> "$REPORT"
     fi
 
-    if [[ -d "$JDIR" ]]; then
+    if [[ -d "$JDIR" && "${JCOUNT:-0}" != 0 ]]; then
         RENDERED="$BUNDLE/journal.txt"
         if command -v journalctl >/dev/null 2>&1; then
             note "rendering the journal with journalctl"

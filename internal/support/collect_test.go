@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // collect runs the collector the way an operator does, in the offline mode
@@ -57,6 +58,25 @@ func collectEnv(t *testing.T, env []string, args ...string) (stdout, stderr stri
 func collectFrom(t *testing.T, script string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command("bash", append([]string{repoPath(t, script)}, args...)...)
+	var out, errb strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	var exit *exec.ExitError
+	switch err := cmd.Run(); {
+	case err == nil:
+	case errors.As(err, &exit):
+		code = exit.ExitCode()
+	default:
+		t.Fatalf("running %s: %v", script, err)
+	}
+	return out.String(), errb.String(), code
+}
+
+// collectEnvFrom runs a script with an environment of its own — how the
+// on-unit captures are exercised off the unit.
+func collectEnvFrom(t *testing.T, script string, env []string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	cmd := exec.Command("bash", append([]string{repoPath(t, script)}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
 	var out, errb strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	var exit *exec.ExitError
@@ -443,6 +463,68 @@ func TestCollectDropsWhatItCannotRead(t *testing.T) {
 	// The rest of the card still comes across.
 	if !strings.Contains(report, "buffer_max_s = 60") {
 		t.Errorf("one locked file cost the rest of the root filesystem:\n%s", report)
+	}
+}
+
+// UT-32: an empty /var/log/journal is a finding, not a blank space. It is the
+// difference between "the unit said nothing" and "the unit's logs never
+// reached this card", and it is the first thing read after a black screen —
+// so the report says which one it is instead of printing an empty list.
+func TestCollectSaysWhenTheJournalIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	bootfs := writeTree(t, filepath.Join(dir, "bootfs"), map[string]string{"cmdline.txt": cmdline})
+	rootfs := writeTree(t, filepath.Join(dir, "rootfs"), map[string]string{
+		"etc/hostname": "zeitspiegel\n",
+	})
+	// The directory the bake creates, with nothing ever written into it.
+	if err := os.MkdirAll(filepath.Join(rootfs, "var/log/journal"), 0o755); err != nil {
+		t.Fatalf("making the journal dir: %v", err)
+	}
+	out := t.TempDir()
+
+	if _, stderr, code := collect(t, "--bootfs", bootfs, "--rootfs", rootfs, "--out", out); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	report := readReport(t, unpack(t, artifact(t, out)))
+	if !strings.Contains(report, "no journal files") {
+		t.Errorf("an empty journal directory is not called out:\n%s", report)
+	}
+}
+
+// UT-32: the unit has no battery-backed clock, so file timestamps are among
+// the few things that order events on it. Redaction rewrites files in the
+// bundle; it must not restamp them, or the evidence is destroyed by the step
+// that was supposed to make the bundle safe to send.
+func TestCollectRedactionKeepsTimestamps(t *testing.T) {
+	bootfs, rootfs := fullCard(t)
+	profile := filepath.Join(rootfs, "etc/NetworkManager/system-connections/zeitspiegel-ap.nmconnection")
+	// A plausible on-card timestamp: the unit's fake clock, months before the
+	// collection.
+	want := time.Date(2026, 6, 18, 0, 27, 38, 0, time.UTC)
+	if err := os.Chtimes(profile, want, want); err != nil {
+		t.Fatalf("stamping the fixture: %v", err)
+	}
+	out := t.TempDir()
+
+	if _, stderr, code := collect(t, "--bootfs", bootfs, "--rootfs", rootfs, "--out", out); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	unpacked := unpack(t, artifact(t, out))
+	hits, _ := filepath.Glob(filepath.Join(unpacked, "*", "rootfs", "etc", "NetworkManager", "system-connections", "*.nmconnection"))
+	if len(hits) != 1 {
+		t.Fatalf("expected the redacted profile in the bundle, got %v", hits)
+	}
+	info, err := os.Stat(hits[0])
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	// Zip stores timestamps to two-second granularity, in local time.
+	if drift := info.ModTime().Sub(want); drift > 2*time.Second || drift < -2*time.Second {
+		t.Errorf("redaction restamped the file: %s, want %s", info.ModTime().UTC(), want)
+	}
+	// And it is still redacted.
+	if b, _ := os.ReadFile(hits[0]); strings.Contains(string(b), "hunter2-supersecret") {
+		t.Errorf("keeping the timestamp cost the redaction: %s", b)
 	}
 }
 

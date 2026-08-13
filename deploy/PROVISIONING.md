@@ -133,7 +133,10 @@ back.
 - A unit that came back from a venue broken, with no screen and no Wi-Fi to
   log into: pull its card, put it in any reader and run `make sd-logs`. It
   finds the card (USB or built-in reader), reads it without writing to it, and
-  collects the boot partition's `zeitspiegel-debug.log` / boot profile plus
+  collects the boot partition's `zeitspiegel-debug.log` / boot profile — which
+  carries the unit's own journal lines, its restart count, journald's storage
+  state and whether DRM and the camera showed up, so a dark unit explains
+  itself even when nothing persisted — plus
   the persistent journal off the ext4 root into a single
   `zeitspiegel-logs-<mirror>-<timestamp>.zip` (a plain-text `report.txt`
   inside it, raw logs beside that, nothing else left on disk).
