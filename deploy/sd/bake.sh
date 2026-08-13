@@ -89,7 +89,13 @@ echo "==> verify the image has what the binary dlopens"
 # The display stack is loaded at runtime, so a missing library produces no
 # build error and no failing test — only a black screen in a venue, which is
 # exactly what happened for two months. Fail the bake here instead.
-bash /deploy/check-runtime.sh "$ROOT"
+RUNTIME_CHECK=$(bash /deploy/check-runtime.sh "$ROOT")
+echo "$RUNTIME_CHECK"
+# Record the verdict on the FAT partition. `make sd` re-bakes and so is
+# verified on the way past, but the card writer will otherwise write any image
+# sitting in build/ — including one baked before this check existed, which is
+# precisely the image that produces a black screen. This is what it reads.
+RUNTIME_VERDICT="ok ($(printf '%s' "$RUNTIME_CHECK" | grep -oE '[0-9]+ runtime libraries' | grep -oE '^[0-9]+') libraries)"
 
 echo "==> install zeitspiegel binary / config / unit"
 install -D -m0755 "$PAYLOAD/zeitspiegel"          "$ROOT/usr/local/bin/zeitspiegel"
@@ -121,6 +127,7 @@ version=${VERSION:-unknown}
 built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 image=$([ "$SEAL" = 1 ] && echo "production (sealed)" || echo "development (unsealed)")
 binary_sha256=$(sha256sum "$PAYLOAD/zeitspiegel" 2>/dev/null | awk '{print $1}')
+runtime_check=${RUNTIME_VERDICT:-unknown}
 EOF
 
 # The same check the bake just ran, carried onto the unit: the boot capture

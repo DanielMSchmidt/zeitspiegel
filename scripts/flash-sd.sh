@@ -71,9 +71,39 @@ size_verdict() {
     return 0
 }
 
+# runtime_verdict <bootfs-dir> — did this image pass the runtime check when it
+# was baked? The libraries SDL dlopens live on the ext4 half, which macOS
+# cannot read, so the bake records its verdict on the FAT half instead and this
+# reads that back. An image that predates the check produces a black screen and
+# nothing else, which is a bad thing to find out after erasing a card.
+runtime_verdict() {
+    local bootfs="$1" verdict=""
+    [[ -f "$bootfs/zeitspiegel-version.txt" ]] &&
+        verdict=$(grep '^runtime_check=' "$bootfs/zeitspiegel-version.txt" 2>/dev/null | cut -d= -f2-)
+    if [[ "$verdict" == ok* ]]; then
+        printf '  Runtime check:          passed at bake — %s\n' "${verdict#ok }"
+        return 0
+    fi
+    if [[ "${ALLOW_UNVERIFIED_IMAGE:-}" == 1 ]]; then
+        printf '  Runtime check:          NOT VERIFIED (allowed by ALLOW_UNVERIFIED_IMAGE)\n'
+        return 0
+    fi
+    echo "this image carries no runtime check verdict, so nothing has confirmed it has the
+  libraries SDL loads at runtime. An image without them boots to a black screen.
+  Re-bake it — 'make image' (or 'make sd', which does both) — or, if writing an
+  older image is the point, set ALLOW_UNVERIFIED_IMAGE=1." >&2
+    return 1
+}
+
 # Standalone form: answer the question without touching anything.
 #   scripts/flash-sd.sh --size-check build/zeitspiegel-appliance.img /dev/disk4
 #   scripts/flash-sd.sh --size-check <image> <byte count>
+if [[ "${1:-}" == "--check-bootfs" ]]; then
+    [[ $# -eq 2 ]] || die "usage: flash-sd.sh --check-bootfs <mounted bootfs dir>"
+    runtime_verdict "$2" || die "refusing to flash an unverified image"
+    exit 0
+fi
+
 if [[ "${1:-}" == "--size-check" ]]; then
     [[ $# -eq 3 ]] || die "usage: flash-sd.sh --size-check <image> <disk|bytes>"
     case "$3" in
@@ -138,6 +168,27 @@ diskutil info "$DISK" | grep -E "Device Identifier|Device / Media Name|Disk Size
 echo "  Image:                  $IMG"
 FITS=0
 size_verdict "$IMG" "$(disk_bytes "$DISK")" || FITS=1
+
+# Ask the image whether it was ever verified, before the operator commits to
+# erasing anything. This costs one attach of the image file; the card is not
+# touched either way.
+VERIFIED=0
+VERIFY_DEV=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount "$IMG" 2>/dev/null | awk 'NR==1 {print $1}')
+if [[ "$VERIFY_DEV" =~ ^/dev/disk[0-9]+$ ]]; then
+    diskutil mount readOnly "${VERIFY_DEV}s1" >/dev/null 2>&1 || true
+    VERIFY_BOOTFS=$(diskutil info "${VERIFY_DEV}s1" 2>/dev/null | awk -F': +' '/Mount Point/ {print $2; exit}')
+    if [[ -n "$VERIFY_BOOTFS" && -d "$VERIFY_BOOTFS" ]]; then
+        runtime_verdict "$VERIFY_BOOTFS" || VERIFIED=1
+    else
+        echo "  Runtime check:          could not read the image's boot partition" >&2
+        VERIFIED=1
+    fi
+    diskutil unmount "${VERIFY_DEV}s1" >/dev/null 2>&1 || true
+    hdiutil detach "$VERIFY_DEV" >/dev/null 2>&1 || true
+else
+    echo "  Runtime check:          could not attach $IMG to read it" >&2
+    VERIFIED=1
+fi
 if [[ "$NAME_CLEAN" == "auto" ]]; then
     echo "  Mirror name:            (unnamed — it will call itself Zeitspiegel <ID>)"
 else
@@ -147,6 +198,7 @@ fi
 # out of room partway, which costs whatever was on it and produces a card that
 # boots nowhere.
 [[ "$FITS" == 0 ]] || die "this card cannot hold $IMG — use a bigger one. Nothing has been erased."
+[[ "$VERIFIED" == 0 ]] || die "refusing to write an unverified image. Nothing has been erased."
 echo
 read -r -p "Type 'erase' to continue: " answer
 [[ "$answer" == "erase" ]] || die "aborted"

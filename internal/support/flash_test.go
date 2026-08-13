@@ -57,6 +57,49 @@ func TestFlashSizeCheckAnswersWhetherTheCardFits(t *testing.T) {
 	}
 }
 
+// UT-38: `make sd` re-bakes, so a fresh image is verified on the way past —
+// but the flasher will happily write any image that happens to be in build/,
+// including one baked before the runtime check existed. That is the image that
+// produces a black screen, so the card writer refuses it: the bake records its
+// verdict on the boot partition and flashing reads it back.
+func TestFlashRefusesAnImageThatWasNeverVerified(t *testing.T) {
+	verified := writeTree(t, filepath.Join(t.TempDir(), "bootfs"), map[string]string{
+		"zeitspiegel-version.txt": "version=v1.4.2\nruntime_check=ok (4 libraries)\n",
+	})
+	stale := writeTree(t, filepath.Join(t.TempDir(), "bootfs"), map[string]string{
+		"zeitspiegel-version.txt": "version=v1.0.0\n",
+	})
+
+	t.Run("verified image passes", func(t *testing.T) {
+		stdout, stderr, code := collectFrom(t, "scripts/flash-sd.sh", "--check-bootfs", verified)
+		if code != 0 {
+			t.Fatalf("a verified image was refused: exit %d\n%s%s", code, stdout, stderr)
+		}
+		if !strings.Contains(stdout+stderr, "4 libraries") {
+			t.Errorf("the verdict is not shown to the operator:\n%s%s", stdout, stderr)
+		}
+	})
+
+	t.Run("unverified image is refused, with a way through", func(t *testing.T) {
+		_, stderr, code := collectFrom(t, "scripts/flash-sd.sh", "--check-bootfs", stale)
+		if code == 0 {
+			t.Fatal("an image that never passed the runtime check was accepted")
+		}
+		for _, want := range []string{"make image", "ALLOW_UNVERIFIED_IMAGE"} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("the refusal does not say %q, so nobody knows what to do: %s", want, stderr)
+			}
+		}
+		// The override exists because an old image is sometimes exactly what
+		// you want to write — bisecting a regression, for one.
+		_, _, code = collectEnvFrom(t, "scripts/flash-sd.sh",
+			[]string{"ALLOW_UNVERIFIED_IMAGE=1"}, "--check-bootfs", stale)
+		if code != 0 {
+			t.Errorf("ALLOW_UNVERIFIED_IMAGE did not let the image through (exit %d)", code)
+		}
+	})
+}
+
 // UT-33: a missing image must not read as a card problem.
 func TestFlashSizeCheckNeedsAnImage(t *testing.T) {
 	_, stderr, code := sizeCheck(t, filepath.Join(t.TempDir(), "absent.img"), "32000000000")

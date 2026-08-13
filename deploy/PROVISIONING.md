@@ -130,6 +130,11 @@ back.
 
 ## 6. Troubleshooting
 
+- `make sd` and `make sd-dev` both re-bake, and the bake fails if the image is
+  missing a library SDL loads at runtime. Flashing checks again — the bake
+  records its verdict on the boot partition, and the card writer refuses an
+  image that never passed, so an old image in `build/` cannot quietly become a
+  black-screened unit (`ALLOW_UNVERIFIED_IMAGE=1` if that is the point).
 - Black screen with the unit otherwise alive: check the runtime libraries
   first — `sudo zeitspiegel-check-runtime /` on the unit, or the "runtime
   libraries" section of the boot capture on a pulled card. SDL loads the EGL
