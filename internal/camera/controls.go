@@ -13,6 +13,9 @@ import (
 
 // Control names, as they appear in the config file and in log lines.
 const (
+	ctrlSaturation       = "saturation"
+	ctrlContrast         = "contrast"
+	ctrlGamma            = "gamma"
 	ctrlFocusAuto        = "focus_auto"
 	ctrlFocusAbsolute    = "focus_absolute"
 	ctrlExposureAuto     = "exposure_auto"
@@ -63,6 +66,22 @@ func plannedControls(cfg config.Config) []control {
 	// exposure off and discovers it the same way.
 	if !cfg.ExposureAuto && cfg.ExposureAbsolute > 0 {
 		plan = append(plan, control{Name: ctrlExposureAbsolute, Value: int32(cfg.ExposureAbsolute)})
+	}
+	// Picture controls, same rule again: a zero is an absence, not a choice.
+	// These exist because a camera can hand back a technically perfect frame —
+	// full range, sharp — that still looks like nothing, and the only lever
+	// that changes that lives in the device.
+	for _, c := range []struct {
+		name string
+		val  int
+	}{
+		{ctrlSaturation, cfg.Saturation},
+		{ctrlContrast, cfg.Contrast},
+		{ctrlGamma, cfg.Gamma},
+	} {
+		if c.val > 0 {
+			plan = append(plan, control{Name: c.name, Value: int32(c.val)})
+		}
 	}
 	return plan
 }

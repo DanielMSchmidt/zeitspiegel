@@ -171,6 +171,9 @@ var ctrlIDs = map[string]v4l2.CtrlID{
 	ctrlFocusAbsolute:    v4l2.CtrlCameraFocusAbsolute,
 	ctrlExposureAuto:     v4l2.CtrlCameraExposureAuto,
 	ctrlExposureAbsolute: v4l2.CtrlCameraExposureAbsolute,
+	ctrlSaturation:       v4l2.CtrlSaturation,
+	ctrlContrast:         v4l2.CtrlContrast,
+	ctrlGamma:            v4l2.CtrlGamma,
 }
 
 // applyControls pins focus and exposure (FR-9; values from spike S-2) and

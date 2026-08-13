@@ -34,6 +34,16 @@ focus_absolute = 0
 exposure_auto = true              # auto exposure is fine for v1
 exposure_absolute = 0             # 0 = not measured (as above); only applies when exposure_auto = false
 
+# Picture controls, unset by default — 0 leaves the camera's own default alone.
+# Ranges differ per device; the boot capture records them (`v4l2-ctl
+# --list-ctrls`), and a value outside the device's range is refused and aborts
+# the open, the same way a rejected focus value does. Worth reaching for when a
+# camera delivers a technically fine frame that still looks like nothing: the
+# 0c45:636a module ships saturation at 67 of a possible 128.
+saturation = 0
+contrast = 0
+gamma = 0
+
 # Development aids, off on a production card. `make sd-dev` appends its own
 # values: verbose logs, and the frames the unit is showing written under
 # /var/log, where `make sd-logs` collects them.

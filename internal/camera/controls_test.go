@@ -42,6 +42,34 @@ func TestPlannedControls(t *testing.T) {
 			},
 		},
 		{
+			// Picture controls follow the same rule: nothing is sent unless a
+			// number was chosen. The camera that came back grey had saturation
+			// at its own default of 67 out of 128 — mid-scale, plenty of
+			// headroom, and not something to guess at from here.
+			name: "picture controls set",
+			cfg: config.Config{
+				FocusAuto: true, ExposureAuto: true,
+				Saturation: 100, Contrast: 40, Gamma: 120,
+			},
+			want: []control{
+				{Name: ctrlFocusAuto, Value: 1},
+				{Name: ctrlExposureAuto, Value: exposureAperturePriority},
+				{Name: ctrlSaturation, Value: 100},
+				{Name: ctrlContrast, Value: 40},
+				{Name: ctrlGamma, Value: 120},
+			},
+		},
+		{
+			// Unset picture controls leave the camera's own defaults alone,
+			// which is what an appliance that has not been tuned should do.
+			name: "picture controls unset",
+			cfg:  config.Config{FocusAuto: true, ExposureAuto: true},
+			want: []control{
+				{Name: ctrlFocusAuto, Value: 1},
+				{Name: ctrlExposureAuto, Value: exposureAperturePriority},
+			},
+		},
+		{
 			// The same trap on the exposure side, latent until someone turns
 			// auto exposure off.
 			name: "manual exposure, no measured value",

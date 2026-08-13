@@ -39,6 +39,16 @@ type Config struct {
 	FrameDumpEveryS float64 `toml:"frame_dump_every_s"`
 	FrameDumpKeep   int     `toml:"frame_dump_keep"`
 
+	// Picture controls (FR-9). Unset — zero — means "not chosen", and the
+	// camera's own default stands: an appliance nobody has tuned should not
+	// be second-guessing a sensor. Ranges are per device (`v4l2-ctl
+	// --list-ctrls`, which the boot capture records), so a value out of range
+	// is refused by the device and aborts the open, exactly as a rejected
+	// focus value does.
+	Saturation int `toml:"saturation"`
+	Contrast   int `toml:"contrast"`
+	Gamma      int `toml:"gamma"`
+
 	// camera controls (FR-9; values measured in spike S-2)
 	FocusAuto        bool `toml:"focus_auto"` // default off: pin focus
 	FocusAbsolute    int  `toml:"focus_absolute"`
