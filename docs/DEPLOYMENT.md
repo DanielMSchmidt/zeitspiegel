@@ -108,9 +108,13 @@ one, only the label staged onto the boot partition differs.
 
 ## Operations
 
-- Logs: `journalctl -u zeitspiegel` — persistent across reboots (NFR-8),
-  bake.sh creates `/var/log/journal/` so post-mortem debug survives without
-  needing a screen attached. Metrics: `GET /debug/vars`.
+- Logs: `journalctl -u zeitspiegel`. Persistent across reboots only on an
+  unsealed card (`make sd-dev`), where journald streams to `/var/log/journal`
+  on ext4 — that is the card to use when something is being debugged. On a
+  sealed card the overlay sends those writes to tmpfs, and the durable record
+  is on the FAT32 boot partition instead: `zeitspiegel-boot-profile.log` and
+  `zeitspiegel-journal.log.gz`, both read out by `make sd-logs` without the
+  unit having to boot (NFR-8). Metrics: `GET /debug/vars`.
 - Admin: SSH is **off** by default (bake.sh masks `ssh.service`); the
   supported admin path is re-flashing the card. The bake-time random
   password (saved in `build/credentials.txt`) is for the local HDMI +
