@@ -42,7 +42,7 @@ Environment overrides:
 | `URL` | `http://zeitspiegel.local` | what the controls QR opens |
 | `IP` | `10.42.0.1` | always-works typed address (AP gateway) |
 | `SSID` | `zeitspiegel` | Wi-Fi name shown (and encoded in the join QR) |
-| `DELAY` | `15` | boot delay named on the poster (= `default_delay_s`) |
+| `DELAY` | `25` | boot delay named on the poster (= `default_delay_s`) |
 
 ## Editing the copy
 

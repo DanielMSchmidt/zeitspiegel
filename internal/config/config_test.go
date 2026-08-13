@@ -42,8 +42,8 @@ func TestDefaults(t *testing.T) {
 	if c.Device != "auto" { // first working capture device, not a fixed node
 		t.Errorf("device default = %q, want auto", c.Device)
 	}
-	if c.DefaultDelayS != 15 { // boot default for the time-shifted mirror
-		t.Errorf("default_delay_s default = %v, want 15", c.DefaultDelayS)
+	if c.DefaultDelayS != 25 { // boot default for the time-shifted mirror
+		t.Errorf("default_delay_s default = %v, want 25", c.DefaultDelayS)
 	}
 }
 

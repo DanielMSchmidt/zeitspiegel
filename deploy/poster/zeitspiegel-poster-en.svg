@@ -22,7 +22,7 @@
 <line x1="454.0" y1="282.6" x2="550.0" y2="282.6" stroke="#2f6db0" stroke-width="5" stroke-linecap="round"/>
 <path d="M 550.0 273.6 L 562.0 282.6 L 550.0 291.6 Z" fill="#2f6db0"/>
 <text x="184.0" y="328.6" fill="#14161a" font-size="16" font-weight="700" text-anchor="middle">Dance without watching</text>
-<text x="400.0" y="328.6" fill="#14161a" font-size="16" font-weight="700" text-anchor="middle">wait 15 seconds</text>
+<text x="400.0" y="328.6" fill="#14161a" font-size="16" font-weight="700" text-anchor="middle">wait 25 seconds</text>
 <text x="616.0" y="328.6" fill="#14161a" font-size="16" font-weight="700" text-anchor="middle">Watch it back</text>
 <line x1="64" y1="381.8" x2="736" y2="381.8" stroke="#d7dbe0" stroke-width="2"/>
 <text x="400.0" y="423.3" fill="#14161a" font-size="25" font-weight="700" text-anchor="middle">Set the delay yourself</text>
