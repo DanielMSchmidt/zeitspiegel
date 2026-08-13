@@ -23,10 +23,12 @@ name the card with `DISK=`.
 
 `NAME` is required: it is the label this mirror shows in the UI, so the
 combined page says "Long Side" and "Window seat" instead of two hex ids. It is
-written onto the card's boot partition *after* the image lands, so the image
-itself stays byte-identical. Up to 32 characters; longer labels are truncated
-by the unit and `make sd` warns before it writes anything. To ship a card that
-names itself, pass `NAME=auto`.
+written into the image's boot partition *just before* the card is written, so
+the card is named the moment it exists and never has to be mounted afterwards.
+The bake itself stays label-free — the label is the one per-card file, not a
+per-card build. Up to 32 characters; longer labels are truncated by the unit
+and `make sd` warns before it writes anything. To ship a card that names
+itself, pass `NAME=auto`.
 
 **Several mirrors?** Nothing changes: write that same image to every card —
 including cards you buy years later. The role is elected at boot and the
@@ -137,9 +139,8 @@ back.
   (`cfg80211.ieee80211_regdom=`, default DE, `WIFI_COUNTRY=` at build time).
 - `zeitspiegel.local` not resolving but Wi-Fi joined → use
   `http://10.42.0.1`.
-- `make sd` says the bootfs is mounted read-only → macOS auto-mounts the
-  partitions the instant `dd` finishes, and that mount is sometimes read-only.
-  The script unmounts, runs `fsck_msdos` and remounts to clear it, and if that
-  still fails it asks you to re-seat the card, which always works. The card is
-  already flashed at that point; the only thing missing is the label, so
-  `scripts/stage-name.sh "Long Side" /Volumes/bootfs` finishes the job.
+- Renaming a card by hand says the bootfs is mounted read-only → macOS
+  sometimes mounts a FAT32 that way, most often right after a write. Eject the
+  card and put it back in; the fresh mount is writable. (`make sd` itself is
+  not affected: it labels the image before the card, and never mounts the
+  card.)

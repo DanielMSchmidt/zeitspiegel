@@ -182,6 +182,26 @@ func TestStageNameAutoLeavesTheCardUnnamed(t *testing.T) {
 	}
 }
 
+// UT-31: the label is staged into the image before it is written, and that
+// image is reused card after card — so `auto` has to clear the label the
+// previous card was given, not leave it behind for this one to inherit.
+func TestStageNameAutoClearsAPreviousLabel(t *testing.T) {
+	bootfs := t.TempDir()
+	if _, errOut, code := stageName(t, "Long Side", bootfs); code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, errOut)
+	}
+	if _, errOut, code := stageName(t, "auto", bootfs); code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, errOut)
+	}
+	if entries, err := os.ReadDir(bootfs); err != nil || len(entries) != 0 {
+		t.Fatalf("bootfs entries = %v (err %v), want the stale label gone", entries, err)
+	}
+	u := resolveStaged(t, bootfs)
+	if u.Name != identity.DefaultName(u.ID) {
+		t.Fatalf("Name = %q, want the id-derived default %q — the previous card's label leaked", u.Name, identity.DefaultName(u.ID))
+	}
+}
+
 // UT-31: re-naming a card that already carries a name replaces the label
 // rather than appending to it — the appliance reads only the first line, so a
 // stale first line would win forever.
