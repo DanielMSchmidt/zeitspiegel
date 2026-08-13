@@ -54,8 +54,22 @@ if (( len > MAX_LEN )); then
 fi
 
 if [[ -n "$bootfs" ]]; then
+    # macOS mounts a freshly written FAT32 boot partition read-only often
+    # enough that the bare redirect failure — a script line number and
+    # "Read-only file system" — is a support question rather than an
+    # instruction. Probe first, then say what to do about it.
+    probe="$bootfs/.zeitspiegel-write-probe"
+    # The group is what silences the shell's own redirect failure: on
+    # `: >"$probe" 2>/dev/null` the redirections apply left to right, so the
+    # message is already out before stderr is diverted.
+    if ! { : > "$probe"; } 2>/dev/null; then
+        rm -f "$probe" 2>/dev/null || true
+        die "cannot write to $bootfs — the boot partition is mounted read-only.
+  Eject and re-insert the card, then: scripts/stage-name.sh \"$name\" $bootfs"
+    fi
+    rm -f "$probe"
     # Truncate, never append: the unit reads the first line, so a leftover
-    # line from an earlier naming would outrank the new label forever.
+    # from an earlier naming would outrank the new label forever.
     printf '%s\n' "$name" > "$bootfs/$NAME_FILE"
 fi
 printf '%s\n' "$name"

@@ -84,18 +84,48 @@ sync
 
 # --- name the card ---------------------------------------------------------
 # The label is the only per-card difference, and it goes onto the FAT32 bootfs
-# partition (partition 1) rather than into the image. macOS mounts it a moment
-# after the write finishes, hence the short wait.
+# partition (partition 1) rather than into the image.
+#
+# macOS auto-mounts the partitions the moment dd closes the device, and that
+# mount comes up read-only often enough to count on: DiskArbitration is
+# attaching to a filesystem whose bytes changed underneath it, and a FAT32 that
+# was loop-mounted in the bake container can still carry a dirty flag. Both are
+# cleared by unmounting for real, letting fsck_msdos have a look, and mounting
+# deliberately — so do that instead of trusting what the auto-mounter left.
 echo "==> naming the card"
+
+bootfs_mount_point() {
+    local mp
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        mp=$(diskutil info "${DISK}s1" 2>/dev/null | awk -F': +' '/Mount Point/ {print $2}')
+        if [[ -n "$mp" && -d "$mp" ]]; then
+            printf '%s' "$mp"
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+name_card() { ./scripts/stage-name.sh "$NAME" "$1" >/dev/null 2>&1; }
+
+diskutil unmountDisk force "$DISK" >/dev/null
+sudo fsck_msdos -y "${RDISK}s1" >/dev/null 2>&1 || true
 diskutil mountDisk "$DISK" >/dev/null
-BOOTFS=""
-for _ in 1 2 3 4 5; do
-    BOOTFS=$(diskutil info "${DISK}s1" 2>/dev/null | awk -F': +' '/Mount Point/ {print $2}')
-    [[ -n "$BOOTFS" && -d "$BOOTFS" ]] && break
-    sleep 1
-done
-[[ -n "$BOOTFS" && -d "$BOOTFS" ]] || die "bootfs partition of $DISK did not mount — name the card by hand: scripts/stage-name.sh \"$NAME\" /Volumes/bootfs"
-./scripts/stage-name.sh "$NAME" "$BOOTFS" >/dev/null
+BOOTFS=$(bootfs_mount_point) || die "bootfs partition of $DISK did not mount — name the card by hand once it does: scripts/stage-name.sh \"$NAME\" /Volumes/bootfs"
+
+if ! name_card "$BOOTFS"; then
+    # Still read-only: try to flip the existing mount before disturbing anyone.
+    sudo mount -u -w "$BOOTFS" >/dev/null 2>&1 || true
+fi
+if ! name_card "$BOOTFS"; then
+    # Re-inserting the card is the reliable cure — the fresh mount is writable.
+    # Worth asking for: the alternative is handing back an unnamed card.
+    echo "    $BOOTFS is mounted read-only; the card has to be re-seated"
+    diskutil eject "$DISK" >/dev/null 2>&1 || true
+    read -r -p "    pull the card out, put it back in, then press return: " _
+    BOOTFS=$(bootfs_mount_point) || die "bootfs did not come back — name the card by hand: scripts/stage-name.sh \"$NAME\" /Volumes/bootfs"
+    name_card "$BOOTFS" || die "could not write the label to $BOOTFS — the card is flashed but unnamed; name it with: scripts/stage-name.sh \"$NAME\" $BOOTFS"
+fi
 sync
 diskutil eject "$DISK" >/dev/null
 
