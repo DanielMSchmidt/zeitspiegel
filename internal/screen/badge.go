@@ -15,14 +15,6 @@ import (
 //go:embed glyphs.png
 var glyphsPNG []byte
 
-// Atlas geometry — must match internal/screen/fontgen/main.go.
-const (
-	atlasOrder    = "0123456789s delay"
-	glyphW        = 14
-	glyphH        = 24
-	badgePadEdge  = 16 // px from top + right edges of the screen
-	badgePadInner = 4  // px between text and badge border, each side
-)
 
 // loadGlyphAtlas decodes the embedded PNG into an SDL texture.
 func loadGlyphAtlas(ren *sdl.Renderer) (*sdl.Texture, error) {
@@ -46,15 +38,15 @@ func loadGlyphAtlas(ren *sdl.Renderer) (*sdl.Texture, error) {
 // be called after CopyEx so it is never mirror-flipped.
 func (s *Screen) drawBadge(d time.Duration) error {
 	text := formatDelay(d)
-	winW, _, err := s.ren.GetOutputSize()
+	winW, winH, err := s.ren.GetOutputSize()
 	if err != nil {
 		return fmt.Errorf("screen: badge output size: %w", err)
 	}
-	innerW := int32(len(text)) * glyphW
-	badgeW := innerW + 2*badgePadInner
-	badgeH := int32(glyphH) + 2*badgePadInner
-	bx := winW - badgePadEdge - badgeW
-	by := int32(badgePadEdge)
+	// Sized against the screen it is actually on (badgelayout.go), not against
+	// the monitor this was first written for.
+	l := badgeLayout(int(winW), int(winH), len([]rune(text)))
+	bx, by := int32(l.X), int32(l.Y)
+	badgeW, badgeH := int32(l.W), int32(l.H)
 
 	// Opaque black backdrop.
 	if err := s.ren.SetDrawColor(0, 0, 0, 255); err != nil {
@@ -73,10 +65,10 @@ func (s *Screen) drawBadge(d time.Duration) error {
 		idx := int32(rawIdx)
 		src := sdl.Rect{X: idx * glyphW, Y: 0, W: glyphW, H: glyphH}
 		dst := sdl.Rect{
-			X: bx + badgePadInner + int32(i)*glyphW,
-			Y: by + badgePadInner,
-			W: glyphW,
-			H: glyphH,
+			X: bx + int32(l.PadInner) + int32(i)*int32(l.GlyphW),
+			Y: by + int32(l.PadInner),
+			W: int32(l.GlyphW),
+			H: int32(l.GlyphH),
 		}
 		if err := s.ren.Copy(s.glyphTex, &src, &dst); err != nil {
 			return fmt.Errorf("screen: badge glyph: %w", err)
