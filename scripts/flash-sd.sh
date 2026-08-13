@@ -9,15 +9,16 @@
 # Auto-detection finds cards in a built-in reader as well as USB readers and
 # sticks. `diskutil list` shows every disk if you need to pick one by hand.
 #
-# NAME is the label this mirror shows in the UI. It is staged onto the FAT32
-# bootfs partition after the write, so the image itself stays byte-identical
-# across every card (E-8).
+# NAME is the label this mirror shows in the UI. It is written into the image's
+# FAT32 boot partition just before the card is, so the card is named the moment
+# it exists and never has to be mounted afterwards. The bake stays label-free:
+# this is the one per-card file, not a per-card build (E-8).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 die() { echo "error: $*" >&2; exit 1; }
 
-[[ "$(uname)" == "Darwin" ]] || die "flash-sd.sh targets macOS; on Linux use: sudo dd if=build/zeitspiegel-appliance.img of=/dev/sdX bs=4M conv=fsync, then scripts/stage-name.sh \"\$NAME\" /media/\$USER/bootfs"
+[[ "$(uname)" == "Darwin" ]] || die "flash-sd.sh targets macOS; on Linux name the image first (L=\$(sudo losetup -Pf --show build/zeitspiegel-appliance.img); sudo mount \"\${L}p1\" /mnt; scripts/stage-name.sh \"\$NAME\" /mnt; sudo umount /mnt; sudo losetup -d \"\$L\"), then: sudo dd if=build/zeitspiegel-appliance.img of=/dev/sdX bs=4M conv=fsync"
 IMG=build/zeitspiegel-appliance.img
 [[ -f "$IMG" ]] || die "$IMG missing — run 'make image' first"
 
@@ -75,57 +76,41 @@ echo
 read -r -p "Type 'erase' to continue: " answer
 [[ "$answer" == "erase" ]] || die "aborted"
 
+# --- name the image, then write it -----------------------------------------
+# The label goes into the image's own boot partition before a single byte
+# reaches the card. Naming the card afterwards is what the earlier version did,
+# and it is a coin flip: macOS auto-mounts the partitions the moment dd closes
+# the device, and that mount regularly comes up read-only — DiskArbitration
+# attaches to a filesystem whose bytes changed underneath it. An image file is
+# subject to none of that, and a card that has just been written is never
+# touched again.
+#
+# The bake stays label-free, so this is still the one per-card file rather than
+# a per-card build (E-8); the image is re-labelled in place for the next card.
+echo "==> naming the image"
+IMG_DEV=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount "$IMG" | awk 'NR==1 {print $1}') \
+    || die "could not attach $IMG — 'hdiutil info' lists what is already attached"
+[[ "$IMG_DEV" =~ ^/dev/disk[0-9]+$ ]] || die "attaching $IMG gave no disk device (got \"$IMG_DEV\")"
+detach_img() { hdiutil detach "$IMG_DEV" >/dev/null 2>&1 || true; }
+trap detach_img EXIT
+
+# An already-mounted partition makes `diskutil mount` fail; the mount point is
+# the thing that actually matters, so test for that rather than for the exit.
+diskutil mount "${IMG_DEV}s1" >/dev/null 2>&1 || true
+IMG_BOOTFS=$(diskutil info "${IMG_DEV}s1" 2>/dev/null | awk -F': +' '/Mount Point/ {print $2}')
+[[ -n "$IMG_BOOTFS" && -d "$IMG_BOOTFS" ]] || die "could not mount the boot partition of $IMG"
+# `auto` clears the label instead of writing one — the image is reused card
+# after card, so a previous card's name must not leak into this one.
+./scripts/stage-name.sh "$NAME" "$IMG_BOOTFS" >/dev/null
+diskutil unmount "${IMG_DEV}s1" >/dev/null
+detach_img
+trap - EXIT
+
 RDISK="${DISK/\/dev\/disk//dev/rdisk}"
 echo "==> unmounting $DISK"
 diskutil unmountDisk force "$DISK"
 echo "==> writing $IMG to $RDISK (sudo will prompt; a few minutes)"
 sudo dd if="$IMG" of="$RDISK" bs=4m
-sync
-
-# --- name the card ---------------------------------------------------------
-# The label is the only per-card difference, and it goes onto the FAT32 bootfs
-# partition (partition 1) rather than into the image.
-#
-# macOS auto-mounts the partitions the moment dd closes the device, and that
-# mount comes up read-only often enough to count on: DiskArbitration is
-# attaching to a filesystem whose bytes changed underneath it, and a FAT32 that
-# was loop-mounted in the bake container can still carry a dirty flag. Both are
-# cleared by unmounting for real, letting fsck_msdos have a look, and mounting
-# deliberately — so do that instead of trusting what the auto-mounter left.
-echo "==> naming the card"
-
-bootfs_mount_point() {
-    local mp
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-        mp=$(diskutil info "${DISK}s1" 2>/dev/null | awk -F': +' '/Mount Point/ {print $2}')
-        if [[ -n "$mp" && -d "$mp" ]]; then
-            printf '%s' "$mp"
-            return 0
-        fi
-        sleep 1
-    done
-    return 1
-}
-name_card() { ./scripts/stage-name.sh "$NAME" "$1" >/dev/null 2>&1; }
-
-diskutil unmountDisk force "$DISK" >/dev/null
-sudo fsck_msdos -y "${RDISK}s1" >/dev/null 2>&1 || true
-diskutil mountDisk "$DISK" >/dev/null
-BOOTFS=$(bootfs_mount_point) || die "bootfs partition of $DISK did not mount — name the card by hand once it does: scripts/stage-name.sh \"$NAME\" /Volumes/bootfs"
-
-if ! name_card "$BOOTFS"; then
-    # Still read-only: try to flip the existing mount before disturbing anyone.
-    sudo mount -u -w "$BOOTFS" >/dev/null 2>&1 || true
-fi
-if ! name_card "$BOOTFS"; then
-    # Re-inserting the card is the reliable cure — the fresh mount is writable.
-    # Worth asking for: the alternative is handing back an unnamed card.
-    echo "    $BOOTFS is mounted read-only; the card has to be re-seated"
-    diskutil eject "$DISK" >/dev/null 2>&1 || true
-    read -r -p "    pull the card out, put it back in, then press return: " _
-    BOOTFS=$(bootfs_mount_point) || die "bootfs did not come back — name the card by hand: scripts/stage-name.sh \"$NAME\" /Volumes/bootfs"
-    name_card "$BOOTFS" || die "could not write the label to $BOOTFS — the card is flashed but unnamed; name it with: scripts/stage-name.sh \"$NAME\" $BOOTFS"
-fi
 sync
 diskutil eject "$DISK" >/dev/null
 

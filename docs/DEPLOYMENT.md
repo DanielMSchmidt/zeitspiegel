@@ -87,11 +87,12 @@ one, only the label staged onto the boot partition differs.
   themselves. Every mirror keeps mirroring throughout — the display path
   never waits on the network. Plug the old unit back in and it joins as an
   ordinary member.
-- Name a unit as you write its card: `make sd NAME="Long Side"`. The label lands
-  in `zeitspiegel-name.txt` on the FAT32 `bootfs` partition, so renaming later
-  is `scripts/stage-name.sh "Long Side" /Volumes/bootfs` on any computer — no
-  re-flash. Cards written with `NAME=auto` call themselves `Zeitspiegel <ID>`
-  after their CPU serial. The image stays identical either way.
+- Name a unit as you write its card: `make sd NAME="Long Side"`. The label goes
+  into the image's `zeitspiegel-name.txt` on the FAT32 `bootfs` partition
+  immediately before the card is written, so the card arrives named. Renaming
+  later is `scripts/stage-name.sh "Long Side" /Volumes/bootfs` against the card
+  on any computer — no re-flash. Cards written with `NAME=auto` call themselves
+  `Zeitspiegel <ID>` after their CPU serial. The bake is identical either way.
 - **First thing to check on site:** a phone and a member unit, both on the
   network, must reach each other (`curl http://10.42.0.x/healthz` from a
   laptop). The combined page rests on that.
