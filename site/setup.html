@@ -74,20 +74,31 @@
       </td>
     </tr>
     <tr>
-      <td><strong>A wide-angle USB webcam</strong> (~100–110° diagonal, fixed focus, native MJPEG)</td>
+      <td><strong>A wide-angle USB webcam</strong> (~100° diagonal, focus that
+        stays put, native MJPEG) — around €30–€55</td>
       <td>
         Three things matter, in this order. It must output <strong>MJPEG
         natively</strong> — that's the one requirement that can't be worked
         around, and a camera without it won't start at all. It should be
         <strong>wide</strong>, so the whole dancer fits from a couple of metres
-        away. And it should be <strong>fixed focus</strong> with
+        away. And its <strong>focus must stay where you put it</strong>, with
         <strong>no "AI" features</strong> — no auto-framing, no background
-        blur, no beauty mode. Fixed focus isn't a downgrade: the lens is set so
-        that everything from about 30&nbsp;cm to infinity is sharp, and it can
-        never hunt mid-movement. Auto-framing is the worst offender — it would
-        pan and crop the picture as you move.
+        blur, no beauty mode. Auto-framing is the worst offender: it would pan
+        and crop the picture as you move.
         <br>
-        Ranked shortlist with links, plus the field-of-view maths:
+        Both <em>fixed</em> and <em>manual</em> focus are right for this.
+        A fixed lens sits at its hyperfocal distance, so at 100° everything
+        from about 30–40&nbsp;cm out to infinity is sharp; a manual ring you
+        set once at dancing distance does the same and cannot drift.
+        Autofocus works too, but it has to be pinned in the config from a
+        measured value, and that's one more thing to get wrong.
+        <br>
+        The current pick is the <strong>LogiLink UA0378</strong> — 100°,
+        manual focus, clips to a screen, tripod thread, about €34
+        (<a href="https://www.amazon.de/dp/B08QCXMC1V">amazon.de B08QCXMC1V</a>).
+        Webcam listings churn constantly, so check the ranked shortlist —
+        stock webcams and bare camera modules, with prices, the field-of-view
+        maths and the named models to avoid — before ordering:
         <a href="https://github.com/DanielMSchmidt/zeitspiegel/blob/main/docs/HARDWARE.md">docs/HARDWARE.md</a>
         <br>
         <strong>Don't buy 4K.</strong> The Pi can't decode it fast enough for a
@@ -227,7 +238,36 @@ write the card:</p>
   screen so dancers know what to do.
 </p>
 
-<h2>6. Day-to-day operation</h2>
+<h2 id="more-than-one-mirror">6. More than one mirror</h2>
+
+<p>
+  Bigger rooms often want two or three — one down the long side, one at the
+  barre. There is nothing to configure: write every card the same way
+  (<code>make sd NAME="…"</code>, a different name each time) and plug them
+  in. The image is identical on all of them; the name is the only difference.
+</p>
+
+<ul>
+  <li>Whichever unit comes up first hosts the <code>zeitspiegel</code> Wi-Fi;
+    the rest find it and join as members. There's still exactly one network in
+    the room, and the order you switch them on doesn't matter.</li>
+  <li>The web page shows one card per mirror, named the way you named them,
+    each with its own delay slider, preview and clip download. Changing one
+    doesn't touch the others.</li>
+  <li>If the hosting unit is unplugged, one of the others takes the network
+    over within seconds and keeps the name <code>zeitspiegel.local</code>.
+    Plug the old one back in and it rejoins as an ordinary member.</li>
+  <li>You can buy more units years later and they'll join the same way — no
+    unit knows or cares how many exist.</li>
+</ul>
+
+<p>
+  Clip downloads are the one thing that competes for radio time. If several
+  mirrors will be in one room, bake the cards on 5&nbsp;GHz for more headroom:
+  <code>AP_BAND=a AP_CHANNEL=36 make sd NAME="Long Side"</code>.
+</p>
+
+<h2>7. Day-to-day operation</h2>
 
 <ul>
   <li><strong>To start:</strong> plug in power. The full-screen mirror is up
@@ -241,15 +281,52 @@ write the card:</p>
     The appliance has no login on purpose.</li>
 </ul>
 
-<h2>7. When things go wrong</h2>
+<h2>8. When things go wrong</h2>
+
+<div class="callout">
+  <strong>Start here: the card can tell you what happened.</strong> A unit that
+  won't come up has no Wi-Fi and no screen, so there is nothing to log into.
+  It doesn't need one — every boot writes what it did to the card's own boot
+  partition. Power the unit down, take the card out, put it in your computer
+  and run:
+  <pre><code>make sd-logs</code></pre>
+  That produces one zip — the boot report, the unit's journal for that boot,
+  the version it was running — which is enough to see whether the camera
+  enumerated, whether a screen was detected, and what the service said before
+  it gave up. It only reads the card; it never writes to it.
+</div>
 
 <details>
   <summary>The Wi-Fi <code>zeitspiegel</code> doesn't appear after 5 minutes</summary>
   <p>
-    Plug a USB keyboard into the Pi and look at the console on the HDMI
-    output for error messages — the first-boot script logs there. The most
-    common cause is a country code mismatch blocking the radio; re-bake the
-    card with <code>WIFI_COUNTRY=YourTwoLetterCode make sd NAME="Long Side"</code>.
+    Read the card with <code>make sd-logs</code> (above) — the boot report
+    says whether the radio came up. The most common cause is a country code
+    mismatch blocking it; re-bake the card with
+    <code>WIFI_COUNTRY=YourTwoLetterCode make sd NAME="Long Side"</code>.
+  </p>
+  <p>
+    If several mirrors are running, this may also be correct behaviour: only
+    one unit hosts the <code>zeitspiegel</code> network and the others join it
+    as members. One network for the whole room is the expected result.
+  </p>
+</details>
+
+<details>
+  <summary>The screen stays black</summary>
+  <p>
+    Read the card with <code>make sd-logs</code>. The boot report records
+    whether the Pi found a display at all, whether the camera enumerated, and
+    how many times the service restarted — which separates "no screen", "no
+    camera" and "the program is crashing" without any guesswork.
+  </p>
+  <p>
+    If you need to watch a problem happen rather than read about it
+    afterwards, write a <em>development</em> card:
+    <code>make sd-dev NAME="Bench"</code>. It's the same appliance with the
+    read-only seal left off, so it keeps verbose logs across reboots and can
+    save the frames it is actually displaying — both collected by the same
+    <code>make sd-logs</code>. Because it isn't sealed, pulling its power can
+    corrupt the card: it's a card for a workbench, not for a studio.
   </p>
 </details>
 
