@@ -52,7 +52,7 @@ func Open(ctx context.Context, cfg config.Config) (*Camera, error) {
 		}
 		errs = append(errs, err)
 	}
-	return nil, fmt.Errorf("camera: no usable device among %v: %w", nodes, errors.Join(errs...))
+	return nil, fmt.Errorf("camera: %s", summarizeProbeErrors(nodes, errs))
 }
 
 // openDevice configures and starts one specific node.
