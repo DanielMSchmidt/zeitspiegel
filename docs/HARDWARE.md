@@ -16,7 +16,7 @@ preferences.
 |---|---|---|
 | **USB UVC** | The adapter is V4L2 over go4vl. CSI cameras are designed out (`camera_auto_detect=0`) | `deploy/setup.sh` |
 | **Native MJPEG** | The ring buffer stores the camera's own JPEGs. There is no YUYV path and no live encoder — a camera without MJPEG cannot be opened at all | D2, `camera.go` `PixelFmtMJPEG` |
-| **A discrete MJPEG mode ≤ 1920×1080** | `probeMaxMJPEG` rejects everything above the `config.MaxAuto{Width,Height}` cap | E-2, `camera.go` |
+| **A discrete MJPEG mode ≤ 1920×1080** | `selectMode` rejects everything above the `config.MaxAuto{Width,Height}` cap | E-2, `camera/modes.go` |
 | **Bus-powered from the Pi** | Which is why the 5 V/5 A PSU is mandatory | docs/DEPLOYMENT.md |
 
 Two constraints that used to exist and no longer do: the camera needed to
@@ -91,7 +91,7 @@ downstream of it is:
 - **Export.** The Pi 5 has no hardware H.264 encoder (D4) and export already
   downscales to a 720p long edge — 4K would be decoded only to be discarded.
 
-A 4K camera is not *fatal* — `probeMaxMJPEG` would select its 1080p MJPEG mode,
+A 4K camera is not *fatal* — `selectMode` would select its 1080p MJPEG mode,
 and a downsampled 4K sensor can look marginally better. But you would pay for
 resolution that is unreachable by design, and the 4K webcam market is
 overwhelmingly the AI-processing class below.
