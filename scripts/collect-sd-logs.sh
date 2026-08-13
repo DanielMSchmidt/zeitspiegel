@@ -558,6 +558,7 @@ fi
 note "collecting the boot partition"
 mkdir -p "$BUNDLE/bootfs"
 for f in zeitspiegel-debug.log zeitspiegel-boot-profile.log zeitspiegel-journal.log.gz \
+         zeitspiegel-capture-live \
          zeitspiegel-name.txt zeitspiegel-version.txt cmdline.txt config.txt ssh \
          userconf.txt zeitspiegel-authorized_keys; do
     copy_into "$BOOTFS/$f" "$BUNDLE/bootfs/$f"
@@ -604,6 +605,10 @@ section "bootfs: seal / access markers"
 {
     printf 'overlay root (cmdline.txt):                 %s\n' \
         "$([[ "$SEALED" == 1 ]] && echo 'yes — root is sealed read-only' || echo 'no — root is writable')"
+    printf 'live capture marker:                        %s\n' \
+        "$([[ -e "$BOOTFS/zeitspiegel-capture-live" ]] \
+            && echo 'yes — the capture refreshed on every timer firing' \
+            || echo 'no — the capture is from 30 s after the last boot only')"
     printf 'ssh marker file present:                    %s\n' "$([[ -e "$BOOTFS/ssh" ]] && echo yes || echo no)"
     printf 'staged authorized_keys present:             %s\n' "$([[ -e "$BOOTFS/zeitspiegel-authorized_keys" ]] && echo yes || echo no)"
     printf 'userconf.txt present:                       %s (hash redacted)\n' "$([[ -e "$BOOTFS/userconf.txt" ]] && echo yes || echo no)"

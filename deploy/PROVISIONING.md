@@ -160,6 +160,14 @@ back.
   the ext4 journal is empty — a first boot (journald keeps it in RAM until the
   machine id is committed) and any boot of a sealed unit (the overlay sends it
   to tmpfs). `make sd-logs` reads it out into the report.
+- A unit that fails *after running a while* needs the capture to keep up: it
+  writes once per boot by default, so a card pulled at hour six otherwise
+  carries hour zero. Drop an empty file named `zeitspiegel-capture-live` on the
+  boot partition — from any laptop, card in a reader — and every timer firing
+  (5 min) refreshes the profile and the journal snapshot instead. Dev cards
+  ship with it; venue cards do not, because the persistent journal is meant to
+  be the one write path (NFR-9). `make sd-logs` reports which mode the card
+  was in.
 - A unit you are actively debugging belongs on a **development card**:
   `make sd-dev NAME="Bench"` bakes and flashes the same image with the
   first-boot seal left off. The root stays writable, so `/var/log/journal`

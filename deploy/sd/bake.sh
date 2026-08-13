@@ -312,6 +312,10 @@ if [[ "$SEAL" != 1 ]]; then
     # image (E-8), and a fleet sharing one machine id shares everything derived
     # from it — NetworkManager's stable MAC and DHCP identifiers among them.
     # Bench cards run one at a time, so the trade is free there and not here.
+    # A bench card is being watched, so it refreshes its capture on every
+    # timer firing rather than once per boot. On a venue card this marker is
+    # absent and the card is written once per boot (NFR-9).
+    : > "$ROOT/boot/firmware/zeitspiegel-capture-live"
     head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$ROOT/etc/machine-id"
     printf '\n' >> "$ROOT/etc/machine-id"
     chmod 0444 "$ROOT/etc/machine-id"

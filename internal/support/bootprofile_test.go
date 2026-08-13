@@ -89,6 +89,61 @@ func TestBootProfileSnapshotsTheJournalToTheBootPartition(t *testing.T) {
 	}
 }
 
+// UT-34: a unit that has been up for hours and fails at hour six is the case
+// a once-at-30-seconds capture cannot answer, however many lines it keeps. The
+// timer therefore keeps firing, and the capture decides whether to rewrite:
+// once per boot normally — a venue appliance does not write to its card every
+// five minutes for nothing — and every firing when a marker on the boot
+// partition asks for it, which an operator can drop there by plugging the card
+// into a laptop.
+func TestBootProfileRewritesOnlyWhenLiveCaptureIsAsked(t *testing.T) {
+	run := func(t *testing.T, dir string, extraEnv ...string) string {
+		t.Helper()
+		out := filepath.Join(dir, "zeitspiegel-boot-profile.log")
+		env := append([]string{
+			"OUT=" + out,
+			"JOURNAL_OUT=" + filepath.Join(dir, "zeitspiegel-journal.log.gz"),
+			"CAPTURE_STAMP=" + filepath.Join(dir, "stamp"),
+			"PROFILE_WAIT=0",
+		}, extraEnv...)
+		if _, stderr, code := collectEnvFrom(t, "deploy/zeitspiegel-boot-profile.sh", env); code != 0 {
+			t.Fatalf("capture failed: exit %d: %s", code, stderr)
+		}
+		b, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatalf("no capture written: %v", err)
+		}
+		return string(b)
+	}
+
+	t.Run("second firing is a no-op by default", func(t *testing.T) {
+		dir := t.TempDir()
+		first := run(t, dir)
+		if err := os.WriteFile(filepath.Join(dir, "zeitspiegel-boot-profile.log"),
+			[]byte(first+"\nSENTINEL\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := run(t, dir); !strings.Contains(got, "SENTINEL") {
+			t.Error("the second firing rewrote the capture; a card in a venue would be written to every five minutes")
+		}
+	})
+
+	t.Run("marker on the boot partition makes it live", func(t *testing.T) {
+		dir := t.TempDir()
+		marker := filepath.Join(dir, "zeitspiegel-capture-live")
+		run(t, dir, "LIVE_MARKER="+marker)
+		if err := os.WriteFile(filepath.Join(dir, "zeitspiegel-boot-profile.log"), []byte("SENTINEL\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(marker, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := run(t, dir, "LIVE_MARKER="+marker); strings.Contains(got, "SENTINEL") {
+			t.Error("the marker did not make the capture refresh; a long-running unit stays frozen at 30 s")
+		}
+	})
+}
+
 // UT-34: a unit that logged nothing and a journal that cannot be read are
 // different diagnoses, and the profile is where they get told apart — an empty
 // grep must not be the only thing distinguishing them.

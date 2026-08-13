@@ -33,7 +33,31 @@ PROFILE_WAIT="${PROFILE_WAIT:-60}"
 # for is gone, unless it is copied here first. gzip because it is text, and
 # because this is a FAT32 card being written on every boot.
 JOURNAL_OUT="${JOURNAL_OUT:-/boot/firmware/zeitspiegel-journal.log.gz}"
-JOURNAL_LINES="${JOURNAL_LINES:-5000}"
+# 50k lines of short-monotonic is a few MB of text and a few hundred KB
+# gzipped — nothing on an SD card, and enough to cover hours of a unit that
+# logs steadily. The cap exists to bound the write, not to save space.
+JOURNAL_LINES="${JOURNAL_LINES:-50000}"
+
+# --- how often this runs ----------------------------------------------------
+# The timer keeps firing (OnUnitActiveSec), because a unit that has been up for
+# six hours and failed at hour five cannot be explained by a capture taken 30
+# seconds after boot, however many lines it keeps. But a venue appliance should
+# not write to its card every few minutes for nothing, and the persistent
+# journal is meant to be the one write path (NFR-9) — so by default this writes
+# once per boot and later firings do nothing.
+#
+# Dropping zeitspiegel-capture-live on the boot partition — from any laptop,
+# with the card in a reader — turns every firing into a refresh, so the card
+# always carries the last few minutes. Dev images ship with it.
+LIVE_MARKER="${LIVE_MARKER:-$(dirname "$OUT")/zeitspiegel-capture-live}"
+# Per-boot, in tmpfs: it disappears on reboot, which is exactly the lifetime
+# "once per boot" needs.
+CAPTURE_STAMP="${CAPTURE_STAMP:-/run/zeitspiegel-boot-profile.stamp}"
+
+if [ -e "$CAPTURE_STAMP" ] && [ ! -e "$LIVE_MARKER" ]; then
+    exit 0
+fi
+: > "$CAPTURE_STAMP" 2>/dev/null || true
 
 # Poll until the manager records a finished boot, capped so we always write
 # *something* even if a unit hangs. `systemctl show` returns
@@ -133,15 +157,30 @@ say() {
     echo "-- full journal for this boot --"
     printf 'Snapshotted next to this file as %s\n' "$(basename "$JOURNAL_OUT")"
     printf 'Read it with: gunzip -c %s\n' "$(basename "$JOURNAL_OUT")"
+    if [ -e "$LIVE_MARKER" ]; then
+        printf 'Live capture is ON (%s): this file is refreshed on every timer\n' "$(basename "$LIVE_MARKER")"
+        printf 'firing, so it reflects the unit as of the snapshot time above.\n'
+    else
+        printf 'Live capture is off: this was written once, %s seconds into the boot.\n' \
+            "$(awk '{printf "%%d", $1}' /proc/uptime 2>/dev/null)"
+        printf 'For a unit that fails after running a while, drop an empty file named\n'
+        printf '%s on the boot partition — every firing then refreshes it.\n' "$(basename "$LIVE_MARKER")"
+    fi
 } > "$OUT" 2>&1
 
 # Every unit's lines, not just ours: a display that never came up may be
 # explained by udev, vc4 or NetworkManager rather than by the mirror. Bounded,
 # because this goes onto the card on every boot.
+# niced, because on a live capture this runs while the mirror is rendering and
+# the render loop's budget is the thing that must not move (NFR-2/NFR-3). The
+# same reason the exporter is niced.
 {
-    journalctl -b --no-pager --output=short-monotonic 2>&1 | tail -n "$JOURNAL_LINES"
+    nice -n 19 journalctl -b --no-pager --output=short-monotonic 2>&1 | tail -n "$JOURNAL_LINES"
     echo "(snapshot taken at uptime $(awk '{print $1}' /proc/uptime 2>/dev/null)s, last $JOURNAL_LINES lines)"
-} | gzip -9 > "$JOURNAL_OUT" 2>/dev/null
+} | nice -n 19 gzip -9 > "$JOURNAL_OUT.tmp" 2>/dev/null
+# Rename rather than write in place: a power cut during the write then costs
+# the new snapshot, not the one already on the card.
+mv -f "$JOURNAL_OUT.tmp" "$JOURNAL_OUT" 2>/dev/null || rm -f "$JOURNAL_OUT.tmp"
 
 # FAT32 loses unflushed writes on a power cut, and surviving one is the entire
 # point of writing here.

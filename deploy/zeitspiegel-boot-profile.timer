@@ -11,6 +11,12 @@ Description=zeitspiegel: fire boot timing profile capture once after boot
 
 [Timer]
 OnBootSec=30s
+# Keep firing: a unit that fails after hours cannot be explained by a capture
+# taken 30 seconds after boot. The script decides whether a firing rewrites
+# anything — once per boot by default, every firing when the
+# zeitspiegel-capture-live marker is on the boot partition — so this costs a
+# process every five minutes and no card writes unless they were asked for.
+OnUnitActiveSec=5min
 AccuracySec=1s
 Unit=zeitspiegel-boot-profile.service
 
