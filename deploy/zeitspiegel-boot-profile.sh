@@ -143,6 +143,22 @@ say() {
                done; [ -e /sys/class/drm ] || echo "(no /sys/class/drm on this machine)"'
     say "/dev/video (did the camera enumerate)" \
         ls -la /dev/video0 /dev/video1 /dev/video2
+
+    # What the camera says about itself. A picture that arrives sharp but grey
+    # is answered here — the colour space and quantisation the driver reports,
+    # and where saturation, contrast and brightness actually sit — and asking
+    # by hand means somebody standing at the unit with a keyboard, which is
+    # exactly what nobody has.
+    say "camera: capabilities, formats and controls (v4l2-ctl)" \
+        sh -c 'for dev in /dev/video0 /dev/video1; do
+                   [ -e "$dev" ] || continue
+                   echo "=== $dev ==="
+                   v4l2-ctl -d "$dev" --all 2>&1 | head -60
+                   echo "--- formats ---"
+                   v4l2-ctl -d "$dev" --list-formats-ext 2>&1 | head -40
+                   echo "--- controls ---"
+                   v4l2-ctl -d "$dev" --list-ctrls 2>&1 | head -40
+               done'
     say "dmesg: vc4 / drm / hdmi / usb video" \
         sh -c 'dmesg 2>&1 | grep -iE "vc4|drm|hdmi|uvcvideo|cma" | tail -40'
 

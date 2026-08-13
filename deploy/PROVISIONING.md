@@ -135,6 +135,12 @@ back.
   records its verdict on the boot partition, and the card writer refuses an
   image that never passed, so an old image in `build/` cannot quietly become a
   black-screened unit (`ALLOW_UNVERIFIED_IMAGE=1` if that is the point).
+- "The picture looked wrong": a development card writes a frame every 5 s to
+  `/var/log/zeitspiegel/frames`, keeping the newest 30, and `make sd-logs`
+  carries them in the bundle — so a colour cast or a framing problem arrives as
+  JPEGs somebody can measure rather than as a description. Dev cards also log
+  at debug level, and the boot capture asks the camera what it can do
+  (`v4l2-ctl --all`, formats, controls), so nothing needs running on the unit.
 - Delay badge looks blocky: the typeface (`fonts-liberation2`) is missing and
   the badge fell back to its built-in bitmap glyphs. `zeitspiegel-check-runtime /`
   says so by name — nothing links a font, so nothing else would.

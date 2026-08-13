@@ -37,6 +37,11 @@ fonts-liberation2
 network-manager
 dnsmasq-base
 iptables
+# v4l-utils: what the boot capture uses to ask the camera what it can do —
+# its modes, its controls, and the colour range it claims. Nobody can run this
+# on a unit in a studio, so the unit runs it on itself and puts the answer on
+# the card.
+v4l-utils
 # rfkill + iw: in-place debugging when a unit will not beacon, and
 # `iw station dump` is how a host counts its audience (D8).
 rfkill

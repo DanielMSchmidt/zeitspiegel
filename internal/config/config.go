@@ -28,6 +28,17 @@ type Config struct {
 	NetworkManage bool   `toml:"network_manage"` // let the binary drive the radio (true only on the appliance)
 	NameFile      string `toml:"name_file"`      // display-name file on the boot partition; empty = identity default
 
+	// Development aids, off by default. A field unit is sealed and silent;
+	// a bench card can afford to say more, and `make sd-dev` turns these on.
+	// LogLevel is slog's ("debug"|"info"|"warn"|"error"); FrameDumpDir writes
+	// the frames the unit is actually showing where the log collection picks
+	// them up, which is the only way to look at them on a unit nobody can
+	// reach over a network.
+	LogLevel        string  `toml:"log_level"`
+	FrameDumpDir    string  `toml:"frame_dump_dir"`
+	FrameDumpEveryS float64 `toml:"frame_dump_every_s"`
+	FrameDumpKeep   int     `toml:"frame_dump_keep"`
+
 	// camera controls (FR-9; values measured in spike S-2)
 	FocusAuto        bool `toml:"focus_auto"` // default off: pin focus
 	FocusAbsolute    int  `toml:"focus_absolute"`
@@ -38,15 +49,18 @@ type Config struct {
 // Default returns the boot defaults (deploy/config.toml overrides for the Pi).
 func Default() Config {
 	return Config{
-		Bind:           ":8080",
-		Source:         "camera",
-		Device:         "auto", // first device that actually streams (UVC cameras also enumerate a metadata-only node)
-		Profile:        "auto", // highest MJPEG resolution the camera offers, capped at 1080p (E-2 rev)
-		BufferMaxS:     120,
-		BufferMaxBytes: 1536 << 20, // 1.5 GiB
-		MirrorFlip:     true,
-		DefaultDelayS:  25, // boot the mirror with a 25 s shift (FR-3 default)
-		ExposureAuto:   true,
+		Bind:            ":8080",
+		Source:          "camera",
+		Device:          "auto", // first device that actually streams (UVC cameras also enumerate a metadata-only node)
+		Profile:         "auto", // highest MJPEG resolution the camera offers, capped at 1080p (E-2 rev)
+		BufferMaxS:      120,
+		BufferMaxBytes:  1536 << 20, // 1.5 GiB
+		MirrorFlip:      true,
+		DefaultDelayS:   25, // boot the mirror with a 25 s shift (FR-3 default)
+		ExposureAuto:    true,
+		LogLevel:        "info",
+		FrameDumpEveryS: 5,
+		FrameDumpKeep:   30,
 	}
 }
 

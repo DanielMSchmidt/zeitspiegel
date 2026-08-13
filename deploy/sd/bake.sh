@@ -328,6 +328,21 @@ if [[ "$SEAL" != 1 ]]; then
     # image (E-8), and a fleet sharing one machine id shares everything derived
     # from it — NetworkManager's stable MAC and DHCP identifiers among them.
     # Bench cards run one at a time, so the trade is free there and not here.
+    # A bench card is watched rather than shipped: it says more in its logs,
+    # and it writes the frames it is showing under /var/log, which is where
+    # `make sd-logs` already collects from. That is the only way to look at
+    # what a unit is actually rendering when nobody can reach it over a
+    # network. 30 frames at 5 s covers two and a half minutes and costs a few
+    # MB of a card that has tens of GB spare.
+    cat >> "$ROOT/etc/zeitspiegel/config.toml" <<'DEVCFG'
+
+# --- development image (make sd-dev) ---
+log_level = "debug"
+frame_dump_dir = "/var/log/zeitspiegel/frames"
+frame_dump_every_s = 5.0
+frame_dump_keep = 30
+DEVCFG
+
     # A bench card is being watched, so it refreshes its capture on every
     # timer firing rather than once per boot. On a venue card this marker is
     # absent and the card is written once per boot (NFR-9).

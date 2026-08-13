@@ -26,6 +26,7 @@ import (
 	"github.com/danielmschmidt/zeitspiegel/internal/engine"
 	"github.com/danielmschmidt/zeitspiegel/internal/export"
 	"github.com/danielmschmidt/zeitspiegel/internal/frame"
+	"github.com/danielmschmidt/zeitspiegel/internal/framedump"
 	"github.com/danielmschmidt/zeitspiegel/internal/httpapi"
 	"github.com/danielmschmidt/zeitspiegel/internal/ringbuf"
 	"github.com/danielmschmidt/zeitspiegel/web"
@@ -88,12 +89,18 @@ func run() error {
 		return err
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	// A field unit logs at info; a bench card can afford to say everything,
+	// because nobody can ssh in to ask it a question later (log_level).
+	lvl := new(slog.LevelVar)
+	if err := lvl.UnmarshalText([]byte(cfg.LogLevel)); err != nil && cfg.LogLevel != "" {
+		lvl.Set(slog.LevelInfo)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
 	start := time.Now()
 	// First line of every boot: which build this is. Every card ships the
 	// same image, so a log with no version in it cannot be tied to a build
 	// after the fact (E-8).
-	logger.Info("zeitspiegel starting", "version", buildVersion())
+	logger.Info("zeitspiegel starting", "version", buildVersion(), "log_level", lvl.Level())
 	expvar.NewString("zeitspiegel_version").Set(buildVersion())
 
 	// Who this unit is and, when there is a fleet, how it finds its place on
@@ -281,6 +288,28 @@ func run() error {
 			errCh <- fmt.Errorf("http: %w", err)
 		}
 	}()
+	// A bench card writes the frames it is showing where the log collection
+	// finds them (frame_dump_dir): a unit in a studio has no network anybody
+	// can curl and no keyboard anybody can type on, so "the picture looked
+	// wrong" has to arrive as bytes somebody can measure. Off unless
+	// configured, and its failures never touch the mirror.
+	if cfg.FrameDumpDir != "" {
+		dumper := framedump.New(framedump.Options{
+			Dir:      cfg.FrameDumpDir,
+			Interval: time.Duration(cfg.FrameDumpEveryS * float64(time.Second)),
+			Keep:     cfg.FrameDumpKeep,
+			Source:   buf,
+			Logger:   logger,
+		})
+		logger.Info("frame dump enabled", "dir", cfg.FrameDumpDir,
+			"every_s", cfg.FrameDumpEveryS, "keep", cfg.FrameDumpKeep)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dumper.Run(ctx)
+		}()
+	}
+
 	wg.Add(1)
 	go func() { // capture (sole buffer writer)
 		defer wg.Done()

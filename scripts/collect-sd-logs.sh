@@ -674,6 +674,21 @@ if [[ -n "$ROOTFS" ]]; then
         printf '(not present on this card)\n' >> "$REPORT"
     fi
 
+    # The frames a development card wrote of what it was showing. They are
+    # carried in the bundle rather than described: a colour cast is a thing to
+    # look at, not a thing to read about.
+    section "rootfs: frames the unit was showing (/var/log/zeitspiegel/frames)"
+    FRAMEDIR="$BUNDLE/rootfs/var/log/zeitspiegel/frames"
+    if [[ -d "$FRAMEDIR" ]]; then
+        printf '%s JPEG frames are in this bundle under rootfs%s:\n\n' \
+            "$(find "$FRAMEDIR" -name '*.jpg' 2>/dev/null | wc -l | tr -d ' ')" \
+            "/var/log/zeitspiegel/frames"
+        ls -la "$FRAMEDIR" 2>/dev/null | head -40 >> "$REPORT"
+    else
+        printf '(none — frame dumping is a development-image setting, off on a\n' >> "$REPORT"
+        printf 'sealed card. `make sd-dev` turns it on.)\n' >> "$REPORT"
+    fi
+
     # --- the journal -------------------------------------------------------
     section "rootfs: persistent journal (/var/log/journal)"
     JDIR="$BUNDLE/rootfs/var/log/journal"

@@ -41,6 +41,7 @@ func TestBootProfileCapturesEverySectionWithoutSystemd(t *testing.T) {
 		"/dev/dri",                     // is there a DRM device for SDL at all
 		"drm connectors",               // is anything plugged in and connected
 		"/dev/video",                   // did the camera enumerate
+		"v4l2-ctl",                     // and what does it say about itself
 	} {
 		if !strings.Contains(log, want) {
 			t.Errorf("the profile has no %q section:\n%s", want, log)
