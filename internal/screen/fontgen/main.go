@@ -1,5 +1,7 @@
 // Generator for internal/screen/glyphs.png. Stdlib only. Run with
-//   go run ./internal/screen/fontgen
+//
+//	go run ./internal/screen/fontgen
+//
 // from the repo root. The output PNG is checked in; CI does not run this.
 package main
 

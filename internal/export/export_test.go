@@ -384,9 +384,9 @@ func TestExportWriterErrorAborts(t *testing.T) {
 
 // failAfter accepts n bytes, then fails every Write with err.
 type failAfter struct {
-	n    int
-	got  int
-	err  error
+	n   int
+	got int
+	err error
 }
 
 func (f *failAfter) Write(p []byte) (int, error) {

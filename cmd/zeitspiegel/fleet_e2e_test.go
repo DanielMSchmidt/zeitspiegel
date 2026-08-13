@@ -201,9 +201,9 @@ func (u *unit) mustStatus() status {
 }
 
 type peer struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	BaseURL string `json:"base_url"`
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	BaseURL string  `json:"base_url"`
 	AgeS    float64 `json:"age_s"`
 }
 
