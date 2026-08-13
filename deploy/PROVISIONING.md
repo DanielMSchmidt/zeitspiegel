@@ -130,6 +130,14 @@ back.
 
 ## 6. Troubleshooting
 
+- Black screen with the unit otherwise alive: check the runtime libraries
+  first — `sudo zeitspiegel-check-runtime /` on the unit, or the "runtime
+  libraries" section of the boot capture on a pulled card. SDL loads the EGL
+  stack with `dlopen`, so a missing library is invisible to the build and
+  shows up only as `EGL not initialized` at startup. `deploy/runtime-libs.txt`
+  is the list; `deploy/runtime-packages.txt` is what installs it, shared by
+  the image bake and `setup.sh` so the two cannot drift.
+
 - Which build is this? `cat /boot/firmware/zeitspiegel-version.txt` on the
   card, `zeitspiegel --version` on the unit, `zeitspiegel_version` at
   `/debug/vars`, or the first line of the unit's log. `make sd-logs` puts it

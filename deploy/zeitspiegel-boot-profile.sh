@@ -126,6 +126,13 @@ say() {
                echo "--- machine id ---"; cat /etc/machine-id 2>&1;
                echo "--- root mount ---"; findmnt -no SOURCE,FSTYPE,OPTIONS / 2>&1'
 
+    # The libraries SDL dlopens. A card that boots with these missing shows a
+    # black screen and nothing else; this is the line that names the cause.
+    say "runtime libraries (dlopened, so nothing else checks them)" \
+        sh -c 'LIBS_FILE=/usr/local/share/zeitspiegel/runtime-libs.txt \
+               /usr/local/sbin/zeitspiegel-check-runtime / 2>&1 ||
+               echo "(checker not installed — this card predates it)"'
+
     # --- the hardware the mirror needs before it can show anything ----------
     say "/dev/dri (KMSDRM needs a card node before SDL can open)" \
         ls -la /dev/dri

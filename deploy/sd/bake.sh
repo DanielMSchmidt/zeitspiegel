@@ -77,23 +77,19 @@ if [[ -e "$ROOT/etc/resolv.conf" ]]; then cp -a "$ROOT/etc/resolv.conf" "$ROOT/e
 rm -f "$ROOT/etc/resolv.conf"; echo "nameserver 1.1.1.1" > "$ROOT/etc/resolv.conf"
 
 echo "==> install runtime packages into the image"
+# One list, shared with deploy/setup.sh (deploy/runtime-packages.txt), so the
+# image and a hand-installed Pi cannot disagree about what a unit needs. The
+# comments in that file are the reasoning; this is just the plumbing.
+PKGS=$(sed 's/#.*//' /deploy/runtime-packages.txt | tr '\n' ' ')
 chroot "$ROOT" apt-get update -qq
-chroot "$ROOT" apt-get install -y -qq ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 \
-    libegl1 libegl-mesa0 libgles2 \
-    network-manager dnsmasq-base iptables rfkill iw avahi-utils >/dev/null
-# libegl1 + libegl-mesa0 + libgles2: SDL's KMSDRM backend dlopens libEGL.so.1
-# at runtime, so it is not a dependency of libsdl2 and nothing complains at
-# build time when it is missing — the image builds, boots, and the binary dies
-# with "EGL not initialized" against a perfectly good HDMI output. That is how
-# a unit came back from a venue black, fifteen restarts deep (2026-08-13).
-# libgbm1 comes in with mesa already; the EGL half did not.
-# dnsmasq-base + iptables: required by NM's `ipv4.method=shared` AP profile
-# (DHCP to clients + NAT rules). rfkill + iw: lightweight tools for in-place
-# debugging when the appliance won't broadcast, and `iw station dump` is how
-# a host counts its audience (D8). avahi-utils: avahi-set-host-name is the
-# only way to rename a running Avahi -- the daemon does not follow kernel
-# hostname changes, and without the rename zeitspiegel.local would not move
-# to the new host after a failover.
+# shellcheck disable=SC2086
+chroot "$ROOT" apt-get install -y -qq $PKGS >/dev/null
+
+echo "==> verify the image has what the binary dlopens"
+# The display stack is loaded at runtime, so a missing library produces no
+# build error and no failing test — only a black screen in a venue, which is
+# exactly what happened for two months. Fail the bake here instead.
+bash /deploy/check-runtime.sh "$ROOT"
 
 echo "==> install zeitspiegel binary / config / unit"
 install -D -m0755 "$PAYLOAD/zeitspiegel"          "$ROOT/usr/local/bin/zeitspiegel"
@@ -126,6 +122,12 @@ built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 image=$([ "$SEAL" = 1 ] && echo "production (sealed)" || echo "development (unsealed)")
 binary_sha256=$(sha256sum "$PAYLOAD/zeitspiegel" 2>/dev/null | awk '{print $1}')
 EOF
+
+# The same check the bake just ran, carried onto the unit: the boot capture
+# runs it every boot, so a card says "libEGL.so.1 missing" in plain text even
+# when the binary's own error never reaches anyone.
+install -D -m0755 "$PAYLOAD/check-runtime.sh" "$ROOT/usr/local/sbin/zeitspiegel-check-runtime"
+install -D -m0644 "$PAYLOAD/runtime-libs.txt" "$ROOT/usr/local/share/zeitspiegel/runtime-libs.txt"
 
 echo "==> install + enable boot-time profile capture (→ /boot/firmware/zeitspiegel-boot-profile.log)"
 install -D -m0755 "$PAYLOAD/zeitspiegel-boot-profile.sh" \

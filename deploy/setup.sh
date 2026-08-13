@@ -30,10 +30,13 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- runtime dependencies (libs only; the binary links SDL2 dynamically) ---
 apt-get update
-# libegl1/libegl-mesa0/libgles2: dlopened by SDL's KMSDRM backend, so their
-# absence surfaces only as "EGL not initialized" at runtime, never at build time.
-apt-get install -y ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 \
-    libegl1 libegl-mesa0 libgles2 avahi-utils
+# One list, shared with the image bake (deploy/runtime-packages.txt), so a Pi
+# set up by hand and a baked card need the same things. The EGL libraries in
+# it are dlopened by SDL rather than linked, which is why their absence used to
+# surface only as a black screen at a venue.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+apt-get install -y $(sed 's/#.*//' "$HERE/runtime-packages.txt" | tr '\n' ' ')
+bash "$HERE/check-runtime.sh" /
 
 # For an on-device build instead, install the dev toolchain and run
 # `make build-pi` in the repo:

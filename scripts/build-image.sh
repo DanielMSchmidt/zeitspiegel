@@ -73,6 +73,8 @@ cp deploy/sd/zeitspiegel-debug-pre-rfkill.service  build/payload/zeitspiegel-deb
 cp deploy/sd/zeitspiegel-debug-post-rfkill.service build/payload/zeitspiegel-debug-post-rfkill.service
 cp deploy/sd/zeitspiegel-debug-late.service        build/payload/zeitspiegel-debug-late.service
 cp deploy/sd/zeitspiegel-rfkill-unblock.service    build/payload/zeitspiegel-rfkill-unblock.service
+cp deploy/check-runtime.sh                         build/payload/check-runtime.sh
+cp deploy/runtime-libs.txt                         build/payload/runtime-libs.txt
 cp deploy/zeitspiegel-boot-profile.sh              build/payload/zeitspiegel-boot-profile.sh
 cp deploy/zeitspiegel-boot-profile.service         build/payload/zeitspiegel-boot-profile.service
 cp deploy/zeitspiegel-boot-profile.timer           build/payload/zeitspiegel-boot-profile.timer

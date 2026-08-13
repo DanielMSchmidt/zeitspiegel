@@ -1,0 +1,39 @@
+# What the appliance needs installed to run. One package per line; comments
+# and blank lines ignored. Every path that installs the runtime reads this
+# file — deploy/sd/bake.sh (the image) and deploy/setup.sh (a Pi in front of
+# you) — so the two cannot drift into disagreeing about what a unit needs.
+#
+# Nothing here is a build dependency. The binary is cross-built elsewhere
+# (make pi-binary); libsdl2-dev and friends belong to that machine, not to a
+# card. That distinction is the whole reason this file exists: the -dev
+# packages drag in half of this list as a side effect, so a developer's Pi
+# worked while a baked card could not open a screen (2026-06-13 to
+# 2026-08-13).
+
+# Clip export. Subprocess, never linked (ARCHITECTURE §D3).
+ffmpeg
+
+# The display path. SDL renders through KMSDRM straight onto the DRM node —
+# no X, no Wayland.
+libsdl2-2.0-0
+libsdl2-image-2.0-0
+# SDL dlopens these; it does not link them, so nothing fails at build time
+# when they are absent. libgbm1 arrives with mesa anyway, the EGL half does
+# not — and without it SDL dies with "EGL not initialized" against a working
+# HDMI output. deploy/runtime-libs.txt is what makes their absence loud.
+libegl1
+libegl-mesa0
+libgles2
+
+# The radio: NetworkManager drives the AP and the station side, dnsmasq-base
+# and iptables are what `ipv4.method=shared` needs to hand out addresses.
+network-manager
+dnsmasq-base
+iptables
+# rfkill + iw: in-place debugging when a unit will not beacon, and
+# `iw station dump` is how a host counts its audience (D8).
+rfkill
+iw
+# avahi-set-host-name is the only way to rename a running Avahi, which is how
+# zeitspiegel.local follows a failover.
+avahi-utils

@@ -1,0 +1,14 @@
+# Shared objects the appliance loads at runtime with dlopen, which means no
+# linker, no build and no test on any tier can notice their absence — the
+# image builds, the card boots, and the binary dies on a screen nobody is
+# watching. deploy/check-runtime.sh asserts each one exists, and every install
+# path runs it.
+#
+# Format: <soname>  <package that provides it>  # why it is needed
+# Only add a line for something genuinely dlopened. Anything the binary links
+# against is already covered by the loader refusing to start it.
+
+libEGL.so.1       libegl1       # SDL KMSDRM: without it, "EGL not initialized"
+libGLESv2.so.2    libgles2      # SDL's GL ES renderer on the KMSDRM backend
+libgbm.so.1       libgbm1       # buffer allocation for the DRM scanout
+libdrm.so.2       libdrm2       # the DRM node itself
