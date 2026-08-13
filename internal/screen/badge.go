@@ -15,7 +15,6 @@ import (
 //go:embed glyphs.png
 var glyphsPNG []byte
 
-
 // loadGlyphAtlas decodes the embedded PNG into an SDL texture.
 func loadGlyphAtlas(ren *sdl.Renderer) (*sdl.Texture, error) {
 	rw, err := sdl.RWFromMem(glyphsPNG)
