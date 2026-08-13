@@ -400,6 +400,52 @@ func TestCollectBootOnlyIsAWayPastTheRefusal(t *testing.T) {
 	}
 }
 
+// UT-32: the card's own permissions come across with its files — the Wi-Fi
+// profiles are 0600 root, the journal directories root:systemd-journal — and a
+// file this run cannot read is a file it cannot redact either. Such a file is
+// dropped from the bundle and named in the report: shipping it unread would
+// mean shipping the pre-shared key it was supposed to strip.
+func TestCollectDropsWhatItCannotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root, which cannot be locked out of a file")
+	}
+	dir := t.TempDir()
+	bootfs := writeTree(t, filepath.Join(dir, "bootfs"), map[string]string{"cmdline.txt": cmdline})
+	rootfs := writeTree(t, filepath.Join(dir, "rootfs"), map[string]string{
+		"etc/NetworkManager/system-connections/zeitspiegel-ap.nmconnection": apProfile,
+		"etc/zeitspiegel/config.toml":                                       "buffer_max_s = 60\n",
+	})
+	locked := filepath.Join(rootfs, "etc/NetworkManager/system-connections/zeitspiegel-ap.nmconnection")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatalf("locking the profile: %v", err)
+	}
+	out := t.TempDir()
+
+	stdout, stderr, code := collect(t, "--bootfs", bootfs, "--rootfs", rootfs, "--out", out)
+	if code != 0 {
+		t.Fatalf("an unreadable file killed the whole run: exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+
+	unpacked := unpack(t, artifact(t, out))
+	all := bundleText(t, unpacked)
+	if strings.Contains(all, "hunter2-supersecret") {
+		t.Errorf("an unredacted secret shipped in the bundle")
+	}
+	if hits, _ := filepath.Glob(filepath.Join(unpacked, "*", "rootfs", "etc", "NetworkManager", "system-connections", "*")); len(hits) != 0 {
+		t.Errorf("the unreadable profile was carried anyway: %v", hits)
+	}
+	report := readReport(t, unpacked)
+	for _, want := range []string{"could not be read", "zeitspiegel-ap.nmconnection"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the report does not account for the dropped file (%q):\n%s", want, report)
+		}
+	}
+	// The rest of the card still comes across.
+	if !strings.Contains(report, "buffer_max_s = 60") {
+		t.Errorf("one locked file cost the rest of the root filesystem:\n%s", report)
+	}
+}
+
 // UT-32: pointing the collector at the wrong volume — a camera card, a stick
 // of holiday photos — must fail loudly. Silently bundling a stranger's files
 // is both a privacy leak and a debugging dead end.

@@ -310,6 +310,14 @@ ext4_extract() {
             || $SUDO "$dbg" -R "dump \"$path\" \"$dest$path\"" "$dev" >/dev/null 2>&1 \
             || true
     done
+    # rdump reproduces the card's ownership and modes: the Wi-Fi profiles come
+    # out 0600 root, the journal directories root:systemd-journal. Extracted
+    # under sudo, that leaves a tree this script — running as you — can neither
+    # redact nor zip. Take ownership of the copy; the card is untouched.
+    if [[ -n "$SUDO" ]]; then
+        $SUDO chown -R "$(id -u):$(id -g)" "$dest" 2>/dev/null || true
+    fi
+    chmod -R u+rwX "$dest" 2>/dev/null || true
     [[ -n "$(ls -A "$dest" 2>/dev/null)" ]]
 }
 
@@ -360,25 +368,66 @@ file_mtime() {
     fi
 }
 
+# Files dropped because this run could not read them — reported, never
+# silently missing.
+UNREADABLE=""
+
 # redact <file> — the bundle travels; the AP key and the admin hash do not.
 # The keys stay, so a reader can still see that a profile had a psk at all.
+#
+# A file that cannot be read cannot be redacted either, and carrying it
+# unread is how the pre-shared key this function exists to strip would ship
+# anyway. Drop it and say so.
 redact() {
     local f="$1"
     [[ "$REDACT" == 1 && -f "$f" ]] || return 0
+    if [[ ! -r "$f" ]]; then
+        unreadable "$f"
+        rm -f "$f" 2>/dev/null || true
+        return 0
+    fi
     local tmp="$f.redacting"
-    LC_ALL=C sed -E \
+    if LC_ALL=C sed -E \
         -e 's/^([[:space:]]*(psk|password|wep-key[0-9]*|passwd|leap-password|private-key-password)[[:space:]]*=).*/\1<REDACTED>/I' \
         -e 's/(\$[0-9y][a-z]*\$[^:[:space:]]+)/<REDACTED-PASSWORD-HASH>/g' \
-        "$f" > "$tmp" 2>/dev/null && mv "$tmp" "$f" || rm -f "$tmp"
+        "$f" > "$tmp" 2>/dev/null
+    then
+        mv "$tmp" "$f"
+    else
+        rm -f "$tmp" 2>/dev/null || true
+        unreadable "$f"
+        rm -f "$f" 2>/dev/null || true
+    fi
+}
+
+# unreadable <path> — record a file the card had and this bundle does not.
+unreadable() {
+    local p="$1"
+    p="${p#"$ROOTFS"}"; p="${p#"$BOOTFS"}"; p="${p#"$BUNDLE/"}"
+    UNREADABLE="$UNREADABLE
+  $p"
 }
 
 # copy_into <src> <dest-dir> — verbatim copy of a subtree into the bundle, so
 # the binary journals can be rendered later with journalctl -D.
+#
+# cp gives up on individual files it cannot read (0600 root, when this is not
+# root) while still returning a tree that looks complete. Compare afterwards
+# rather than trusting the exit status: a file the card has and the bundle
+# does not must be named, not quietly absent.
 copy_into() {
-    local src="$1" dest="$2"
+    local src="$1" dest="$2" f rel
     [[ -e "$src" ]] || return 0
     mkdir -p "$(dirname "$dest")"
     cp -R "$src" "$dest" 2>/dev/null || true
+    if [[ -d "$src" ]]; then
+        while IFS= read -r f; do
+            rel="${f#"$src"}"
+            [[ -e "$dest$rel" ]] || unreadable "$f"
+        done < <(find "$src" -type f 2>/dev/null)
+    else
+        [[ -e "$dest" ]] || unreadable "$src"
+    fi
 }
 
 # --- go --------------------------------------------------------------------
@@ -659,9 +708,32 @@ fi
 # every machine this bundle might be forwarded to. Minimal Linux images ship
 # without the zip binary, so fall back rather than fail at the last step —
 # still exactly one file either way.
+# Whatever the card had and this bundle does not, said once, where a reader
+# will see it before concluding the unit was quiet about something.
+if [[ -n "$UNREADABLE" ]]; then
+    section "files on the card that this bundle does NOT contain"
+    printf 'These could not be read by the account that ran the collection, so
+' >> "$REPORT"
+    printf 'they were dropped rather than carried unredacted:
+%s
+' "$UNREADABLE" >> "$REPORT"
+    printf '
+On a card read with debugfs this should not happen — if it did, re-run
+' >> "$REPORT"
+    printf 'the collection and let the sudo prompt through.
+' >> "$REPORT"
+fi
+
 ARTIFACT="$OUT_BASE/zeitspiegel-logs-$SLUG-$STAMP.zip"
 if command -v zip >/dev/null 2>&1; then
-    ( cd "$STAGING" && zip -qr "$ARTIFACT" "$(basename "$BUNDLE")" )
+    # A zip that cannot read part of its input exits 18 with two words of
+    # explanation. Say which file and what to do about it.
+    ( cd "$STAGING" && zip -qr "$ARTIFACT" "$(basename "$BUNDLE")" ) || {
+        rm -f "$ARTIFACT"
+        die "could not pack the bundle — something under $BUNDLE is unreadable.
+  This is usually a card extracted under sudo whose files kept the card's own
+  ownership. Re-run the collection; if it persists, run it with sudo."
+    }
 else
     ARTIFACT="$OUT_BASE/zeitspiegel-logs-$SLUG-$STAMP.tar.gz"
     tar -czf "$ARTIFACT" -C "$STAGING" "$(basename "$BUNDLE")"
