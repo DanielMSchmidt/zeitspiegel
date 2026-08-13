@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image sd check-name build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
+.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image sd sd-logs check-name build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
 
 test: vet
 	$(GO) test -race ./...
@@ -69,6 +69,16 @@ check-name:
 	  echo 'error: NAME is required — e.g. make sd NAME="Long Side"  (NAME=auto for a card that names itself)' >&2; \
 	  exit 1; }
 	@./scripts/stage-name.sh "$(NAME)" >/dev/null
+
+# Pull a unit's own logs off its card into one attachable zip: the FAT32
+# boot-partition captures plus the persistent journal from the ext4 root.
+# One call, one file — read-only, it never writes to the card.
+#
+#   make sd-logs                       # find the card in any reader
+#   make sd-logs ARGS="--list"         # just say which disk it found
+#   make sd-logs ARGS="--disk /dev/disk4"
+sd-logs:
+	./scripts/collect-sd-logs.sh $(ARGS)
 
 run-synth: build
 	./$(BIN) --source synth

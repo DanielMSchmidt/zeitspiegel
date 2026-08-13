@@ -52,6 +52,7 @@ so a full failover takes seconds.
 | UT-29 | cmd | `modeStore`: status/gap/export read the mode the source actually opened, and fall back to the profile nominal when it reports none (synth) or its rate is unknown; `Clear` stops a reopen inheriting the previous camera's mode; `/status` carries the live geometry and rate — a 60 fps capture must not reach the exporter as the nominal 30 (FR-5 half-speed clips) |
 | UT-30 | poster | The generated guest poster (python, `make poster-test`, run by the CI `poster` job — not part of `go test`): every string exists in both languages and is actually drawn; a single-language variant carries only its own; no line runs past the margins and no two columns on one baseline touch (German is ~20 % longer than its English twin); the content clears the footer rule, with a long SSID/URL too; both QR codes' emitted rects, sampled back into a module matrix, still equal what segno encodes for the Wi-Fi join string and the controls URL |
 | UT-31 | identity | Provisioning (`scripts/stage-name.sh`, the label `make sd NAME=…` stages into the image's bootfs before the card is written): a staged label is read back verbatim by `identity.Resolve` — trimmed, umlauts intact, at the length limit; validate-only mode (no target directory) so a bad label is refused before the image bake; empty / whitespace / multi-line refused loudly with nothing written; over-length written but warned about, matching the unit's truncation; `auto` stages nothing and the unit falls back to `Zeitspiegel <ID>`, and clears a previous card's label from the reused image rather than letting it leak; re-naming replaces the file rather than appending; a bootfs that cannot be written to (macOS mounts a freshly written FAT32 read-only) is diagnosed by name with nothing left behind, not reported as a shell redirect failure — skipped when the tests run as root, which cannot be locked out of a directory |
+| UT-32 | support | Field log collection (`scripts/collect-sd-logs.sh`, `make sd-logs` — the card comes back from a venue and has to explain itself): both halves of a card land in one zip — the run's only output, no scratch directory beside it — the FAT32 captures (`zeitspiegel-debug.log`, boot profile, `cmdline.txt`) and the ext4 root's persistent journal, which is copied verbatim so `journalctl -D` can still render it; a card that never got far enough to write a debug log, or whose root cannot be read on this machine (macOS without e2fsprogs), still produces a report naming what is missing instead of an empty file; the AP pre-shared key and the admin password hash are redacted while the keys stay visible, because the bundle travels; a volume that is not one of ours is refused by name with nothing written |
 | UT-18 | httpapi | Streaming clip handler: headers (`X-Clip-Duration`, no `Content-Length`) precede the chunked body; pre-flight busy/empty still 503; exporter failing before the first body byte ⇒ 500 problem+json; failure mid-stream ⇒ truncated body, no second response; the stream is Closed exactly once |
 
 ## 1.1 Tier 1b — UI unit (headless browser, no server, `make test-ui`)
@@ -131,6 +132,10 @@ IT-10 → cmd wiring and the radio adapters → the combined page (UI-1..12) →
 ST-7..12.
 The election is built before anything can call it, and the E2E lane last,
 because it exercises the whole thing through real processes.
+
+UT-32 sits outside the build order: it covers field-support tooling on the
+operator's laptop (`make sd-logs`), not anything that ships on the unit, so it
+can be built whenever a card first needs to be debugged after the fact.
 
 ## 4. Tier 3 — system/E2E (real binary, nightly) & milestones
 

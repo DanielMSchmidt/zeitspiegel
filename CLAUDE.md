@@ -40,6 +40,7 @@ make test-hw           # -tags "v4l2 sdl" build + v4l2loopback tests (Linux)
 make build-pi          # arm64 binary with v4l2+sdl tags (on the Pi itself)
 make pi-binary         # same, cross-built in Docker (bookworm arm64)
 make sd NAME="Long Side"   # flash + name a self-provisioning SD card (macOS)
+make sd-logs           # read a unit's logs off its card into one zip
 make run-synth         # run binary with --source synth (no camera needed)
 make run-tv            # real SDL display path in a desktop window (dev TV view)
 make manual-test       # hands-on E2E: see docs/MANUAL_TESTING.md (TV=1, SOURCE=camera)

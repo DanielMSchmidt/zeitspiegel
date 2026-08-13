@@ -130,6 +130,16 @@ back.
 
 ## 6. Troubleshooting
 
+- A unit that came back from a venue broken, with no screen and no Wi-Fi to
+  log into: pull its card, put it in any reader and run `make sd-logs`. It
+  finds the card (USB or built-in reader), reads it without writing to it, and
+  collects the boot partition's `zeitspiegel-debug.log` / boot profile plus
+  the persistent journal off the ext4 root into a single
+  `zeitspiegel-logs-<mirror>-<timestamp>.zip` (a plain-text `report.txt`
+  inside it, raw logs beside that, nothing else left on disk).
+  On macOS the ext4 half needs `brew install e2fsprogs` — without it
+  the report says so rather than looking like a quiet card. The AP key and the
+  admin password hash are redacted, so the bundle can be attached to an issue.
 - Logs: `journalctl -u zeitspiegel` (persistent across reboots — NFR-8,
   so a no-AP / no-screen failure can still be diagnosed after a power
   cycle); the one-time seal: `journalctl -u zeitspiegel-seal`
