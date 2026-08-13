@@ -1,4 +1,5 @@
 GO ?= go
+GOFMT ?= gofmt
 BIN := bin/zeitspiegel
 
 # The build's identity. Every card ships the byte-identical image (E-8), so a
@@ -9,7 +10,7 @@ BIN := bin/zeitspiegel
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image image-dev sd sd-dev sd-logs check-name build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
+.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image image-dev sd sd-dev sd-logs check-name build-tv run-synth run-tv manual-test vet fmt-check clean poster poster-test poster-check
 
 test: vet
 	$(GO) test -race ./...
@@ -39,8 +40,21 @@ test-hw:
 	$(GO) build -tags "v4l2 sdl" -o $(BIN) ./cmd/zeitspiegel
 	$(GO) test -race -tags "v4l2 sdl" ./...
 
-vet:
+vet: fmt-check
 	$(GO) vet ./...
+
+# go vet does not check formatting, so drift sat unnoticed until something
+# else touched the file — longest in the files behind build tags, which most
+# tooling never compiles. gofmt reads every .go file regardless of its tags,
+# which is exactly why the check belongs here rather than in `go vet ./...`.
+fmt-check:
+	@drift=$$($(GOFMT) -l ./cmd ./internal ./web); \
+	if [ -n "$$drift" ]; then \
+	  echo "gofmt: these files are not formatted:" >&2; \
+	  echo "$$drift" | sed 's/^/  /' >&2; \
+	  echo "fix with: $(GOFMT) -w ./cmd ./internal ./web" >&2; \
+	  exit 1; \
+	fi
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/zeitspiegel

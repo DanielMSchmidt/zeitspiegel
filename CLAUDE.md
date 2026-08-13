@@ -47,7 +47,9 @@ make run-tv            # real SDL display path in a desktop window (dev TV view)
 make manual-test       # hands-on E2E: see docs/MANUAL_TESTING.md (TV=1, SOURCE=camera)
 ```
 
-`go vet` and `-race` are part of `make test`; both must be clean.
+`gofmt`, `go vet` and `-race` are all part of `make test`; all three must be
+clean. The formatting gate covers files behind build tags too (`gofmt` reads
+them regardless), which is where drift otherwise hides.
 
 ## Code conventions
 
