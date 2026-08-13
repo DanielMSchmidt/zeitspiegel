@@ -69,7 +69,7 @@ build-pi:
 pi-binary:
 	docker run --rm --platform linux/arm64 -v "$(CURDIR)":/src -w /src \
 	  -e GOFLAGS=-buildvcs=false golang:1.25-trixie bash -c \
-	  "apt-get update -qq >/dev/null && apt-get install -y -qq libsdl2-dev libsdl2-image-dev >/dev/null \
+	  "apt-get update -qq >/dev/null && apt-get install -y -qq libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev >/dev/null \
 	   && go build -tags 'v4l2 sdl' -ldflags '$(LDFLAGS)' -o bin/zeitspiegel-pi ./cmd/zeitspiegel"
 
 # Bake a finished, network-free appliance image (no SD card needed).
@@ -125,7 +125,8 @@ manual-test:
 	./scripts/manual-test.sh
 
 # Dev TV view: the real SDL display path in a desktop window.
-# macOS: brew install sdl2 sdl2_image pkgconf. Linux: libsdl2-dev libsdl2-image-dev.
+# macOS: brew install sdl2 sdl2_image sdl2_ttf pkgconf.
+# Linux: libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev.
 build-tv:
 	$(GO) build -tags sdl -ldflags "$(LDFLAGS)" -o $(BIN)-tv ./cmd/zeitspiegel
 

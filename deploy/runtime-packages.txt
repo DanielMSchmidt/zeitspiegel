@@ -24,6 +24,13 @@ libsdl2-image-2.0-0
 libegl1
 libegl-mesa0
 libgles2
+# The delay badge is drawn with SDL_ttf in Liberation Sans — metrically
+# identical to Arial, and redistributable. The library is linked, so the loader
+# would refuse to start the binary without it; the font file is not, which is
+# why deploy/runtime-libs.txt names it explicitly. Missing font is survivable:
+# the badge falls back to the built-in bitmap glyphs.
+libsdl2-ttf-2.0-0
+fonts-liberation2
 
 # The radio: NetworkManager drives the AP and the station side, dnsmasq-base
 # and iptables are what `ipv4.method=shared` needs to hand out addresses.

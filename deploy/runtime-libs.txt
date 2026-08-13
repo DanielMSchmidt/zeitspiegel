@@ -12,3 +12,9 @@ libEGL.so.1       libegl1       # SDL KMSDRM: without it, "EGL not initialized"
 libGLESv2.so.2    libgles2      # SDL's GL ES renderer on the KMSDRM backend
 libgbm.so.1       libgbm1       # buffer allocation for the DRM scanout
 libdrm.so.2       libdrm2       # the DRM node itself
+
+# Absolute paths are checked as files rather than searched for as libraries.
+# The badge's typeface is loaded by name at runtime, so nothing links it and
+# nothing else would notice it missing — the badge would quietly drop back to
+# its bitmap glyphs and look like it always did.
+/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf  fonts-liberation2  # badge typeface

@@ -87,7 +87,7 @@ jobs:
           go-version: '1.25'
           cache: true
       - name: Install SDL2 headers
-        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libsdl2-image-dev
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
       - run: go vet -tags "v4l2 sdl" ./...
       - run: go build -tags "v4l2 sdl" ./...
       # Real display path (decode -> flip -> present) under SDL's headless

@@ -67,3 +67,56 @@ func TestBadgeLayoutSurvivesADegenerateScreen(t *testing.T) {
 		}
 	}
 }
+
+// UT-40: with a real font the size is no longer tied to a bitmap cell, so the
+// type is exactly the fraction of the screen it should be — 1440p stops
+// sharing 1080p's size because the atlas happened to double there.
+func TestBadgeFontPx(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		h    int
+		want int
+	}{
+		{"720p", 720, 28},
+		{"1080p", 1080, 43},
+		{"1440p", 1440, 57},
+		{"4K", 2160, 86},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := badgeFontPx(tc.h); got != tc.want {
+				t.Errorf("badgeFontPx(%d) = %d, want %d", tc.h, got, tc.want)
+			}
+		})
+	}
+	// A tiny or nonsensical output still yields type somebody could read,
+	// never zero or negative — SDL refuses to open a font at 0 px.
+	for _, h := range []int{0, -1, 8, 120} {
+		if px := badgeFontPx(h); px < 12 {
+			t.Errorf("badgeFontPx(%d) = %d, too small to render", h, px)
+		}
+	}
+}
+
+// UT-40: with a measured string the box is built around what the font
+// actually drew, rather than around a count of fixed-width cells.
+func TestBadgeLayoutTextWrapsMeasuredText(t *testing.T) {
+	const w, h = 1920, 1080
+	l := badgeLayoutText(w, h, 200, 43)
+	if l.W <= 200 || l.H <= 43 {
+		t.Errorf("box %dx%d does not contain 200x43 of text plus padding", l.W, l.H)
+	}
+	if l.X+l.W >= w || l.Y <= 0 || l.X < 0 {
+		t.Errorf("box %+v is not inset in the top-right of %dx%d", l, w, h)
+	}
+	// Padding scales with the type, so the box never looks tight at 4K or
+	// bloated at 720p.
+	small := badgeLayoutText(1280, 720, 120, 28)
+	if small.PadInner >= l.PadInner {
+		t.Errorf("padding did not grow with the type: %d at 720p vs %d at 1080p", small.PadInner, l.PadInner)
+	}
+	// Text wider than the screen still starts on it.
+	wide := badgeLayoutText(640, 480, 5000, 30)
+	if wide.X < 0 || wide.Y < 0 {
+		t.Errorf("oversized text pushed the box off-screen: %+v", wide)
+	}
+}

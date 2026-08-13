@@ -12,6 +12,7 @@ import (
 
 	"github.com/veandco/go-sdl2/img"
 	"github.com/veandco/go-sdl2/sdl"
+	"github.com/veandco/go-sdl2/ttf"
 
 	"github.com/danielmschmidt/zeitspiegel/internal/frame"
 )
@@ -25,6 +26,16 @@ type Screen struct {
 	delayNS  atomic.Int64
 	glyphTex *sdl.Texture
 	info     Info
+
+	// The badge's typeface, when one was found, and the rendered text cached
+	// at the current size. Nil font means the bitmap atlas is drawing it.
+	font     *ttf.Font
+	fontPath string
+	fontPx   int
+	badgeTex *sdl.Texture
+	badgeStr string
+	badgeW   int32
+	badgeH   int32
 
 	// frameTex is the persistent streaming texture frames decode into.
 	// Creating and destroying a GPU texture per frame causes driver-side
@@ -257,6 +268,14 @@ func (s *Screen) Close() error {
 	}
 	if s.glyphTex != nil {
 		s.glyphTex.Destroy()
+	}
+	s.dropBadgeCache()
+	if s.font != nil {
+		s.font.Close()
+		s.font = nil
+	}
+	if ttf.WasInit() {
+		ttf.Quit()
 	}
 	s.ren.Destroy()
 	s.win.Destroy()

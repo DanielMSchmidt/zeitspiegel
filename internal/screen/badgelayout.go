@@ -18,7 +18,54 @@ const (
 	// also not the thing being watched, so it stays out of the way. Four per
 	// cent puts it at roughly a fingertip's width on a studio TV.
 	badgeHeightNum, badgeHeightDen = 1, 25
+
+	// Never smaller than this, whatever the renderer reports: SDL will not
+	// open a font at zero pixels, and type nobody can read is no better.
+	badgeMinPx = 16
 )
+
+// badgeFontPx is the pixel height for the badge's type on a screenH-tall
+// output. With a real font there is no atlas cell to round to, so this is the
+// exact fraction — which is why 1440p no longer inherits 1080p's size just
+// because doubling a bitmap happened to land there.
+//
+// The floor matters: SDL refuses to open a font at zero pixels, and a screen
+// the renderer describes as tiny (or nonsensically) still has to show
+// something a person could read.
+func badgeFontPx(screenH int) int {
+	px := screenH * badgeHeightNum / badgeHeightDen
+	if px < badgeMinPx {
+		px = badgeMinPx
+	}
+	return px
+}
+
+// badgeLayoutText places the badge around text a font has already measured.
+// The bitmap path counts fixed-width cells; a real font does not have any, so
+// the box is built around what was actually drawn.
+func badgeLayoutText(screenW, screenH, textW, textH int) badgeRect {
+	if textH < 1 {
+		textH = badgeMinPx
+	}
+	padInner := textH * badgePadInnerNum / badgePadInnerDen
+	padEdge := textH * badgePadEdgeNum / badgePadEdgeDen
+	b := badgeRect{
+		W:        textW + 2*padInner,
+		H:        textH + 2*padInner,
+		GlyphW:   textW,
+		GlyphH:   textH,
+		PadInner: padInner,
+	}
+	b.X = screenW - padEdge - b.W
+	b.Y = padEdge
+	if b.X < 0 {
+		b.X = 0
+	}
+	if b.Y < 0 {
+		b.Y = 0
+	}
+	return b
+}
 
 // badgeRect is where the delay badge goes and how big its type is, in pixels.
 type badgeRect struct {

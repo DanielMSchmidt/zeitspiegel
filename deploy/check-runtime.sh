@@ -29,9 +29,18 @@ while read -r soname package _rest; do
     # Search the library directories rather than asking the dynamic loader:
     # the root being checked is usually an image that is not running, and on
     # the unit itself ldconfig's cache can lag a fresh install.
-    if find "$ROOT/usr/lib" "$ROOT/lib" -name "$soname" -print -quit 2>/dev/null | grep -q .; then
-        continue
-    fi
+    case "$soname" in
+        /*)
+            # An absolute path is a data file the runtime loads by name — a
+            # font, say. Nothing links it, so nothing else would notice.
+            [[ -e "$ROOT$soname" ]] && continue
+            ;;
+        *)
+            if find "$ROOT/usr/lib" "$ROOT/lib" -name "$soname" -print -quit 2>/dev/null | grep -q .; then
+                continue
+            fi
+            ;;
+    esac
     missing=$((missing + 1))
     echo "check-runtime: MISSING $soname — install $package" >&2
 done < "$LIBS_FILE"

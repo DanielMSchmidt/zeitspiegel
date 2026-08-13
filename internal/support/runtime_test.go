@@ -17,7 +17,16 @@ func fakeRoot(t *testing.T, sonames ...string) string {
 		t.Fatalf("mkdir: %v", err)
 	}
 	for _, so := range sonames {
-		if err := os.WriteFile(filepath.Join(libdir, so), []byte("\x7fELF"), 0o644); err != nil {
+		// An entry may be a soname to find under the library directories, or
+		// an absolute path to a data file the runtime loads by name.
+		path := filepath.Join(libdir, so)
+		if strings.HasPrefix(so, "/") {
+			path = filepath.Join(root, so)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("mkdir for %s: %v", so, err)
+			}
+		}
+		if err := os.WriteFile(path, []byte("\x7fELF"), 0o644); err != nil {
 			t.Fatalf("writing %s: %v", so, err)
 		}
 	}
@@ -88,6 +97,36 @@ func TestCheckRuntimeFindsAMissingLibrary(t *testing.T) {
 			t.Errorf("the failure does not name the package that provides it:\n%s", out)
 		}
 	})
+}
+
+// UT-37: the badge's typeface is loaded by name, not linked, so a missing font
+// file is invisible in exactly the way libEGL was — except that this one only
+// costs the badge its looks. It is still reported, because "the type went
+// blocky again" is not a diagnosis anybody should have to make by eye.
+func TestCheckRuntimeFindsAMissingDataFile(t *testing.T) {
+	libs := requiredSonames(t)
+	var font string
+	var kept []string
+	for _, entry := range libs {
+		if strings.HasPrefix(entry, "/") && strings.Contains(entry, "font") {
+			font = entry
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if font == "" {
+		t.Skip("no font file listed as a runtime dependency")
+	}
+
+	root := fakeRoot(t, kept...)
+	stdout, stderr, code := collectFrom(t, "deploy/check-runtime.sh", root)
+	out := stdout + stderr
+	if code == 0 {
+		t.Fatalf("a root with no badge typeface passed:\n%s", out)
+	}
+	if !strings.Contains(out, font) {
+		t.Errorf("the failure does not name the missing font:\n%s", out)
+	}
 }
 
 // UT-37: one list, used by every path that installs the runtime. The image

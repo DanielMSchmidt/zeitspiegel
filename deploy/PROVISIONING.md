@@ -135,6 +135,9 @@ back.
   records its verdict on the boot partition, and the card writer refuses an
   image that never passed, so an old image in `build/` cannot quietly become a
   black-screened unit (`ALLOW_UNVERIFIED_IMAGE=1` if that is the point).
+- Delay badge looks blocky: the typeface (`fonts-liberation2`) is missing and
+  the badge fell back to its built-in bitmap glyphs. `zeitspiegel-check-runtime /`
+  says so by name — nothing links a font, so nothing else would.
 - Black screen with the unit otherwise alive: check the runtime libraries
   first — `sudo zeitspiegel-check-runtime /` on the unit, or the "runtime
   libraries" section of the boot capture on a pulled card. SDL loads the EGL
