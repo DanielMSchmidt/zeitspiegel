@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image sd build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
+.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image sd check-name build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
 
 test: vet
 	$(GO) test -race ./...
@@ -54,9 +54,21 @@ pi-binary:
 image: pi-binary
 	./scripts/build-image.sh
 
-# Write the baked image to an SD card (macOS). Plug-and-play, no ethernet.
-sd: image
-	./scripts/flash-sd.sh
+# Write the baked image to an SD card (macOS) and name that unit. Plug-and-play,
+# no ethernet. NAME is the label the mirror shows in the UI; it is staged onto
+# the card's boot partition afterwards, so the image stays byte-identical (E-8).
+#
+#   make sd NAME="Long Side"       # named card
+#   make sd NAME=auto          # deliberately unnamed: it calls itself Zeitspiegel <ID>
+sd: check-name image
+	NAME="$(NAME)" ./scripts/flash-sd.sh
+
+# Reject a missing or unusable label before the (slow) image bake, not after.
+check-name:
+	@[ -n "$(NAME)" ] || { \
+	  echo 'error: NAME is required — e.g. make sd NAME="Long Side"  (NAME=auto for a card that names itself)' >&2; \
+	  exit 1; }
+	@./scripts/stage-name.sh "$(NAME)" >/dev/null
 
 run-synth: build
 	./$(BIN) --source synth

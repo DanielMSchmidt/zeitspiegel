@@ -51,6 +51,7 @@ so a full failover takes seconds.
 | UT-28 | camera | `selectMode` table (E-2, NFR-1): 1080p15 + 720p30 ⇒ 720p30 (rate is the constraint); 1080p30 + 720p60 ⇒ 1080p30 (area wins once the floor is cleared); equal area ⇒ faster wins; the 25 fps floor — 29.97 and 1080p@25 clear it (keeping the resolution over a 720p@30), 1080p@24 does not; modes above `MaxAuto{Width,Height}` filtered; nothing clearing the floor ⇒ fastest available, never an error; a device enumerating sizes but not intervals still selectable; empty/degenerate ⇒ error; selection stable across every rotation of the input |
 | UT-29 | cmd | `modeStore`: status/gap/export read the mode the source actually opened, and fall back to the profile nominal when it reports none (synth) or its rate is unknown; `Clear` stops a reopen inheriting the previous camera's mode; `/status` carries the live geometry and rate — a 60 fps capture must not reach the exporter as the nominal 30 (FR-5 half-speed clips) |
 | UT-30 | poster | The generated guest poster (python, `make poster-test`, run by the CI `poster` job — not part of `go test`): every string exists in both languages and is actually drawn; a single-language variant carries only its own; no line runs past the margins and no two columns on one baseline touch (German is ~20 % longer than its English twin); the content clears the footer rule, with a long SSID/URL too; both QR codes' emitted rects, sampled back into a module matrix, still equal what segno encodes for the Wi-Fi join string and the controls URL |
+| UT-31 | identity | Provisioning (`scripts/stage-name.sh`, the label `make sd NAME=…` stages onto a card's bootfs): a staged label is read back verbatim by `identity.Resolve` — trimmed, umlauts intact, at the length limit; validate-only mode (no target directory) so a bad label is refused before the image bake; empty / whitespace / multi-line refused loudly with nothing written; over-length written but warned about, matching the unit's truncation; `auto` stages nothing and the unit falls back to `Zeitspiegel <ID>`; re-naming replaces the file rather than appending |
 | UT-18 | httpapi | Streaming clip handler: headers (`X-Clip-Duration`, no `Content-Length`) precede the chunked body; pre-flight busy/empty still 503; exporter failing before the first body byte ⇒ 500 problem+json; failure mid-stream ⇒ truncated body, no second response; the stream is Closed exactly once |
 
 ## 1.1 Tier 1b — UI unit (headless browser, no server, `make test-ui`)
@@ -121,9 +122,10 @@ real studio lighting**, since sensor noise in a dim room inflates it and
 | 6 | camera + screen adapters (thin), reconnect supervisor | UT-11,26,27,28,29; IT-7; ST-1 |
 | 7 | wiring, web UI, deploy artifacts, soak | ST-2..6 |
 | 8 | observability + stutter hardening (render metrics, capture gaps, streaming texture, export nice, 60 s capacity) | UT-12..17; ST-4 |
-| 9 | multi-unit: dynamic election, membership, combined page, one image (E-8) | UT-19..25; UI-1..12; IT-10,11; ST-7..13 |
+| 9 | multi-unit: dynamic election, membership, combined page, one image (E-8) | UT-19..25,31; UI-1..12; IT-10,11; ST-7..13 |
 
-Step 9 in order: netrole (UT-19) → config + identity (UT-20, UT-21) → peers
+Step 9 in order: netrole (UT-19) → config + identity (UT-20, UT-21; UT-31
+covers the provisioning script that writes what UT-21 reads) → peers
 (UT-22, UT-25) → httpapi (UT-23, UT-24) → the fleet supervisor and IT-11 →
 IT-10 → cmd wiring and the radio adapters → the combined page (UI-1..12) →
 ST-7..12.

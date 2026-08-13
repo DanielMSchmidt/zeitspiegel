@@ -34,9 +34,11 @@ Raspberry Pi 5 (4/8 GB) + a wide-angle fixed-focus UVC webcam (native MJPEG,
 any HDMI display. Runs as an unattended appliance: power on → mirror in ~20 s.
 The appliance hosts its own Wi-Fi (SSID `zeitspiegel`): join it and open
 `http://zeitspiegel.local` — no venue network needed. Power-off = pull the
-plug (root FS is read-only). Provisioning is one command: `make sd` writes a
-fully self-installing SD card; for several mirrors, `FLEET_SIZE=3 make sd`
-once and write the same image to every card.
+plug (root FS is read-only). Provisioning is one command: `make sd
+NAME="Long Side"` writes a fully self-installing SD card labelled for the spot it
+will stand in; for several mirrors, run it once per card with a different
+`NAME` — the image is identical, only the label differs, and the fleet's size
+is discovered at runtime rather than configured.
 
 ## Repository layout
 

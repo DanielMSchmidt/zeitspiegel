@@ -32,7 +32,7 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 | `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the open Wi-Fi AP (`AP_SSID`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
 | `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg + SDL2 + NetworkManager + dnsmasq-base/iptables (needed by `ipv4.method=shared`) + rfkill/iw (for in-place debug), writes the binary, AP keyfile, user, regdomain, NOPASSWD sudo for the admin, persistent journal, and clears the stock rfkill soft-block — produces a finished, network-free image |
 | `sd/seal.sh` + `zeitspiegel-seal.service` | one-time first-boot finisher baked into the image: stages `authorized_keys` for the SSH escape hatch, enables the read-only overlay, reboots; self-disables (offline). SSH itself stays masked. |
-| `PROVISIONING.md` | plug-and-play path: `make sd` (bakes the image + writes the card on macOS) → boot once, no network → done |
+| `PROVISIONING.md` | plug-and-play path: `make sd NAME="Long Side"` (bakes the image + writes and names the card on macOS) → boot once, no network → done |
 
 ## Network & discovery (E-7: the appliance is its own network)
 
@@ -48,8 +48,9 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 ## Several units, added over time (E-8)
 
 Every card carries the **identical image** and nothing about the fleet is
-configured — not even how many units exist. `make sd` once, write that image
-to every card you own now, and to every card you buy later.
+configured — not even how many units exist. `make sd NAME="…"` once per card,
+for every card you own now and every card you buy later: the image is the same
+one, only the label staged onto the boot partition differs.
 
 - On boot a unit looks for the `zeitspiegel` network. On the air ⇒ join it
   and register with whoever is hosting; not ⇒ host it. Power-on order never
@@ -86,13 +87,15 @@ to every card you own now, and to every card you buy later.
   themselves. Every mirror keeps mirroring throughout — the display path
   never waits on the network. Plug the old unit back in and it joins as an
   ordinary member.
-- Name a unit by writing one line into `zeitspiegel-name.txt` on the FAT32
-  `bootfs` partition (e.g. `Barre`); unnamed units call themselves
-  `Zeitspiegel <ID>` after their CPU serial. The image stays identical.
+- Name a unit as you write its card: `make sd NAME="Long Side"`. The label lands
+  in `zeitspiegel-name.txt` on the FAT32 `bootfs` partition, so renaming later
+  is `scripts/stage-name.sh "Long Side" /Volumes/bootfs` on any computer — no
+  re-flash. Cards written with `NAME=auto` call themselves `Zeitspiegel <ID>`
+  after their CPU serial. The image stays identical either way.
 - **First thing to check on site:** a phone and a member unit, both on the
   network, must reach each other (`curl http://10.42.0.x/healthz` from a
   laptop). The combined page rests on that.
-- Radio: all units share one channel; `AP_BAND=a AP_CHANNEL=36 make sd`
+- Radio: all units share one channel; `AP_BAND=a AP_CHANNEL=36 make sd NAME="…"`
   (non-DFS 5 GHz) gives clip downloads far more headroom in one room;
   `bg`/6 stays the compatibility default. The station profile ships with
   Wi-Fi powersave disabled (`powersave=2`) — Pi OS's default powersave is a
@@ -115,7 +118,7 @@ to every card you own now, and to every card you buy later.
   FAT32 `bootfs` on any computer and `touch ssh` — Pi OS unmasks
   `ssh.service` on next boot. The `authorized_keys` from your
   `~/.ssh/*.pub` was staged at bake time, so the key already works.
-- Config change / update: re-flash via `make sd`. If you must edit
+- Config change / update: re-flash via `make sd NAME="…"`. If you must edit
   in place, unseal first (`raspi-config nonint disable_overlayfs` +
   reboot), apply, re-enable + reboot — full procedure in PROVISIONING.md §5.
 - RAM budget: buffer cap 1 GiB (deploy/config.toml); typical 1080p30 MJPEG
