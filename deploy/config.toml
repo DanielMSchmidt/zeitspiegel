@@ -25,6 +25,11 @@ name_file = "/boot/firmware/zeitspiegel-name.txt"   # optional per-card display 
 # so they are skipped at open and named in the journal. That is expected — the
 # lens already sits at its hyperfocal distance, sharp from ~0.3 m to infinity.
 focus_auto = false                # disable continuous autofocus (autofocus cameras only)
-focus_absolute = 0                # autofocus cameras only: set from spike S-2 measurement on real hardware
+# 0 = not measured, so the position is left wherever the device puts it. Only a
+# measured value is sent: a device whose focus_absolute range starts at 1
+# refuses 0, and a refused control aborts the open — which is how a mirror once
+# came up showing its delay badge over a black frame with a working camera
+# attached. Put a number here once S-2 has measured one on real hardware.
+focus_absolute = 0
 exposure_auto = true              # auto exposure is fine for v1
-exposure_absolute = 0             # only applies when exposure_auto = false
+exposure_absolute = 0             # 0 = not measured (as above); only applies when exposure_auto = false

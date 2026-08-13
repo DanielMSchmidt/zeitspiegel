@@ -39,10 +39,19 @@ type control struct {
 
 // plannedControls lists the controls to pin for cfg, in application order.
 // The absolute value is only sent when the matching auto mode is off — pinning
-// focus while autofocus is still running is meaningless.
+// focus while autofocus is still running is meaningless — and only when there
+// is a value worth sending.
+//
+// Zero means "not measured yet", which is what the shipped config carries
+// until S-2 puts a number on real hardware, and sending it is worse than not:
+// a device whose focus_absolute range starts at 1 refuses it, the open aborts
+// (correctly — an explicitly chosen value the device rejects is fatal, E-9),
+// and the unit renders a delay badge over a black frame with a perfectly good
+// camera attached. Leaving the control alone instead means the lens stays
+// where the device put it, which is exactly what "no measurement" should do.
 func plannedControls(cfg config.Config) []control {
 	plan := []control{{Name: ctrlFocusAuto, Value: boolValue(cfg.FocusAuto)}}
-	if !cfg.FocusAuto {
+	if !cfg.FocusAuto && cfg.FocusAbsolute > 0 {
 		plan = append(plan, control{Name: ctrlFocusAbsolute, Value: int32(cfg.FocusAbsolute)})
 	}
 	expo := int32(exposureAperturePriority)
@@ -50,7 +59,9 @@ func plannedControls(cfg config.Config) []control {
 		expo = exposureManual
 	}
 	plan = append(plan, control{Name: ctrlExposureAuto, Value: expo})
-	if !cfg.ExposureAuto {
+	// Same rule on the exposure side, latent until somebody turns auto
+	// exposure off and discovers it the same way.
+	if !cfg.ExposureAuto && cfg.ExposureAbsolute > 0 {
 		plan = append(plan, control{Name: ctrlExposureAbsolute, Value: int32(cfg.ExposureAbsolute)})
 	}
 	return plan

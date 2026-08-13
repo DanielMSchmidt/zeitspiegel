@@ -17,13 +17,38 @@ func TestPlannedControls(t *testing.T) {
 		want []control
 	}{
 		{
-			// The deployed default: focus pinned, exposure left to the camera.
-			name: "pinned focus, auto exposure",
+			// The deployed default: autofocus off, and no measured focus
+			// position to pin it to. Sending the unmeasured 0 is what took a
+			// mirror's video away — the attached camera's focus_absolute range
+			// starts at 1, so the value was refused, the open aborted, and the
+			// unit rendered a delay badge over a black frame. An absolute
+			// value only means something once S-2 has measured one.
+			name: "pinned focus, no measured value, auto exposure",
 			cfg:  config.Config{FocusAuto: false, FocusAbsolute: 0, ExposureAuto: true},
 			want: []control{
 				{Name: ctrlFocusAuto, Value: 0},
-				{Name: ctrlFocusAbsolute, Value: 0},
 				{Name: ctrlExposureAuto, Value: exposureAperturePriority},
+			},
+		},
+		{
+			// A measured value is sent, and out-of-range is then the device
+			// disagreeing with a deliberate choice — still fatal (below).
+			name: "pinned focus with a measured value",
+			cfg:  config.Config{FocusAuto: false, FocusAbsolute: 250, ExposureAuto: true},
+			want: []control{
+				{Name: ctrlFocusAuto, Value: 0},
+				{Name: ctrlFocusAbsolute, Value: 250},
+				{Name: ctrlExposureAuto, Value: exposureAperturePriority},
+			},
+		},
+		{
+			// The same trap on the exposure side, latent until someone turns
+			// auto exposure off.
+			name: "manual exposure, no measured value",
+			cfg:  config.Config{FocusAuto: true, ExposureAuto: false, ExposureAbsolute: 0},
+			want: []control{
+				{Name: ctrlFocusAuto, Value: 1},
+				{Name: ctrlExposureAuto, Value: exposureManual},
 			},
 		},
 		{
@@ -79,7 +104,9 @@ func (r *recorder) apply(c control) error {
 // them is what makes the recommended wide-angle cameras usable
 // (docs/HARDWARE.md); aborting the open is the bug this replaces.
 func TestApplyPlanSkipsUnsupportedControls(t *testing.T) {
-	cfg := config.Config{ExposureAuto: true}
+	// A measured focus value, so the plan actually contains the control whose
+	// absence this test is about (an unmeasured 0 is never planned at all).
+	cfg := config.Config{FocusAbsolute: 250, ExposureAuto: true}
 	rec := &recorder{fail: map[string]error{
 		// go4vl reports an unimplemented control id as a bad argument from
 		// VIDIOC_QUERYCTRL; the adapter translates it to this sentinel.
@@ -122,7 +149,7 @@ func TestApplyPlanAllSupported(t *testing.T) {
 // UT-26: a control that exists but genuinely fails is still fatal — an I/O
 // error or an out-of-range value must not be silently swallowed.
 func TestApplyPlanRealFailureAborts(t *testing.T) {
-	cfg := config.Config{ExposureAuto: true}
+	cfg := config.Config{FocusAbsolute: 250, ExposureAuto: true}
 	sentinel := errors.New("input/output error")
 	rec := &recorder{fail: map[string]error{ctrlFocusAbsolute: sentinel}}
 
