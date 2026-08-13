@@ -13,7 +13,13 @@ Insert the micro-SD into your computer, then:
 ```
 make sd                      # auto-detects the card, asks before erasing
 SSID=studio-mirror make sd   # choose the Wi-Fi network name
+DISK=/dev/disk4 make sd      # pick the card yourself (see `diskutil list`)
 ```
+
+Auto-detection accepts any removable disk, whether the card sits in a built-in
+reader or a USB one. It refuses to write to fixed disks and to the disk your
+Mac booted from; if it finds more than one candidate it stops and asks you to
+name the card with `DISK=`.
 
 **Several mirrors?** Nothing changes: write that same image to every card —
 including cards you buy years later. The role is elected at boot and the
