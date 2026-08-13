@@ -52,6 +52,24 @@ func collectEnv(t *testing.T, env []string, args ...string) (stdout, stderr stri
 	return out.String(), errb.String(), code
 }
 
+// collectFrom runs any of the operator-side scripts and reports what a human
+// at the card reader would see.
+func collectFrom(t *testing.T, script string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	cmd := exec.Command("bash", append([]string{repoPath(t, script)}, args...)...)
+	var out, errb strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	var exit *exec.ExitError
+	switch err := cmd.Run(); {
+	case err == nil:
+	case errors.As(err, &exit):
+		code = exit.ExitCode()
+	default:
+		t.Fatalf("running %s: %v", script, err)
+	}
+	return out.String(), errb.String(), code
+}
+
 func repoPath(t *testing.T, rel string) string {
 	t.Helper()
 	abs, err := filepath.Abs(filepath.Join("../..", rel))

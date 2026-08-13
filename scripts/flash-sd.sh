@@ -6,6 +6,12 @@
 #   make sd NAME=auto                       # ship the card deliberately unnamed
 #   DISK=/dev/disk4 make sd NAME="Long Side" # skip auto-detection
 #
+# The confirmation prompt shows how big a card this image needs next to what
+# the card actually has; a card that is too small is refused there, before
+# anything is erased. To ask that on its own, without touching the card:
+#
+#   scripts/flash-sd.sh --size-check build/zeitspiegel-appliance.img /dev/disk4
+#
 # Auto-detection finds cards in a built-in reader as well as USB readers and
 # sticks. `diskutil list` shows every disk if you need to pick one by hand.
 #
@@ -17,6 +23,65 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 die() { echo "error: $*" >&2; exit 1; }
+
+# --- how big a card does this image need? ----------------------------------
+# The confirmation prompt is the last moment before a card is erased, and the
+# question actually being asked at it is "is this card big enough?". Answer it
+# there, in the same units the disk is described in.
+human_size() {
+    # Powers of ten, because that is what card packaging and `diskutil` mean
+    # by GB — comparing a 32 GB card against a GiB figure invites the wrong
+    # answer at exactly the wrong moment.
+    awk -v b="$1" 'BEGIN {
+        split("B KB MB GB TB", u, " ")
+        i = 1
+        while (b >= 1000 && i < 5) { b /= 1000; i++ }
+        printf (i <= 2 || b >= 100) ? "%.0f %s\n" : "%.1f %s\n", b, u[i]
+    }'
+}
+
+file_bytes() { stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null; }
+
+# The byte count out of `diskutil info`, which prints it in parentheses next
+# to the human figure: "Disk Size: 31.9 GB (31914983424 Bytes) (exactly ...)".
+disk_bytes() {
+    diskutil info "$1" 2>/dev/null \
+        | awk -F'[()]' '/Disk Size/ {print $2; exit}' \
+        | awk '{print $1}'
+}
+
+# size_verdict <image> <disk-bytes> — the two lines the prompt shows, plus the
+# exit status that decides whether erasing this card could work at all.
+size_verdict() {
+    local img="$1" have="$2" need
+    [[ -f "$img" ]] || die "$img missing — run 'make image' first"
+    need=$(file_bytes "$img")
+    printf '  Image size:             %s — the card must be at least this big\n' "$(human_size "$need")"
+    if [[ -z "$have" || "$have" == 0 ]]; then
+        printf '  Card capacity:          unknown (diskutil did not report a size)\n'
+        return 0
+    fi
+    if [[ "$have" -lt "$need" ]]; then
+        printf '  Card capacity:          %s — TOO SMALL for this image by %s\n' \
+            "$(human_size "$have")" "$(human_size $((need - have)))"
+        return 1
+    fi
+    printf '  Card capacity:          %s — fits, %s to spare\n' \
+        "$(human_size "$have")" "$(human_size $((have - need)))"
+    return 0
+}
+
+# Standalone form: answer the question without touching anything.
+#   scripts/flash-sd.sh --size-check build/zeitspiegel-appliance.img /dev/disk4
+#   scripts/flash-sd.sh --size-check <image> <byte count>
+if [[ "${1:-}" == "--size-check" ]]; then
+    [[ $# -eq 3 ]] || die "usage: flash-sd.sh --size-check <image> <disk|bytes>"
+    case "$3" in
+        /dev/*) size_verdict "$2" "$(disk_bytes "$3")" ;;
+        *)      size_verdict "$2" "$3" ;;
+    esac
+    exit $?
+fi
 
 [[ "$(uname)" == "Darwin" ]] || die "flash-sd.sh targets macOS; on Linux name the image first (L=\$(sudo losetup -Pf --show build/zeitspiegel-appliance.img); sudo mount \"\${L}p1\" /mnt; scripts/stage-name.sh \"\$NAME\" /mnt; sudo umount /mnt; sudo losetup -d \"\$L\"), then: sudo dd if=build/zeitspiegel-appliance.img of=/dev/sdX bs=4M conv=fsync"
 # IMG picks which bake gets written — `make sd-dev` points it at the unsealed
@@ -70,11 +135,18 @@ writable_target "$DISK" || die "refusing to write to $DISK — not removable or 
 echo
 echo "About to ERASE this disk and write the Zeitspiegel appliance image:"
 diskutil info "$DISK" | grep -E "Device Identifier|Device / Media Name|Disk Size" | sed 's/^ */  /'
+echo "  Image:                  $IMG"
+FITS=0
+size_verdict "$IMG" "$(disk_bytes "$DISK")" || FITS=1
 if [[ "$NAME_CLEAN" == "auto" ]]; then
     echo "  Mirror name:            (unnamed — it will call itself Zeitspiegel <ID>)"
 else
     echo "  Mirror name:            $NAME_CLEAN"
 fi
+# Refuse here rather than at the prompt: dd would erase the card and then run
+# out of room partway, which costs whatever was on it and produces a card that
+# boots nowhere.
+[[ "$FITS" == 0 ]] || die "this card cannot hold $IMG — use a bigger one. Nothing has been erased."
 echo
 read -r -p "Type 'erase' to continue: " answer
 [[ "$answer" == "erase" ]] || die "aborted"
