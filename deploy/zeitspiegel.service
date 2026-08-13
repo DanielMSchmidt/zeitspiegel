@@ -34,6 +34,12 @@ ExecStart=/usr/local/bin/zeitspiegel --config /etc/zeitspiegel/config.toml
 # the export pin lasts for the download, bounded by the single slot and
 # the handler's rolling write deadline.
 Environment=GOMEMLIMIT=1400MiB
+# One video path, named. Left to itself SDL probes wayland and x11 first on a
+# machine that has neither, and the resulting XDG_RUNTIME_DIR complaint buries
+# the real error. XDG_RUNTIME_DIR points at the tmpfs RuntimeDirectory below
+# already creates, which silences the complaint rather than hiding it.
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=XDG_RUNTIME_DIR=/run/zeitspiegel
 Restart=always
 RestartSec=1
 # tmpfs working dir at /run/zeitspiegel — nothing else may write on the

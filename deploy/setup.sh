@@ -30,7 +30,10 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- runtime dependencies (libs only; the binary links SDL2 dynamically) ---
 apt-get update
-apt-get install -y ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 avahi-utils
+# libegl1/libegl-mesa0/libgles2: dlopened by SDL's KMSDRM backend, so their
+# absence surfaces only as "EGL not initialized" at runtime, never at build time.
+apt-get install -y ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 \
+    libegl1 libegl-mesa0 libgles2 avahi-utils
 
 # For an on-device build instead, install the dev toolchain and run
 # `make build-pi` in the repo:

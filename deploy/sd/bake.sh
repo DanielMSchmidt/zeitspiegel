@@ -79,7 +79,14 @@ rm -f "$ROOT/etc/resolv.conf"; echo "nameserver 1.1.1.1" > "$ROOT/etc/resolv.con
 echo "==> install runtime packages into the image"
 chroot "$ROOT" apt-get update -qq
 chroot "$ROOT" apt-get install -y -qq ffmpeg libsdl2-2.0-0 libsdl2-image-2.0-0 \
+    libegl1 libegl-mesa0 libgles2 \
     network-manager dnsmasq-base iptables rfkill iw avahi-utils >/dev/null
+# libegl1 + libegl-mesa0 + libgles2: SDL's KMSDRM backend dlopens libEGL.so.1
+# at runtime, so it is not a dependency of libsdl2 and nothing complains at
+# build time when it is missing — the image builds, boots, and the binary dies
+# with "EGL not initialized" against a perfectly good HDMI output. That is how
+# a unit came back from a venue black, fifteen restarts deep (2026-08-13).
+# libgbm1 comes in with mesa already; the EGL half did not.
 # dnsmasq-base + iptables: required by NM's `ipv4.method=shared` AP profile
 # (DHCP to clients + NAT rules). rfkill + iw: lightweight tools for in-place
 # debugging when the appliance won't broadcast, and `iw station dump` is how
