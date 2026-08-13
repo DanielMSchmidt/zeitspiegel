@@ -241,4 +241,13 @@ back.
   sometimes mounts a FAT32 that way, most often right after a write. Eject the
   card and put it back in; the fresh mount is writable. (`make sd` itself is
   not affected: it labels the image before the card, and never mounts the
-  card.)
+  card.) If it stays read-only, check the card's lock switch — see below.
+- `dd: /dev/rdiskN: Permission denied`, even under `sudo` → the kernel refused
+  the write, not `sudo`. Either the card's write-protect switch is engaged, or
+  the terminal has no access to removable volumes (System Settings ▸ Privacy &
+  Security ▸ Full Disk Access — add Terminal/iTerm and restart it). The lock
+  switch is the usual one, and it is worth knowing that a Mac's **built-in SD
+  reader enforces it while most USB readers ignore it** — the same card can be
+  writable through a USB adapter and refused in the slot. It is also easy to
+  nudge while re-seating a card. `make sd` now refuses before erasing anything
+  when the media reports itself read-only, rather than failing mid-write.

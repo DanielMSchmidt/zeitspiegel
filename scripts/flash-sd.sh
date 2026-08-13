@@ -12,6 +12,10 @@
 #
 #   scripts/flash-sd.sh --size-check build/zeitspiegel-appliance.img /dev/disk4
 #
+# A write-protected card is refused at that same prompt: the kernel would fail
+# the raw write anyway, and it says so as "Permission denied", which sends
+# people looking at sudo instead of at the card's lock switch.
+#
 # Auto-detection finds cards in a built-in reader as well as USB readers and
 # sticks. `diskutil list` shows every disk if you need to pick one by hand.
 #
@@ -95,21 +99,46 @@ runtime_verdict() {
     return 1
 }
 
-# Standalone form: answer the question without touching anything.
+# --- can this card be written to at all? -----------------------------------
+# A locked SD card is reported as read-only media, and the kernel then refuses
+# the raw write with EPERM — "dd: /dev/rdiskN: Permission denied", which reads
+# like a sudo problem and is not one. A read-only *volume* is a different
+# thing (a mount option, not the media) and no reason to refuse a write that
+# erases the volume anyway, so only the media field counts. Field names differ
+# across macOS releases, as they do for the removable/external guards below.
+#
+# media_verdict <disk> — reads `diskutil info` output on stdin.
+media_verdict() {
+    grep -qE '^ *(Media Read-Only|Read-Only Media): *Yes' || return 0
+    echo "error: $1 is write-protected. On an SD card that is the lock switch on its
+  left edge — easy to nudge while re-seating a card, and a Mac's built-in
+  reader honours it where most USB readers ignore it. Slide it away from LOCK,
+  re-insert the card, and run this again." >&2
+    return 1
+}
+
+# Standalone forms: answer the question without touching anything.
 #   scripts/flash-sd.sh --size-check build/zeitspiegel-appliance.img /dev/disk4
 #   scripts/flash-sd.sh --size-check <image> <byte count>
+#   scripts/flash-sd.sh --check-bootfs <mounted bootfs dir>
+#   scripts/flash-sd.sh --media-check <file with 'diskutil info' output>
 if [[ "${1:-}" == "--check-bootfs" ]]; then
     [[ $# -eq 2 ]] || die "usage: flash-sd.sh --check-bootfs <mounted bootfs dir>"
     runtime_verdict "$2" || die "refusing to flash an unverified image"
     exit 0
 fi
-
 if [[ "${1:-}" == "--size-check" ]]; then
     [[ $# -eq 3 ]] || die "usage: flash-sd.sh --size-check <image> <disk|bytes>"
     case "$3" in
         /dev/*) size_verdict "$2" "$(disk_bytes "$3")" ;;
         *)      size_verdict "$2" "$3" ;;
     esac
+    exit $?
+fi
+if [[ "${1:-}" == "--media-check" ]]; then
+    [[ $# -eq 2 ]] || die "usage: flash-sd.sh --media-check <file with 'diskutil info' output>"
+    [[ -f "$2" ]] || die "$2 missing"
+    media_verdict "$(awk -F': +' '/Device Identifier/ {print $2; exit}' "$2")" < "$2"
     exit $?
 fi
 
@@ -161,6 +190,8 @@ fi
 diskutil info "$DISK" >/dev/null || die "no such disk: $DISK"
 [[ "$DISK" != "$BOOT_DISK" ]] || die "refusing to write to the boot disk $DISK"
 writable_target "$DISK" || die "refusing to write to $DISK — not removable or external media"
+# media_verdict prints its own refusal; see the top of this script.
+diskutil info "$DISK" | media_verdict "$DISK" || exit 1
 
 echo
 echo "About to ERASE this disk and write the Zeitspiegel appliance image:"
@@ -237,7 +268,17 @@ RDISK="${DISK/\/dev\/disk//dev/rdisk}"
 echo "==> unmounting $DISK"
 diskutil unmountDisk force "$DISK"
 echo "==> writing $IMG to $RDISK (sudo will prompt; a few minutes)"
-sudo dd if="$IMG" of="$RDISK" bs=4m
+# "Permission denied" here is the kernel refusing the write, not sudo refusing
+# to run dd — root is subject to both of the causes below. The image already
+# carries the label at this point, so the retry does not need a re-bake.
+if ! sudo dd if="$IMG" of="$RDISK" bs=4m; then
+    die "writing $RDISK failed. If that was a permission error, it is one of two things:
+  1. the card's write-protect switch is engaged — slide it away from LOCK and re-insert;
+  2. your terminal has no access to removable volumes — System Settings ▸ Privacy &
+     Security ▸ Full Disk Access, add Terminal (or iTerm), then restart it.
+  The image is already labelled \"$NAME_CLEAN\"; retry the write alone, without
+  re-baking, with: IMG=\"$IMG\" NAME=\"$NAME\" ./scripts/flash-sd.sh"
+fi
 sync
 diskutil eject "$DISK" >/dev/null
 
