@@ -1,6 +1,7 @@
 package netrole_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -342,6 +343,68 @@ func probeAndReclaim(t *testing.T, m *netrole.Machine, clk *synth.FakeClock) tim
 	}
 	t.Fatal("never probed")
 	return 0
+}
+
+// UT-19: two units on the same power strip boot in the same instant, and one
+// time in StaggerSlots their ids hash into the same claim slot — so both claim
+// the AP together and, being in AP mode, neither can ever see the other. The
+// blind self-heal must still collapse this split: if the probe offset were
+// derived from the (colliding) slot alone, both hosts would demote, scan into
+// the shared darkness, and reclaim in perfect lockstep forever.
+func TestSimultaneousBootSameSlotSplitHeals(t *testing.T) {
+	tm := testTimings()
+	clk := synth.NewFakeClock(time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC))
+
+	// Find two ids whose claim slots collide — the cold-start worst case.
+	var a, b *netrole.Machine
+	for i := 0; i < 256 && b == nil; i++ {
+		m := netrole.New(fmt.Sprintf("unit-%02x", i), tm, clk)
+		switch {
+		case a == nil:
+			a = m
+		case m.StaggerDelay() == a.StaggerDelay():
+			b = m
+		}
+	}
+	if b == nil {
+		t.Fatal("setup: no pair of ids sharing a stagger slot found")
+	}
+
+	hosting := map[*netrole.Machine]bool{}
+	observe := func(self *netrole.Machine, otherUp bool) netrole.Observation {
+		if self.Role() == netrole.RolePrimary {
+			// Nobody — no member, no phone — is attached to either half.
+			return netrole.Observation{}
+		}
+		return netrole.Observation{SSIDSeen: otherUp}
+	}
+	apply := func(m *netrole.Machine, act netrole.Action) {
+		switch act {
+		case netrole.ActionBecomeAP:
+			hosting[m] = true
+		case netrole.ActionDemote:
+			hosting[m] = false
+		}
+	}
+
+	// Drive both machines tick for tick from the same cold boot. Observations
+	// are snapshotted before either machine acts — the adversarial ordering:
+	// truly simultaneous scans see each other's state from the tick start.
+	deadline := clk.Now().Add(4 * time.Hour)
+	for clk.Now().Before(deadline) {
+		upA, upB := hosting[a], hosting[b]
+		oa, ob := observe(a, upB), observe(b, upA)
+		apply(a, a.Step(oa))
+		apply(b, b.Step(ob))
+		if a.Role() == netrole.RoleMember || b.Role() == netrole.RoleMember {
+			if hosting[a] == hosting[b] {
+				t.Fatalf("collapsed without exactly one host left (a up=%v, b up=%v)", hosting[a], hosting[b])
+			}
+			return // one AP, one member: the split healed
+		}
+		clk.Advance(time.Second)
+	}
+	t.Fatal("split brain never healed: both units probed in lockstep for 4 h")
 }
 
 // UT-19: a probing host that finds another network joins it — this is what

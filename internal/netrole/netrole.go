@@ -19,6 +19,7 @@
 package netrole
 
 import (
+	"encoding/binary"
 	"hash/fnv"
 	"sort"
 	"time"
@@ -215,6 +216,21 @@ func (m *Machine) slot() int {
 	return int(h.Sum32() % uint32(m.t.StaggerSlots))
 }
 
+// mix folds a hash's high bits into its low ones before the modulo (murmur3's
+// fmix32). It is not decorative: FNV-1a's low k bits form a closed state
+// machine — the next low-k state depends only on the current low-k state and
+// the input byte — so two ids that collide mod StaggerSlots keep colliding
+// under any identical salt appended to them. Differences do diffuse into the
+// high bits, and folding them down is what makes each salted draw independent.
+func mix(h uint32) uint32 {
+	h ^= h >> 16
+	h *= 0x85ebca6b
+	h ^= h >> 13
+	h *= 0xc2b2ae35
+	h ^= h >> 16
+	return h
+}
+
 // promoteDelay is how long this unit waits before trying to take over after
 // the host disappears: its position in the roster times PromoteStep. The
 // lowest surviving id goes first, and if that unit is dead too the next one
@@ -232,8 +248,8 @@ func (m *Machine) promoteDelay() time.Duration {
 }
 
 // healDelay is how long an audience-less host waits before probing. It backs
-// off on every fruitless probe and carries the unit's stagger offset so two
-// hosts in a split brain do not probe in lockstep.
+// off on every fruitless probe and carries a per-probe offset so two hosts in
+// a split brain do not probe in lockstep.
 func (m *Machine) healDelay() time.Duration {
 	mult := 1
 	for i := 0; i < m.healAttempt; i++ {
@@ -243,7 +259,24 @@ func (m *Machine) healDelay() time.Duration {
 			break
 		}
 	}
-	return time.Duration(mult)*m.t.HealAfter + m.StaggerDelay()
+	return time.Duration(mult)*m.t.HealAfter + m.probeOffset()
+}
+
+// probeOffset desynchronizes split-brain probes. The claim stagger cannot do
+// it: the cold boot that needs healing is exactly the one where two units
+// powered on together AND their ids hashed into the same slot, so an offset
+// derived from the slot alone is identical on both sides — the two hosts
+// would demote together, scan into the shared darkness, and reclaim in
+// perfect sync forever. Salting the hash with the attempt number makes every
+// round an independent draw: the first round in which the draws differ, the
+// earlier prober scans while the later host is still beaconing, and joins it.
+func (m *Machine) probeOffset() time.Duration {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(m.id))
+	var attempt [4]byte
+	binary.BigEndian.PutUint32(attempt[:], uint32(m.healAttempt))
+	_, _ = h.Write(attempt[:])
+	return time.Duration(mix(h.Sum32())%uint32(m.t.StaggerSlots)) * m.t.Stagger
 }
 
 // Step advances the machine by one observation and returns the action to
