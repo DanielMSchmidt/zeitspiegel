@@ -1,6 +1,6 @@
 module github.com/danielmschmidt/zeitspiegel
 
-go 1.25
+go 1.25.0
 
 require pgregory.net/rapid v1.3.0
 
@@ -10,4 +10,4 @@ require (
 	github.com/vladimirvivien/go4vl v0.5.0
 )
 
-require golang.org/x/sys v0.37.0 // indirect
+require golang.org/x/sys v0.47.0 // indirect
