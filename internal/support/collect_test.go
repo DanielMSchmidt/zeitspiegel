@@ -32,6 +32,26 @@ func collect(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	return out.String(), errb.String(), code
 }
 
+// collectEnv is collect with the environment tampered with — used to run as if
+// the ext4 reader were not installed, whatever the machine running the tests
+// happens to have.
+func collectEnv(t *testing.T, env []string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	cmd := exec.Command("bash", append([]string{repoPath(t, "scripts/collect-sd-logs.sh")}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
+	var out, errb strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	var exit *exec.ExitError
+	switch err := cmd.Run(); {
+	case err == nil:
+	case errors.As(err, &exit):
+		code = exit.ExitCode()
+	default:
+		t.Fatalf("running collect-sd-logs.sh: %v", err)
+	}
+	return out.String(), errb.String(), code
+}
+
 func repoPath(t *testing.T, rel string) string {
 	t.Helper()
 	abs, err := filepath.Abs(filepath.Join("../..", rel))
@@ -266,6 +286,99 @@ func TestCollectSurvivesAHalfWrittenCard(t *testing.T) {
 		if !strings.Contains(report, want) {
 			t.Errorf("report does not account for what is missing (%q):\n%s", want, report)
 		}
+	}
+}
+
+// UT-32: whether the root is sealed decides how much of the journal is worth
+// anything — an overlay root sends every later write to tmpfs, so what is on
+// the card stops at the seal. raspi-config spells the seal `overlayroot=` on
+// the cards we ship and `boot=overlay` on older ones; missing either makes the
+// report claim a writable root and a journal that reaches to the last boot,
+// which is exactly the wrong thing to believe while chasing a black screen.
+func TestCollectRecognisesASealedCard(t *testing.T) {
+	for _, tc := range []struct {
+		name, cmdline string
+		sealed        bool
+	}{
+		{"overlayroot spelling", "console=tty1 overlayroot=tmpfs cfg80211.ieee80211_regdom=DE\n", true},
+		{"boot=overlay spelling", "console=tty1 boot=overlay cfg80211.ieee80211_regdom=DE\n", true},
+		{"unsealed", "console=tty1 cfg80211.ieee80211_regdom=DE\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bootfs := writeTree(t, filepath.Join(dir, "bootfs"), map[string]string{"cmdline.txt": tc.cmdline})
+			rootfs := writeTree(t, filepath.Join(dir, "rootfs"), map[string]string{
+				"var/log/journal/9f2c/system.journal": journalBytes,
+			})
+			out := t.TempDir()
+
+			if _, stderr, code := collect(t, "--bootfs", bootfs, "--rootfs", rootfs, "--out", out); code != 0 {
+				t.Fatalf("exit %d: %s", code, stderr)
+			}
+			report := readReport(t, unpack(t, artifact(t, out)))
+
+			if got := strings.Contains(report, "sealed read-only"); got != tc.sealed {
+				t.Errorf("sealed=%v reported as %v:\n%s", tc.sealed, got, report)
+			}
+			// A sealed card must say so where it matters — beside the journal,
+			// so nobody reads a journal that ends at the seal as the last word
+			// on a unit that has booted since.
+			if got := strings.Contains(report, "ends at the seal"); got != tc.sealed {
+				t.Errorf("journal-vs-seal warning present=%v, want %v:\n%s", got, tc.sealed, report)
+			}
+		})
+	}
+}
+
+// UT-32: a card whose root cannot be read is a bundle without the unit's own
+// logs, and the failure it was collected for is usually only in those. The run
+// fails at the start, before any work, naming the reader to install — a
+// half-bundle handed over as if it were complete costs a whole round trip with
+// the card back in the drawer.
+func TestCollectRefusesToRunWithoutTheExt4Reader(t *testing.T) {
+	dir := t.TempDir()
+	bootfs := writeTree(t, filepath.Join(dir, "bootfs"), map[string]string{"cmdline.txt": cmdline})
+	out := t.TempDir()
+
+	_, stderr, code := collectEnv(t, []string{"DEBUGFS=/nonexistent/debugfs"},
+		"--bootfs", bootfs, "--rootpart", "/dev/nonexistent2", "--out", out)
+	if code == 0 {
+		t.Fatalf("collected without the ext4 reader instead of refusing")
+	}
+	for _, want := range []string{"e2fsprogs", "--boot-only"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("the refusal does not say %q, so nobody knows what to do next: %s", want, stderr)
+		}
+	}
+	if entries, err := os.ReadDir(out); err != nil || len(entries) != 0 {
+		t.Errorf("a refused run still left %v behind (%v)", entries, err)
+	}
+}
+
+// UT-32: the refusal is a default, not a wall. Somebody at a venue with no
+// package manager still needs whatever the boot partition holds, and asking
+// for it explicitly is a decision on the record rather than a silent gap.
+func TestCollectBootOnlyIsAWayPastTheRefusal(t *testing.T) {
+	dir := t.TempDir()
+	bootfs := writeTree(t, filepath.Join(dir, "bootfs"), map[string]string{
+		"cmdline.txt":           cmdline,
+		"zeitspiegel-debug.log": debugLog,
+	})
+	out := t.TempDir()
+
+	stdout, stderr, code := collectEnv(t, []string{"DEBUGFS=/nonexistent/debugfs"},
+		"--bootfs", bootfs, "--rootpart", "/dev/nonexistent2", "--boot-only", "--out", out)
+	if code != 0 {
+		t.Fatalf("--boot-only still refused: exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	report := readReport(t, unpack(t, artifact(t, out)))
+	if !strings.Contains(report, "STAGE: pre-rfkill") {
+		t.Errorf("the boot partition is missing from a boot-only bundle:\n%s", report)
+	}
+	// The gap is on the record: whoever reads this must know the unit's own
+	// logs were skipped on purpose, not that the unit was quiet.
+	if !strings.Contains(report, "--boot-only") {
+		t.Errorf("the report does not record that the root was skipped deliberately:\n%s", report)
 	}
 }
 

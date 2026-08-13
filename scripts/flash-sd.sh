@@ -19,7 +19,10 @@ cd "$(dirname "$0")/.."
 die() { echo "error: $*" >&2; exit 1; }
 
 [[ "$(uname)" == "Darwin" ]] || die "flash-sd.sh targets macOS; on Linux name the image first (L=\$(sudo losetup -Pf --show build/zeitspiegel-appliance.img); sudo mount \"\${L}p1\" /mnt; scripts/stage-name.sh \"\$NAME\" /mnt; sudo umount /mnt; sudo losetup -d \"\$L\"), then: sudo dd if=build/zeitspiegel-appliance.img of=/dev/sdX bs=4M conv=fsync"
-IMG=build/zeitspiegel-appliance.img
+# IMG picks which bake gets written — `make sd-dev` points it at the unsealed
+# development image, which is a separate file so the two can never be confused
+# at the card writer.
+IMG="${IMG:-build/zeitspiegel-appliance.img}"
 [[ -f "$IMG" ]] || die "$IMG missing — run 'make image' first"
 
 # The label is validated before anything is erased, so a typo costs a second

@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin/zeitspiegel
 
-.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image sd sd-logs check-name build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
+.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image image-dev sd sd-dev sd-logs check-name build-tv run-synth run-tv manual-test vet clean poster poster-test poster-check
 
 test: vet
 	$(GO) test -race ./...
@@ -62,6 +62,21 @@ image: pi-binary
 #   make sd NAME=auto          # deliberately unnamed: it calls itself Zeitspiegel <ID>
 sd: check-name image
 	NAME="$(NAME)" ./scripts/flash-sd.sh
+
+# A bench card: same image, minus the first-boot seal. The root stays
+# writable, so the persistent journal at /var/log/journal survives reboots and
+# `make sd-logs` reads every boot off it — a sealed card can only ever hand
+# back its first, because the overlay sends later writes to tmpfs (NFR-8 vs
+# NFR-9). The trade is that pulling the plug can corrupt the card, so this is
+# for a desk, not a venue. Its own image and credentials file, so it can never
+# be flashed in place of a production card.
+#
+#   make sd-dev NAME="Bench"
+sd-dev: check-name image-dev
+	IMG=build/zeitspiegel-appliance-dev.img NAME="$(NAME)" ./scripts/flash-sd.sh
+
+image-dev: pi-binary
+	SEAL=0 ./scripts/build-image.sh
 
 # Reject a missing or unusable label before the (slow) image bake, not after.
 check-name:

@@ -9,6 +9,7 @@
 #   DISK=/dev/disk4 scripts/collect-sd-logs.sh      # skip auto-detection
 #   scripts/collect-sd-logs.sh --image build/zeitspiegel-appliance.img
 #   scripts/collect-sd-logs.sh --bootfs /Volumes/bootfs [--rootfs /mnt/root]
+#   scripts/collect-sd-logs.sh --boot-only          # skip the ext4 half
 #
 # A card has two halves and they fail differently:
 #
@@ -24,9 +25,15 @@
 #
 # macOS cannot mount ext4, so the second half is read with debugfs from
 # e2fsprogs (`brew install e2fsprogs`) straight off the raw partition —
-# read-only, nothing is mounted, nothing is written to the card. Without it
-# you still get the whole FAT32 half, and the report says what it could not
-# reach rather than pretending the card was quiet.
+# read-only, nothing is mounted, nothing is written to the card. Without the
+# reader this refuses to run at all: a bundle missing the journal is a bundle
+# missing the failure, and finding that out later costs a round trip with the
+# card already back in the unit. --boot-only takes the FAT32 half deliberately
+# and says so in the report.
+#
+# A sealed card can only ever hand back its first boot — the overlay root
+# sends every later write, journald included, to tmpfs. `make sd-dev` bakes an
+# unsealed bench card whose journal survives reboots.
 #
 # The bundle is meant to travel, so the AP pre-shared key and the admin
 # password hash are redacted out of it (--keep-secrets opts out).
@@ -39,6 +46,8 @@ IMAGE=""
 LIST_ONLY=0
 REDACT=1
 RENDER_DOCKER=0
+BOOT_ONLY=0
+ROOTPART_ARG=""
 MOUNTED=()      # things this script mounted and must unmount
 ATTACHED=()     # disk images this script attached
 TMPDIRS=()
@@ -56,6 +65,8 @@ while [[ $# -gt 0 ]]; do
         --out)      OUT_BASE="${2:-}"; shift 2 ;;
         --bootfs)   BOOTFS="${2:-}"; shift 2 ;;
         --rootfs)   ROOTFS="${2:-}"; shift 2 ;;
+        --rootpart) ROOTPART_ARG="${2:-}"; shift 2 ;;
+        --boot-only) BOOT_ONLY=1; shift ;;
         --image)    IMAGE="${2:-}"; shift 2 ;;
         --disk)     DISK="${2:-}"; shift 2 ;;
         --list)     LIST_ONLY=1; shift ;;
@@ -263,6 +274,13 @@ attach_image() {
 # sealed has no NetworkManager state, and that absence is itself evidence.
 find_debugfs() {
     local c
+    # DEBUGFS= points at the binary when it lives somewhere unusual; setting
+    # it to a path that is not there is also how the tests run as if the
+    # reader were missing.
+    if [[ -n "${DEBUGFS:-}" ]]; then
+        [[ -x "$DEBUGFS" ]] && { printf '%s\n' "$DEBUGFS"; return 0; }
+        return 1
+    fi
     for c in debugfs /opt/homebrew/opt/e2fsprogs/sbin/debugfs /usr/local/opt/e2fsprogs/sbin/debugfs \
              /opt/homebrew/sbin/debugfs /sbin/debugfs /usr/sbin/debugfs; do
         command -v "$c" >/dev/null 2>&1 && { printf '%s\n' "$c"; return 0; }
@@ -379,6 +397,28 @@ fi
 is_zeitspiegel_bootfs "$BOOTFS" \
     || die "$BOOTFS is not a Zeitspiegel boot partition — no zeitspiegel-* file and no baked cmdline. Refusing to collect a volume that belongs to something else."
 
+# An explicit root partition overrides what detection found — useful when the
+# card enumerates oddly, and the seam the tests drive.
+[[ -n "$ROOTPART_ARG" ]] && ROOTPART="$ROOTPART_ARG"
+[[ "$BOOT_ONLY" == 1 ]] && ROOTPART=""
+
+# The unit's own logs live on the ext4 root, and a bundle without them is
+# usually a bundle without the failure. Refuse before any work rather than
+# hand over a half-collected card that reads as a quiet one.
+if [[ -z "$ROOTFS" && -n "$ROOTPART" ]] && ! find_debugfs >/dev/null; then
+    die "the root filesystem ($ROOTPART) needs an ext4 reader this machine does not have,
+  and without it the bundle carries no journal — the unit's own logs, which is
+  where a black screen or a missing AP is explained. Install it:
+
+      brew install e2fsprogs        # macOS
+      sudo apt install e2fsprogs    # Debian/Ubuntu
+
+  then run this again. To collect the boot partition alone anyway — the debug
+  and boot-profile captures, which survive a sealed overlay — pass --boot-only.
+  DEBUGFS=/path/to/debugfs points at the reader if it is installed somewhere
+  unusual."
+fi
+
 if [[ "$LIST_ONLY" == 1 ]]; then
     echo "card:   ${SOURCE_DESC:-${DISK:-$BOOTFS}}"
     echo "bootfs: $BOOTFS"
@@ -410,6 +450,11 @@ REPORT="$BUNDLE/report.txt"
 # The ext4 half, if it is not already a directory: extract it beside the report
 # so both mounted and debugfs cards look the same from here on.
 ROOTFS_NOTE=""
+if [[ "$BOOT_ONLY" == 1 ]]; then
+    ROOTFS_NOTE="not collected — --boot-only was passed, so the ext4 root was skipped
+  deliberately. The unit's own logs (the journal) are therefore absent by
+  choice, not because the unit was quiet."
+fi
 if [[ -z "$ROOTFS" && -n "$ROOTPART" ]]; then
     note "reading the root filesystem from $ROOTPART"
     EXTRACTED="$BUNDLE/rootfs"
@@ -465,10 +510,17 @@ emit "bootfs: cmdline.txt (regdomain, overlay root, quiet boot)" "$BUNDLE/bootfs
 emit "bootfs: config.txt" "$BUNDLE/bootfs/config.txt" "/boot/firmware/config.txt"
 emit "bootfs: zeitspiegel-name.txt (the label this mirror shows)" "$BUNDLE/bootfs/zeitspiegel-name.txt" "/boot/firmware/zeitspiegel-name.txt"
 
+# raspi-config's enable_overlayfs spells the seal `overlayroot=tmpfs` on
+# current Pi OS and `boot=overlay` on older releases. Reading only the old
+# spelling reports a sealed appliance as writable, which also means reporting
+# a journal that stops at the seal as if it ran to the last boot.
+SEALED=0
+grep -qE 'boot=overlay|overlayroot=' "$BOOTFS/cmdline.txt" 2>/dev/null && SEALED=1
+
 section "bootfs: seal / access markers"
 {
-    printf 'overlay root (boot=overlay in cmdline.txt): %s\n' \
-        "$(grep -q 'boot=overlay' "$BOOTFS/cmdline.txt" 2>/dev/null && echo 'yes — root is sealed read-only' || echo 'no — root is writable')"
+    printf 'overlay root (cmdline.txt):                 %s\n' \
+        "$([[ "$SEALED" == 1 ]] && echo 'yes — root is sealed read-only' || echo 'no — root is writable')"
     printf 'ssh marker file present:                    %s\n' "$([[ -e "$BOOTFS/ssh" ]] && echo yes || echo no)"
     printf 'staged authorized_keys present:             %s\n' "$([[ -e "$BOOTFS/zeitspiegel-authorized_keys" ]] && echo yes || echo no)"
     printf 'userconf.txt present:                       %s (hash redacted)\n' "$([[ -e "$BOOTFS/userconf.txt" ]] && echo yes || echo no)"
@@ -539,7 +591,20 @@ if [[ -n "$ROOTFS" ]]; then
     JDIR="$BUNDLE/rootfs/var/log/journal"
     if [[ -d "$JDIR" ]]; then
         printf 'journal files carried in this bundle:\n' >> "$REPORT"
-        find "$JDIR" -type f -name '*.journal*' -exec ls -la {} \; >> "$REPORT" 2>/dev/null || true
+        find "$JDIR" -type f -name '*.journal*' -exec ls -la {} \; 2>/dev/null \
+            | sed "s|$BUNDLE/rootfs||" >> "$REPORT" || true
+        # An overlay root sends every write after the seal to tmpfs, journald
+        # included. What is on the card is then the pre-seal boots only —
+        # believing otherwise turns "the journal says nothing" into a wrong
+        # conclusion about the boot that actually failed.
+        if [[ "$SEALED" == 1 ]]; then
+            printf '\nNOTE: this card is sealed (overlay root), so what is here ends at the seal —\n' >> "$REPORT"
+            printf 'the first boot. Every boot since wrote its journal to tmpfs and lost it at\n' >> "$REPORT"
+            printf 'power-off. For logs from a later boot, unseal the unit\n' >> "$REPORT"
+            printf '(sudo raspi-config nonint disable_overlayfs && sudo reboot), reproduce, and\n' >> "$REPORT"
+            printf 'collect again — or read what the boot partition captured, which survives\n' >> "$REPORT"
+            printf 'the overlay because it is a separate FAT32 mount.\n' >> "$REPORT"
+        fi
     else
         printf '(no persistent journal on this card — either it never booted far enough\n' >> "$REPORT"
         printf 'to write one, or the root filesystem could not be read here)\n' >> "$REPORT"
@@ -582,6 +647,11 @@ else
         printf '    brew install e2fsprogs\n' >> "$REPORT"
         printf 'On Linux, mount partition 2 read-only and pass --rootfs.\n' >> "$REPORT"
     fi
+    if [[ "$SEALED" == 1 ]]; then
+        printf '\nThis card is sealed (overlay root), so even once it can be read, the\n' >> "$REPORT"
+        printf 'journal on it ends at the seal — the first boot. Later boots wrote to\n' >> "$REPORT"
+        printf 'tmpfs and lost it at power-off.\n' >> "$REPORT"
+    fi
 fi
 
 # --- one file to hand over -------------------------------------------------
@@ -605,5 +675,9 @@ rm -rf "$STAGING"
 echo
 echo "$ARTIFACT   ($(du -h "$ARTIFACT" | cut -f1 | tr -d ' '))"
 echo
-echo "That one file is the whole card: report.txt reads as plain text, and the"
-echo "raw logs — journal included — are beside it."
+echo "report.txt inside it reads as plain text, with the raw logs beside it."
+if [[ -n "$ROOTFS" ]]; then
+    echo "Both halves of the card are in there, journal included."
+else
+    echo "Boot partition only — the unit's own journal is NOT in this bundle."
+fi

@@ -140,6 +140,20 @@ back.
   On macOS the ext4 half needs `brew install e2fsprogs` — without it
   the report says so rather than looking like a quiet card. The AP key and the
   admin password hash are redacted, so the bundle can be attached to an issue.
+  Two things it will not do quietly: without the ext4 reader it refuses to run
+  at all rather than hand back a bundle with no journal in it (`--boot-only`
+  overrides), and it reports whether the card is sealed — because a sealed
+  card's journal ends at the seal.
+- A unit you are actively debugging belongs on a **development card**:
+  `make sd-dev NAME="Bench"` bakes and flashes the same image with the
+  first-boot seal left off. The root stays writable, so `/var/log/journal`
+  survives reboots and `make sd-logs` reads *every* boot off it instead of
+  only the first. It writes its own `build/zeitspiegel-appliance-dev.img` and
+  `build/credentials-dev.txt`, so a bench card can never be flashed in place
+  of a production one. The trade is the one the overlay buys back (NFR-9): an
+  unsealed card can be corrupted by a pulled plug, so it belongs on a desk,
+  not in a venue. Seal it later with
+  `sudo systemctl enable zeitspiegel-seal && sudo reboot`.
 - Logs: `journalctl -u zeitspiegel` (persistent across reboots — NFR-8,
   so a no-AP / no-screen failure can still be diagnosed after a power
   cycle); the one-time seal: `journalctl -u zeitspiegel-seal`

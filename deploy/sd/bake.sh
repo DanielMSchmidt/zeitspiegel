@@ -18,7 +18,14 @@ AP_BAND="${AP_BAND:-bg}"
 AP_CHANNEL="${AP_CHANNEL:-6}"
 GROW_MB="${GROW_MB:-1500}"
 SRC_XZ=/work/raspios.img.xz
-OUT=/work/zeitspiegel-appliance.img
+# SEAL=0 bakes a development card: everything identical except that the
+# first-boot seal never runs, so the root stays writable and the persistent
+# journal at /var/log/journal actually persists across reboots. A sealed card
+# sends every write after the seal to tmpfs, which is why a field unit can only
+# ever hand back its first boot (NFR-8/NFR-9). OUT_NAME keeps the two images
+# apart so a dev bake never gets flashed in place of a production one.
+SEAL="${SEAL:-1}"
+OUT="/work/${OUT_NAME:-zeitspiegel-appliance.img}"
 PAYLOAD=/work/payload
 ROOT=/mnt/zsroot
 
@@ -89,7 +96,15 @@ install -D -m0755 "$PAYLOAD/seal.sh"              "$ROOT/usr/local/sbin/zeitspie
 install -D -m0644 "$PAYLOAD/zeitspiegel-seal.service" "$ROOT/etc/systemd/system/zeitspiegel-seal.service"
 chroot "$ROOT" systemctl enable NetworkManager  >/dev/null 2>&1 || true
 chroot "$ROOT" systemctl enable zeitspiegel.service      >/dev/null
-chroot "$ROOT" systemctl enable zeitspiegel-seal.service >/dev/null
+if [[ "$SEAL" == 1 ]]; then
+    chroot "$ROOT" systemctl enable zeitspiegel-seal.service >/dev/null
+else
+    # The unit and seal.sh stay installed either way: a dev card can be sealed
+    # by hand later (systemctl enable zeitspiegel-seal && reboot) without
+    # rebuilding it.
+    chroot "$ROOT" systemctl disable zeitspiegel-seal.service >/dev/null 2>&1 || true
+    echo "==> DEV IMAGE: first-boot seal NOT enabled — root stays writable, journal persists"
+fi
 
 echo "==> install + enable boot-time profile capture (→ /boot/firmware/zeitspiegel-boot-profile.log)"
 install -D -m0755 "$PAYLOAD/zeitspiegel-boot-profile.sh" \
