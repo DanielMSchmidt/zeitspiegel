@@ -232,10 +232,11 @@ the FR-9 focus-control path** — that path is only covered if a §6.1 autofocus
 webcam (W4) is also on hand. Worth one such device in the drawer regardless of
 which camera ships.
 
-**M2 and M4 are 8MP sensors, so §8 applies to them directly**: `probeMaxMJPEG`
-picks by pixel area and will select 3264×2448 at 15 fps. Set
-`profile = "1080p30"` explicitly rather than leaving it on `auto`. M1, M3 and
-M6 cap at 1080p and cannot be mis-selected.
+**M2 and M4 are 8MP sensors**, and §8 is what makes them safe to buy. Their
+headline modes are 3264×2448 at 15 fps — under the 25 fps floor, so `auto`
+passes over them and opens 1920×1080@30 instead. Nothing needs pinning. Buying
+a sensor whose top mode the pipeline will refuse is now a non-event rather than
+a trap, which is why the 8MP options are ranked on their optics above.
 
 Listings churn: four cameras this page once recommended have since been
 delisted or drifted to a different product. Re-check availability before
