@@ -482,7 +482,12 @@ grep -q '^dtoverlay=disable-bt' "$CFG" 2>/dev/null || echo 'dtoverlay=disable-bt
 echo "==> reclaim space + restore resolv.conf"
 chroot "$ROOT" apt-get clean
 rm -f "$ROOT/etc/resolv.conf"
-[[ "$HADRES" == yes ]] && mv "$ROOT/etc/resolv.conf.zsbak" "$ROOT/etc/resolv.conf"
+# Same reason as build-image.sh's key copy: as an `&&` this ends the bake
+# under `set -e` before the sync below, on any base image that shipped without
+# a resolv.conf.
+if [[ "$HADRES" == yes ]]; then
+    mv "$ROOT/etc/resolv.conf.zsbak" "$ROOT/etc/resolv.conf"
+fi
 
 sync
 echo "==> baked: $OUT"

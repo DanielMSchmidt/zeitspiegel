@@ -170,7 +170,11 @@ rm -f build/payload/authorized_keys
 if [[ -z "${SSH_PUBKEY:-}" ]]; then
     for k in ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub; do [[ -f "$k" ]] && SSH_PUBKEY="$k" && break; done
 fi
-[[ -n "${SSH_PUBKEY:-}" && -f "${SSH_PUBKEY:-}" ]] && cp "$SSH_PUBKEY" build/payload/authorized_keys
+# An `&&` here would end the script under `set -e` on any machine with no SSH
+# key at all — a bake that stops with no output and no image.
+if [[ -n "${SSH_PUBKEY:-}" && -f "${SSH_PUBKEY:-}" ]]; then
+    cp "$SSH_PUBKEY" build/payload/authorized_keys
+fi
 
 # OFFLINE is not a preference the containers are asked to respect — it is taken
 # away from them. A bake that still reaches for the network fails here rather
