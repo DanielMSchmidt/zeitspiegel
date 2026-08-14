@@ -17,7 +17,17 @@ set -euo pipefail
 AP_BAND="${AP_BAND:-bg}"
 AP_CHANNEL="${AP_CHANNEL:-6}"
 GROW_MB="${GROW_MB:-1500}"
-SRC_XZ=/work/raspios.img.xz
+# The base image is read out of the mounted cache (scripts/build-image.sh
+# passes the path); the old spelling is kept so a hand-run bake with a copy
+# under /work still works.
+SRC_XZ="${SRC_XZ:-/work/raspios.img.xz}"
+# Where the .debs this bake downloads are kept between bakes. Empty means no
+# cache was mounted: apt behaves exactly as it always did.
+APT_CACHE="${APT_CACHE:-}"
+# OFFLINE=1: install from the cache and refuse to reach for the network, so a
+# package that was never cached is a refusal here rather than a card that
+# turns out to have no ffmpeg on it.
+OFFLINE="${OFFLINE:-0}"
 # SEAL=0 bakes a development card: everything identical except that the
 # first-boot seal never runs, so the root stays writable and the persistent
 # journal at /var/log/journal actually persists across reboots. A sealed card
@@ -30,9 +40,19 @@ PAYLOAD=/work/payload
 ROOT=/mnt/zsroot
 
 export DEBIAN_FRONTEND=noninteractive
+die() { echo "error: $*" >&2; exit 1; }
+
 echo "==> container tools"
-apt-get update -qq
-apt-get install -y -qq xz-utils cloud-guest-utils e2fsprogs dosfstools util-linux parted >/dev/null
+# Installed once into the builder image (deploy/builder.Dockerfile), never
+# during a bake — that apt-get was the difference between a card that can be
+# made on a train and one that cannot. Named here so running this script in
+# the wrong container fails on the first line instead of halfway through a
+# loop-mounted image.
+MISSING=""
+for t in xz growpart e2fsck resize2fs losetup partx mountpoint; do
+    command -v "$t" >/dev/null || MISSING="$MISSING $t"
+done
+[[ -z "$MISSING" ]] || die "this container is missing:$MISSING — bake.sh expects the builder image (make builder-image), not a stock golang one"
 
 echo "==> decompress image"
 rm -f "$OUT"
@@ -40,9 +60,33 @@ xz -dc "$SRC_XZ" > "$OUT"
 echo "==> grow image by ${GROW_MB} MiB (room for packages)"
 truncate -s "+${GROW_MB}M" "$OUT"
 
-BOOT_LOOP="" ROOT_LOOP=""
+BOOT_LOOP="" ROOT_LOOP="" APT_CACHE_MOUNTED=0
+
+# The host's .deb cache, bind-mounted where apt already looks. Downloading
+# into it is what fills it; installing out of it is what makes the next bake
+# need no network.
+mount_apt_cache() {
+    [[ -n "$APT_CACHE" ]] || return 0
+    install -d "$APT_CACHE/archives/partial" "$APT_CACHE/lists/partial"
+    install -d "$ROOT/var/cache/apt/archives" "$ROOT/var/lib/apt/lists"
+    mount --bind "$APT_CACHE/archives" "$ROOT/var/cache/apt/archives"
+    mount --bind "$APT_CACHE/lists"    "$ROOT/var/lib/apt/lists"
+    APT_CACHE_MOUNTED=1
+}
+
+# ...and it has to be gone again before `apt-get clean` runs, because clean
+# empties the directory the cache is mounted on. Releasing it there rather
+# than in cleanup() is deliberate: the ordering is the point.
+release_apt_cache() {
+    (( APT_CACHE_MOUNTED )) || return 0
+    umount "$ROOT/var/cache/apt/archives"
+    umount "$ROOT/var/lib/apt/lists"
+    APT_CACHE_MOUNTED=0
+}
+
 cleanup() {
     set +e
+    release_apt_cache
     for m in "$ROOT/boot/firmware" "$ROOT/dev/pts" "$ROOT/dev" "$ROOT/sys" "$ROOT/proc" "$ROOT"; do
         mountpoint -q "$m" && umount "$m"
     done
@@ -81,9 +125,29 @@ echo "==> install runtime packages into the image"
 # image and a hand-installed Pi cannot disagree about what a unit needs. The
 # comments in that file are the reasoning; this is just the plumbing.
 PKGS=$(sed 's/#.*//' /deploy/runtime-packages.txt | tr '\n' ' ')
-chroot "$ROOT" apt-get update -qq
-# shellcheck disable=SC2086
-chroot "$ROOT" apt-get install -y -qq $PKGS >/dev/null
+mount_apt_cache
+# apt drops to the unprivileged `_apt` user to download, which cannot write a
+# directory bind-mounted in from the host — the failure is a permission denied
+# on a .deb halfway through the install. This container is root and privileged
+# by construction (it loop-mounts and chroots into the image it is building),
+# so the sandbox buys nothing here anyway.
+APT_ROOT=(-o APT::Sandbox::User=root)
+if [[ "$OFFLINE" == 1 ]]; then
+    echo "    offline: from the cached .debs, downloading nothing"
+    # --no-download turns a package that was never cached into an error here.
+    # The alternative is a card that boots and cannot open a screen, which is
+    # a failure that only shows up in a venue.
+    # shellcheck disable=SC2086
+    chroot "$ROOT" apt-get "${APT_ROOT[@]}" install -y -qq --no-download $PKGS >/dev/null \
+        || die "a package is not in the .deb cache — run 'make warm-cache' once with a network"
+else
+    chroot "$ROOT" apt-get "${APT_ROOT[@]}" update -qq
+    # shellcheck disable=SC2086
+    chroot "$ROOT" apt-get "${APT_ROOT[@]}" install -y -qq $PKGS >/dev/null
+fi
+# Everything apt just downloaded stays in the host's cache; the image gets the
+# installed packages and none of the archive.
+release_apt_cache
 
 echo "==> verify the image has what the binary dlopens"
 # The display stack is loaded at runtime, so a missing library produces no
@@ -418,7 +482,12 @@ grep -q '^dtoverlay=disable-bt' "$CFG" 2>/dev/null || echo 'dtoverlay=disable-bt
 echo "==> reclaim space + restore resolv.conf"
 chroot "$ROOT" apt-get clean
 rm -f "$ROOT/etc/resolv.conf"
-[[ "$HADRES" == yes ]] && mv "$ROOT/etc/resolv.conf.zsbak" "$ROOT/etc/resolv.conf"
+# Same reason as build-image.sh's key copy: as an `&&` this ends the bake
+# under `set -e` before the sync below, on any base image that shipped without
+# a resolv.conf.
+if [[ "$HADRES" == yes ]]; then
+    mv "$ROOT/etc/resolv.conf.zsbak" "$ROOT/etc/resolv.conf"
+fi
 
 sync
 echo "==> baked: $OUT"
