@@ -10,7 +10,23 @@ BIN := bin/zeitspiegel
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary image image-dev sd sd-dev sd-logs check-name build-tv run-synth run-tv manual-test vet fmt-check clean poster poster-test poster-check
+# The container both halves of `make image` run in — the cross-build and the
+# bake. Built once by `make builder-image` (see deploy/builder.Dockerfile);
+# after that nothing in the card path installs a package.
+BUILDER_IMAGE ?= zeitspiegel-builder:trixie-arm64
+
+# Everything the bake downloads is kept here: the Pi OS base image, the .debs
+# the chroot installs, and the Go module and build caches. Warm it once with
+# `make warm-cache`, then a card can be made with the network off:
+#
+#   OFFLINE=1 make sd NAME="Long Side"
+#
+# OFFLINE=1 does not merely avoid the network — it refuses to reach for it, so
+# a cold cache is a refusal at the start rather than a stall in the middle.
+CACHE_DIR ?= $(CURDIR)/build/cache
+OFFLINE ?= 0
+
+.PHONY: test test-integration test-e2e test-hw test-ui build build-pi pi-binary builder-image warm-cache check-caches image image-dev sd sd-dev sd-logs check-name build-tv run-synth run-tv manual-test vet fmt-check clean poster poster-test poster-check
 
 test: vet
 	$(GO) test -race ./...
@@ -63,18 +79,59 @@ build:
 build-pi:
 	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 $(GO) build -tags "v4l2 sdl" -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/zeitspiegel
 
+# Build the container the card path runs in. Idempotent and cheap once it
+# exists — every target that needs it depends on this, so nobody has to
+# remember to run it. It is the only step in the whole path that downloads
+# anything a second bake would download again.
+builder-image:
+	@docker image inspect $(BUILDER_IMAGE) >/dev/null 2>&1 || { \
+	  [ "$(OFFLINE)" != 1 ] || { \
+	    echo 'error: builder image $(BUILDER_IMAGE) is missing, and OFFLINE=1 forbids building it' >&2; \
+	    echo '       run `make warm-cache` once with a network' >&2; exit 1; }; \
+	  echo "==> building $(BUILDER_IMAGE) (once)"; \
+	  docker build --platform linux/arm64 -t $(BUILDER_IMAGE) - < deploy/builder.Dockerfile; }
+
 # Pi binary cross-built in Docker against Debian trixie (= current Pi OS
 # userland; bookworm's 6.1 kernel headers are too old for go4vl), arm64 —
 # runs natively on Apple Silicon.
-pi-binary:
+#
+# The module and build caches are mounted from the host: without them every
+# bake re-downloads the four modules and recompiles the arm64 standard library
+# inside a container it then throws away.
+pi-binary: builder-image
+	@mkdir -p "$(CACHE_DIR)/gomod" "$(CACHE_DIR)/gobuild"
+	@[ "$(OFFLINE)" != 1 ] || [ -d "$(CACHE_DIR)/gomod/cache/download" ] || { \
+	  echo 'error: the Go module cache is cold — run `make warm-cache` once with a network' >&2; exit 1; }
 	docker run --rm --platform linux/arm64 -v "$(CURDIR)":/src -w /src \
-	  -e GOFLAGS=-buildvcs=false golang:1.25-trixie bash -c \
-	  "apt-get update -qq >/dev/null && apt-get install -y -qq libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev >/dev/null \
-	   && go build -tags 'v4l2 sdl' -ldflags '$(LDFLAGS)' -o bin/zeitspiegel-pi ./cmd/zeitspiegel"
+	  -v "$(CACHE_DIR)/gomod":/go/pkg/mod -v "$(CACHE_DIR)/gobuild":/root/.cache/go-build \
+	  -e GOFLAGS=-buildvcs=false $(if $(filter 1,$(OFFLINE)),--network none -e GOPROXY=off,) \
+	  $(BUILDER_IMAGE) \
+	  go build -tags 'v4l2 sdl' -ldflags '$(LDFLAGS)' -o bin/zeitspiegel-pi ./cmd/zeitspiegel
+
+# Fill every cache the card path reads, by walking that path once with a
+# network. After this, making a card needs none.
+warm-cache: image
+	@echo
+	@$(MAKE) --no-print-directory check-caches
+	@echo
+	@echo 'caches are warm: a card can now be made offline —'
+	@echo '  OFFLINE=1 make sd NAME="Long Side"'
+
+# Say whether a card could be made right now with the network off. Cheap, and
+# the answer belongs before the trip rather than at the venue.
+check-caches:
+	@cold=0; \
+	if docker image inspect $(BUILDER_IMAGE) >/dev/null 2>&1; then \
+	  echo "  warm  builder image $(BUILDER_IMAGE)"; \
+	else \
+	  echo "  COLD  builder image $(BUILDER_IMAGE) — the container the bake runs in"; cold=1; \
+	fi; \
+	CACHE_DIR="$(CACHE_DIR)" ./scripts/build-image.sh --check-caches || cold=1; \
+	exit $$cold
 
 # Bake a finished, network-free appliance image (no SD card needed).
 image: pi-binary
-	VERSION="$(VERSION)" ./scripts/build-image.sh
+	VERSION="$(VERSION)" CACHE_DIR="$(CACHE_DIR)" OFFLINE="$(OFFLINE)" BUILDER_IMAGE="$(BUILDER_IMAGE)" ./scripts/build-image.sh
 
 # Write the baked image to an SD card (macOS) and name that unit. Plug-and-play,
 # no ethernet. NAME is the label the mirror shows in the UI; it is staged onto
@@ -98,7 +155,7 @@ sd-dev: check-name image-dev
 	IMG=build/zeitspiegel-appliance-dev.img NAME="$(NAME)" ./scripts/flash-sd.sh
 
 image-dev: pi-binary
-	SEAL=0 VERSION="$(VERSION)" ./scripts/build-image.sh
+	SEAL=0 VERSION="$(VERSION)" CACHE_DIR="$(CACHE_DIR)" OFFLINE="$(OFFLINE)" BUILDER_IMAGE="$(BUILDER_IMAGE)" ./scripts/build-image.sh
 
 # Reject a missing or unusable label before the (slow) image bake, not after.
 check-name:

@@ -40,6 +40,9 @@ make test-hw           # -tags "v4l2 sdl" build + v4l2loopback tests (Linux)
 make build-pi          # arm64 binary with v4l2+sdl tags (on the Pi itself)
 make pi-binary         # same, cross-built in Docker (bookworm arm64)
 make sd NAME="Long Side"   # flash + name a self-provisioning SD card (macOS)
+make warm-cache        # fill every cache the card path reads (needs a network, once)
+make check-caches      # can a card be made right now with the network off?
+OFFLINE=1 make sd NAME="Long Side"   # ...make one, no internet at all
 make sd-dev NAME="Bench"   # same card, unsealed: writable root, journal persists
 make sd-logs           # read a unit's logs off its card into one zip
 make run-synth         # run binary with --source synth (no camera needed)
@@ -82,6 +85,10 @@ numbers recorded in docs/ARCHITECTURE.md §7.
   renderer must skip.
 - Adding a router/web framework — stdlib `ServeMux` patterns are sufficient.
 - Copying frame slices out of the buffer "for safety" — see hard rule 4.
+- Putting an `apt-get install` back into `bake.sh` or `pi-binary` "just for
+  this one package" — the builder image is what lets a card be made with no
+  internet. A package installed during a bake is downloaded during *every*
+  bake; it belongs in `deploy/builder.Dockerfile` (UT-42).
 - Letting NetworkManager autoconnect the Wi-Fi profiles "so the network comes
   up sooner" — it races the role election and a unit that loses the race
   beacons a network somebody else is already hosting. Both profiles are

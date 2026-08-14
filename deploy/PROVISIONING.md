@@ -64,6 +64,20 @@ escape hatch below works without rebuilding.
 `make image` bakes the image without touching a card (useful to inspect it
 first); `make sd` runs that, then writes the card.
 
+The *card* has never needed a network; the *laptop* making one did, every
+time. It no longer does. Run `make warm-cache` once with a network — it bakes
+a card's worth of everything into `build/cache/` — and after that:
+
+```
+make check-caches                    # could I make a card right now, offline?
+OFFLINE=1 make sd NAME="Long Side"   # a card, on a plane
+```
+
+`OFFLINE=1` takes the network away from the build rather than politely
+avoiding it (both containers run `--network none`), so it either produces a
+complete card or says which cache is cold. See docs/DEPLOYMENT.md, "Making a
+card with no internet".
+
 > Not on macOS? `make image` still works (it's all Docker). To write the
 > card: `sudo dd if=build/zeitspiegel-appliance.img of=/dev/sdX bs=4M
 > conv=fsync`. Or flash stock Pi OS Lite with the Imager and run

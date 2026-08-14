@@ -31,8 +31,40 @@ mirror in ≤ 25 s. Power off = pull the plug (safe by design, NFR-9).
 | `config.toml` | profile=auto (E-2: highest MJPEG mode capped at 1080p), buffer 60 s / 1 GiB cap, mirror_flip=true, focus pinning, bind `:80` |
 | `setup.sh` | idempotent on fresh Pi OS Lite: install ffmpeg + SDL2/libjpeg runtime, copy binary/unit/config, hostname `zeitspiegel`, create the open Wi-Fi AP (`AP_SSID`/`WIFI_COUNTRY`), enable service, enable read-only overlayfs (`raspi-config nonint enable_overlayfs`) **last** |
 | `sd/bake.sh` | runs in a privileged linux/arm64 container (`make image`): loop-mounts a stock Pi OS image, grows the root, chroots in to `apt install` ffmpeg + SDL2 + NetworkManager + dnsmasq-base/iptables (needed by `ipv4.method=shared`) + rfkill/iw (for in-place debug), writes the binary, AP keyfile, user, regdomain, NOPASSWD sudo for the admin, persistent journal, and clears the stock rfkill soft-block — produces a finished, network-free image |
+| `builder.Dockerfile` | the one container the card path runs in — the arm64 cross-build and the bake, SDL2 dev libraries and image tools in a single image built once by `make builder-image`. It exists so that neither step installs a package while a card is being made |
 | `sd/seal.sh` + `zeitspiegel-seal.service` | one-time first-boot finisher baked into the image: stages `authorized_keys` for the SSH escape hatch, enables the read-only overlay, reboots; self-disables (offline). SSH itself stays masked. |
 | `PROVISIONING.md` | plug-and-play path: `make sd NAME="Long Side"` (bakes the image + writes and names the card on macOS) → boot once, no network → done |
+
+## Making a card with no internet
+
+The appliance never needs a network; the machine that *makes* one used to,
+every single time — a container `apt-get`, four Go modules, and ~200 `.deb`s,
+re-fetched per bake. All of it is cached now, so the second card can be made
+on a plane.
+
+```
+make warm-cache                      # once, with a network: fills every cache
+make check-caches                    # could I bake right now with the wifi off?
+OFFLINE=1 make sd NAME="Long Side"   # a card, no internet
+```
+
+- `OFFLINE=1` does not merely avoid the network, it is denied one: both
+  containers run `--network none`, the cross-build runs `GOPROXY=off`, and the
+  chroot installs with `apt-get --no-download`. A package that was never
+  cached is a refusal during the bake, not a card that turns out to have no
+  ffmpeg on it.
+- A cold cache is refused at the start, naming every missing piece at once —
+  the answer to "can I make a card at the venue" is wanted before leaving, so
+  `make check-caches` gives it in a second without baking anything.
+- The caches live under `build/cache/` (`CACHE_DIR` to relocate or to share
+  one between checkouts): the Pi OS base image with a `.provenance` sidecar
+  recording the URL and sha256 it was fetched from and verified against on
+  every bake, `apt/{archives,lists}`, and `gomod`/`gobuild`. Delete any of
+  them to re-fetch; delete the builder image (`docker rmi
+  zeitspiegel-builder:trixie-arm64`) to rebuild it against newer packages.
+- `IMG_URL` points at *latest*, so a deleted base-image cache can quietly
+  swap the OS under the appliance. `IMG_SHA256=<hash> make image` pins it to
+  the exact download a fleet was built on.
 
 ## Network & discovery (E-7: the appliance is its own network)
 
