@@ -48,7 +48,10 @@ const CORS = {
 // status builds a /api/v1/status body in the shape pinned by
 // docs/REQUIREMENTS.md §3.
 export function status(over = {}) {
-  const { buffer, ...rest } = over;
+  // `config` is pulled out and dropped here: a test declares a unit's config
+  // alongside its status, but the Fleet owns it as mutable state and splices
+  // a fresh snapshot into every answer.
+  const { buffer, config: _config, ...rest } = over;
   return {
     delay_s: 0,
     fps: 30,
@@ -62,6 +65,21 @@ export function status(over = {}) {
     name: "Corner",
     role: "primary",
     ...rest,
+  };
+}
+
+// config builds a /api/v1/config body — the full config.Runtime, which is
+// what both GET and PATCH answer with.
+export function config(over = {}) {
+  return {
+    mirror_flip: false,
+    profile: "auto",
+    buffer_max_s: 60,
+    focus_auto: true,
+    focus_absolute: 0,
+    exposure_auto: true,
+    exposure_absolute: 0,
+    ...over,
   };
 }
 
@@ -100,9 +118,14 @@ class Fleet {
       base: "", // same origin as the page
       origin: localOrigin,
       status: status(opts.local || {}),
+      config: config(opts.local?.config || {}),
       down: false,
       reject: null,
       clip: null,
+      // slowRead holds every GET /status open for this many ms, which is how
+      // a test lands a read that was made before a write but arrives after
+      // it.
+      slowRead: 0,
     };
     this.units.set(localOrigin, this.local);
     this.peers = [];
@@ -120,9 +143,11 @@ class Fleet {
       base,
       origin: new URL(base).origin,
       status: status({ unit_id: p.id, name: p.name, role: "member", ...(p.status || {}) }),
+      config: config(p.config || {}),
       down: p.down || false,
       reject: null,
       clip: null,
+      slowRead: 0,
     };
     this.units.set(unit.origin, unit);
     this.peers.push(unit);
@@ -186,14 +211,30 @@ class Fleet {
       });
 
     switch (url.pathname) {
-      case "/api/v1/status":
-        return json(unit.status);
+      case "/api/v1/status": {
+        // The config the unit is running under rides along with its status,
+        // so a page watching a unit polls once (REQUIREMENTS §3).
+        // The answer carries what the unit held when the read was made, not
+        // when it was delivered — so a slow read arriving after a write
+        // reports the value from before it. That is the stale reading a
+        // polling page has to recognise and drop.
+        const snapshot = { ...unit.status, config: { ...unit.config } };
+        if (unit.slowRead) await new Promise((ok) => setTimeout(ok, unit.slowRead));
+        return json(snapshot);
+      }
       case "/api/v1/peers":
         return json(this.peerList());
       case "/api/v1/delay": {
         if (unit.reject) return json(unit.reject, 422);
         unit.status.delay_s = JSON.parse(req.postData() || "{}").seconds;
         return json({ delay_s: unit.status.delay_s });
+      }
+      case "/api/v1/config": {
+        if (req.method() === "GET") return json(unit.config);
+        // PATCH merges and answers with the whole config, the way the server
+        // does (httpapi.patchConfig returns config.Runtime).
+        Object.assign(unit.config, JSON.parse(req.postData() || "{}"));
+        return json(unit.config);
       }
       case "/api/v1/preview":
         return route.fulfill({ status: 200, headers: { ...CORS, "Content-Type": "image/png" }, body: PIXEL });
@@ -219,8 +260,9 @@ class Fleet {
 
 // --- entry point -------------------------------------------------------------
 
-// openUI serves web/, opens index.html in a phone-sized viewport and answers
-// every API call from the stub fleet.
+// openUI serves web/, opens a page in a phone-sized viewport and answers
+// every API call from the stub fleet. Defaults to the control page;
+// opts.path opens another one that ships in web/ (e.g. "/settings.html").
 export async function openUI(opts = {}) {
   const server = await serveWeb();
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -233,7 +275,7 @@ export async function openUI(opts = {}) {
   const page = await context.newPage();
   const fleet = new Fleet(origin, opts);
   await page.route("**/api/v1/**", (route) => fleet.handle(route));
-  await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
+  await page.goto(origin + (opts.path || "/"), { waitUntil: "domcontentloaded" });
 
   return {
     page,

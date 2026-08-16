@@ -34,8 +34,10 @@ func freePort(t *testing.T) int {
 }
 
 // startBinary builds and launches zeitspiegel --source synth, waits for
-// /healthz, and returns the base URL plus the process.
-func startBinary(t *testing.T) (string, *exec.Cmd) {
+// /healthz, and returns the base URL plus the process. Extra arguments are
+// appended, which is how a restart is given the same config — and therefore
+// the same stored settings — as the run before it.
+func startBinary(t *testing.T, extra ...string) (string, *exec.Cmd) {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "zeitspiegel")
 	build := exec.Command("go", "build", "-o", bin, ".")
@@ -45,7 +47,8 @@ func startBinary(t *testing.T) (string, *exec.Cmd) {
 
 	port := freePort(t)
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	cmd := exec.Command(bin, "--source", "synth", "--bind", fmt.Sprintf("127.0.0.1:%d", port))
+	args := append([]string{"--source", "synth", "--bind", fmt.Sprintf("127.0.0.1:%d", port)}, extra...)
+	cmd := exec.Command(bin, args...)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -170,21 +173,13 @@ func TestBinaryAPIContract(t *testing.T) {
 	})
 
 	t.Run("config roundtrip (FR-9)", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodPatch, base+"/api/v1/config", bytes.NewReader([]byte(`{"mirror_flip": false}`)))
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			t.Fatalf("PATCH config: %d", resp.StatusCode)
-		}
-		var rt struct {
-			MirrorFlip bool `json:"mirror_flip"`
-		}
-		json.NewDecoder(resp.Body).Decode(&rt)
-		if rt.MirrorFlip {
-			t.Error("mirror_flip still true after patch")
+		// Both directions: the flip is off by default now (FR-2), so patching
+		// it off again would prove nothing about the write path.
+		for _, want := range []bool{true, false} {
+			got := patchMirror(t, base, want)
+			if got != want {
+				t.Errorf("PATCH mirror_flip=%v answered %v", want, got)
+			}
 		}
 	})
 
@@ -266,4 +261,94 @@ func TestBinaryAPIContract(t *testing.T) {
 			t.Error("did not exit within 5s of SIGTERM")
 		}
 	})
+}
+
+// patchMirror PATCHes the flip and returns what the unit answers it is now.
+func patchMirror(t *testing.T, base string, on bool) bool {
+	t.Helper()
+	body := fmt.Sprintf(`{"mirror_flip": %t}`, on)
+	req, _ := http.NewRequest(http.MethodPatch, base+"/api/v1/config", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("PATCH config: %d", resp.StatusCode)
+	}
+	var rt struct {
+		MirrorFlip bool `json:"mirror_flip"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rt); err != nil {
+		t.Fatal(err)
+	}
+	return rt.MirrorFlip
+}
+
+func getMirror(t *testing.T, base string) bool {
+	t.Helper()
+	resp, err := http.Get(base + "/api/v1/config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var rt struct {
+		MirrorFlip bool `json:"mirror_flip"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rt); err != nil {
+		t.Fatal(err)
+	}
+	return rt.MirrorFlip
+}
+
+// ST-14 (FR-18): a setting changed from the control page is still in force
+// after the unit has been switched off and on again.
+//
+// This is the whole feature seen from where it is used: nobody shuts an
+// appliance down, they pull its plug at the end of the evening, so a setting
+// that lives only in the process is a setting the room has to make again every
+// morning. The unit is killed rather than asked to exit, because that is what
+// the switch on the wall does.
+func TestSettingsSurviveARestart(t *testing.T) {
+	dir := t.TempDir()
+	state := filepath.Join(dir, "zeitspiegel-settings.json")
+	cfgPath := filepath.Join(dir, "config.toml")
+	cfg := fmt.Sprintf("mirror_flip = false\nstate_file = %q\n", state)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base, cmd := startBinary(t, "--config", cfgPath)
+	if getMirror(t, base) {
+		t.Fatal("booted with the flip on, want the config file's false")
+	}
+	if got := patchMirror(t, base, true); !got {
+		t.Fatal("PATCH did not turn the flip on")
+	}
+
+	// The plug comes out.
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	cmd.Wait()
+
+	if _, err := os.Stat(state); err != nil {
+		t.Fatalf("nothing was written to the state file: %v", err)
+	}
+
+	base2, _ := startBinary(t, "--config", cfgPath)
+	if !getMirror(t, base2) {
+		t.Error("the flip came back off: the unit forgot a setting across a restart (FR-18)")
+	}
+
+	// And a card put back to its defaults is one file deletion away, which is
+	// the only reset an operator with a card reader has.
+	if err := os.Remove(state); err != nil {
+		t.Fatal(err)
+	}
+	base3, _ := startBinary(t, "--config", cfgPath)
+	if getMirror(t, base3) {
+		t.Error("deleting the state file did not put the unit back to its config file")
+	}
 }

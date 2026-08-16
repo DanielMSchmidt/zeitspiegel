@@ -10,6 +10,7 @@ type loopMetrics struct {
 	ticks            atomic.Uint64 // loop iterations
 	presented        atomic.Uint64 // frames rendered to the display
 	held             atomic.Uint64 // ticks where the selected frame was unchanged
+	repaints         atomic.Uint64 // held ticks re-presented because the overlay changed
 	tickOverruns     atomic.Uint64 // tick-to-tick delta > 1.5× budget (dropped ticker ticks)
 	renderOverBudget atomic.Uint64 // renders slower than one tick interval
 	missTooEarly     atomic.Uint64 // engine.MissTooEarly selections
@@ -30,6 +31,7 @@ func (m *loopMetrics) snapshot() any {
 		"ticks":              m.ticks.Load(),
 		"presented":          m.presented.Load(),
 		"held":               m.held.Load(),
+		"repaints":           m.repaints.Load(),
 		"tick_overruns":      m.tickOverruns.Load(),
 		"render_over_budget": m.renderOverBudget.Load(),
 		"miss_too_early":     m.missTooEarly.Load(),

@@ -1,0 +1,111 @@
+# mise.toml — the developer machine's side of the toolchain.
+#
+# What this can and cannot do. Homebrew is not one of mise's backends
+# (`mise backends ls`: aqua, ubi, cargo, npm, go, pipx, …), and SDL2 is not a
+# downloadable binary anyway — it is C libraries, headers and pkg-config files
+# that cgo links against. So it cannot be a `[tools]` entry, and anything that
+# claims otherwise is a wrapper around `brew` with extra steps. What mise can
+# do is own the *command*: one entry point that installs them and one that
+# answers "can this machine run the tagged lanes?" without installing
+# anything — the laptop's counterpart to `make check-caches`.
+#
+# The card's own package list is deploy/runtime-packages.txt, checked by
+# deploy/check-runtime.sh (UT-37). This file is only what a machine needs to
+# *build and test* what goes on the card.
+
+[tools]
+# The language version comes from go.mod rather than being repeated here; the
+# setting below is what lets mise read it, so a fresh clone gets it without
+# anyone's personal config being involved.
+go = "1.25"
+# `make test-ui` runs the control page in headless Chromium through Playwright,
+# which is a Node program. Playwright itself is an npm dependency of
+# web/uitest, and its browser build is fetched separately —
+# `cd web/uitest && npm install && npx playwright install chromium`.
+node = "lts"
+
+[settings]
+idiomatic_version_file_enable_tools = ["go"]
+
+[env]
+# Named once, used by both tasks below. Homebrew formula names; the Debian
+# equivalents are in the tasks' output and in docs/MANUAL_TESTING.md.
+#
+#   sdl2, sdl2_image, sdl2_ttf, pkgconf → the `sdl` build tag: `make build-tv`,
+#     `make run-tv`, `go test -tags sdl ./internal/screen/` (UT-49 and the rest
+#     of the real display path, under SDL's dummy video driver — no screen
+#     needed). sdl2_ttf is easy to miss: nothing links it until the delay badge
+#     is drawn in a real typeface, and its absence surfaces as a pkg-config
+#     error three layers down.
+#   ffmpeg → `make test-integration`, which shells out to ffmpeg and ffprobe
+#     (they are subprocesses, never linked — hard rule 7).
+#
+# The `v4l2` tag needs Linux kernel headers and cannot be built on a Mac at
+# all; use the arm64 builder image (deploy/builder.Dockerfile) for that.
+ZEITSPIEGEL_BREW_DEPS = "sdl2 sdl2_image sdl2_ttf pkgconf ffmpeg"
+
+[tasks.deps]
+description = "Install the C libraries and tools the sdl + integration lanes need (macOS/Homebrew)"
+run = '''
+set -eu
+if ! command -v brew >/dev/null 2>&1; then
+  echo "No Homebrew here. On Debian/Ubuntu the same set is:" >&2
+  echo "  sudo apt install libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev pkg-config ffmpeg" >&2
+  exit 1
+fi
+# Already-installed formulae are left exactly as they are: this is a setup
+# step, not an upgrade, and a machine that was working must not be changed
+# underneath somebody in the middle of a job.
+missing=""
+for f in $ZEITSPIEGEL_BREW_DEPS; do
+  brew list --versions "$f" >/dev/null 2>&1 || missing="$missing $f"
+done
+if [ -z "$missing" ]; then
+  echo "all present:$(printf ' %s' $ZEITSPIEGEL_BREW_DEPS)"
+else
+  echo "installing:$missing"
+  # shellcheck disable=SC2086
+  brew install $missing
+fi
+mise run deps:check
+'''
+
+[tasks."deps:check"]
+description = "Can this machine run the tagged and integration lanes? Reports without installing anything"
+run = '''
+set -eu
+# Deliberately checks the *capability* rather than the package manager's
+# opinion of it, so it is the same check on a Mac, on Linux and in CI: what
+# breaks a build is pkg-config not finding a library, which is a different
+# question from whether a formula is listed as installed.
+missing=0
+for pc in sdl2 SDL2_image SDL2_ttf; do
+  if pkg-config --exists "$pc" 2>/dev/null; then
+    echo "ok   $pc $(pkg-config --modversion "$pc")"
+  else
+    echo "MISS $pc — the sdl build tag will fail at pkg-config"
+    missing=1
+  fi
+done
+for bin in ffmpeg ffprobe; do
+  if command -v "$bin" >/dev/null 2>&1; then
+    echo "ok   $bin"
+  else
+    echo "MISS $bin — make test-integration needs it"
+    missing=1
+  fi
+done
+if command -v node >/dev/null 2>&1; then
+  echo "ok   node $(node --version)"
+else
+  echo "MISS node — make test-ui needs it (mise install)"
+  missing=1
+fi
+if [ "$missing" -ne 0 ]; then
+  echo
+  echo "run 'mise run deps' (macOS), or see docs/MANUAL_TESTING.md for the apt list"
+  exit 1
+fi
+echo
+echo "this machine can run: make test, make test-ui, make test-integration, make build-tv"
+'''

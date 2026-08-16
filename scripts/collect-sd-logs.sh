@@ -558,7 +558,7 @@ fi
 note "collecting the boot partition"
 mkdir -p "$BUNDLE/bootfs"
 for f in zeitspiegel-debug.log zeitspiegel-boot-profile.log zeitspiegel-journal.log.gz \
-         zeitspiegel-capture-live \
+         zeitspiegel-capture-live zeitspiegel-settings.json \
          zeitspiegel-name.txt zeitspiegel-version.txt cmdline.txt config.txt ssh \
          userconf.txt zeitspiegel-authorized_keys; do
     copy_into "$BOOTFS/$f" "$BUNDLE/bootfs/$f"
@@ -575,6 +575,10 @@ printf '\n%s files on the boot partition in total.\n' \
 
 emit "bootfs: zeitspiegel-debug.log (rfkill / NetworkManager, three boot stages)" "$BUNDLE/bootfs/zeitspiegel-debug.log" "/boot/firmware/zeitspiegel-debug.log"
 emit "bootfs: zeitspiegel-boot-profile.log (boot timing, first frame, HTTP listen)" "$BUNDLE/bootfs/zeitspiegel-boot-profile.log" "/boot/firmware/zeitspiegel-boot-profile.log"
+# What the unit was last set to from the control page (FR-18). A card with no
+# such file was never changed — which is itself the answer to half the reports
+# that start "it came back different".
+emit "bootfs: zeitspiegel-settings.json (settings kept across restarts; absent = never changed)" "$BUNDLE/bootfs/zeitspiegel-settings.json" "/boot/firmware/zeitspiegel-settings.json"
 # The snapshot the on-unit capture leaves on the FAT partition. On a first
 # boot or a sealed card this is the only journal there is, so it is read out in
 # full rather than merely carried.

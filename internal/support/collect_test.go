@@ -572,6 +572,35 @@ func TestCollectReportsTheBuildVersion(t *testing.T) {
 	}
 }
 
+// UT-32: what a unit was left set to is part of what a card has to explain.
+// Settings changed from the control page live on the boot partition (FR-18),
+// and "the mirror came back unflipped" and "somebody unflipped it" are
+// different faults — the file is the only thing that tells them apart, and it
+// reads without an ext4 reader.
+func TestCollectCarriesTheStoredSettings(t *testing.T) {
+	dir := t.TempDir()
+	bootfs := writeTree(t, filepath.Join(dir, "bootfs"), map[string]string{
+		"cmdline.txt":               cmdline,
+		"zeitspiegel-settings.json": `{"mirror_flip":true}` + "\n",
+	})
+	out := t.TempDir()
+
+	if _, stderr, code := collect(t, "--bootfs", bootfs, "--out", out); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	bundle := unpack(t, artifact(t, out))
+	hits, _ := filepath.Glob(filepath.Join(bundle, "zeitspiegel-logs-*", "bootfs", "zeitspiegel-settings.json"))
+	if len(hits) != 1 {
+		t.Fatalf("the stored settings are not in the bundle: %v", hits)
+	}
+	if b, _ := os.ReadFile(hits[0]); !strings.Contains(string(b), "mirror_flip") {
+		t.Errorf("settings file collected but empty: %q", b)
+	}
+	if report := readReport(t, bundle); !strings.Contains(report, "mirror_flip") {
+		t.Errorf("the report does not say what the unit was set to:\n%s", report)
+	}
+}
+
 // UT-32: cards baked before version stamping existed are still in circulation
 // and still come back broken. An absent stamp is reported as absent, not as a
 // blank field that reads like a build with no name.

@@ -33,15 +33,18 @@ func (c Config) Runtime() Runtime {
 	}
 }
 
-// Patch is a partial runtime update; nil fields stay unchanged.
+// Patch is a partial runtime update; nil fields stay unchanged. It is also
+// what a unit stores to carry its settings across a restart (FR-18), which is
+// why the fields are `omitempty`: the stored file lists only what somebody
+// actually set, leaving every other key to the boot config.
 type Patch struct {
-	MirrorFlip       *bool    `json:"mirror_flip"`
-	Profile          *string  `json:"profile"`
-	BufferMaxS       *float64 `json:"buffer_max_s"`
-	FocusAuto        *bool    `json:"focus_auto"`
-	FocusAbsolute    *int     `json:"focus_absolute"`
-	ExposureAuto     *bool    `json:"exposure_auto"`
-	ExposureAbsolute *int     `json:"exposure_absolute"`
+	MirrorFlip       *bool    `json:"mirror_flip,omitempty"`
+	Profile          *string  `json:"profile,omitempty"`
+	BufferMaxS       *float64 `json:"buffer_max_s,omitempty"`
+	FocusAuto        *bool    `json:"focus_auto,omitempty"`
+	FocusAbsolute    *int     `json:"focus_absolute,omitempty"`
+	ExposureAuto     *bool    `json:"exposure_auto,omitempty"`
+	ExposureAbsolute *int     `json:"exposure_absolute,omitempty"`
 }
 
 // WithPatch returns a validated copy with the patch applied.

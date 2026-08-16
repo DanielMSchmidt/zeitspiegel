@@ -33,8 +33,8 @@ func TestDefaults(t *testing.T) {
 	if w, h := c.Resolution(); w != 1920 || h != 1080 {
 		t.Errorf("auto nominal resolution = %dx%d, want 1920x1080 (cap)", w, h)
 	}
-	if !c.MirrorFlip { // FR-2: default on
-		t.Error("mirror_flip default must be true")
+	if c.MirrorFlip { // FR-2: default off (changed 2026-08-16 on the owner's call)
+		t.Error("mirror_flip default must be false")
 	}
 	if c.BufferMaxS <= 0 || c.BufferMaxBytes <= 0 {
 		t.Errorf("buffer budgets must default > 0, got %v s / %v B", c.BufferMaxS, c.BufferMaxBytes)
@@ -65,7 +65,7 @@ bind = ":80"
 source = "synth"
 profile = "1080p30"
 buffer_max_s = 60.0
-mirror_flip = false
+mirror_flip = true
 focus_auto = false
 focus_absolute = 30
 `)
@@ -79,8 +79,8 @@ focus_absolute = 30
 	if c.FPS() != 30 {
 		t.Errorf("FPS = %v, want 30", c.FPS())
 	}
-	if c.MirrorFlip {
-		t.Error("mirror_flip = true, want false (explicitly set)")
+	if !c.MirrorFlip {
+		t.Error("mirror_flip = false, want true (explicitly set)")
 	}
 	if c.FocusAbsolute != 30 {
 		t.Errorf("focus_absolute = %d, want 30", c.FocusAbsolute)
@@ -163,5 +163,12 @@ func TestDeployConfigLoadsWith60sBuffer(t *testing.T) {
 	}
 	if cfg.BufferMaxBytes != 1<<30 {
 		t.Errorf("buffer_max_bytes = %d, want 1 GiB", cfg.BufferMaxBytes)
+	}
+	// FR-18: a card that persists nothing is a card whose settings go back to
+	// the file every time somebody pulls the plug, which is how the appliance
+	// is switched off. The path has to be the boot partition — the root is a
+	// read-only overlay (NFR-9).
+	if !strings.HasPrefix(cfg.StateFile, "/boot/firmware/") {
+		t.Errorf("state_file = %q, want a path on the FAT32 boot partition", cfg.StateFile)
 	}
 }

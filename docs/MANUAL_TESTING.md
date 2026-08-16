@@ -51,14 +51,20 @@ TV=1 SOURCE=camera ./scripts/manual-test.sh
 `internal/screen`, the same JPEG-decode → mirror-flip → vsync-present code
 that drives the HDMI output on the Pi — in a desktop window (`--windowed`).
 This is the closest possible answer to "what would the connected TV show",
-including FR-2 mirror flip (toggle it in the web UI and watch the window)
+including FR-2 mirror flip (the switch on that mirror's card, and watch the
+window)
 and the warm-up / hard-cut behavior at native frame rate. Closing the
 window shuts the binary down cleanly.
 
 One-off without the script: `make run-tv`.
 
-Prerequisites: macOS `brew install sdl2 sdl2_image pkgconf`; Linux
-`apt install libsdl2-dev libsdl2-image-dev`. Only pixel timing differs from
+Prerequisites: `mise run deps` installs them on macOS, and `mise run
+deps:check` says whether this machine can run the tagged lanes at all without
+installing anything. By hand: macOS `brew install sdl2 sdl2_image sdl2_ttf
+pkgconf ffmpeg`; Linux `apt install libsdl2-dev libsdl2-image-dev
+libsdl2-ttf-dev pkg-config ffmpeg`. (The typeface library is the one that gets
+missed — nothing links it until the delay badge is drawn in real type, and
+without it the `sdl` tag does not build at all.) Only pixel timing differs from
 the appliance (your desktop GPU vs. the Pi's KMSDRM) — measured budgets
 still come from spike S-1 on real hardware.
 
@@ -69,7 +75,7 @@ still come from spike S-1 on real hardware.
 | MT-1 | Start preview, switch view live ↔ delayed | Delayed bar lags the live bar by the configured delay (2 s after setup) | FR-1 |
 | MT-2 | Drag the delay slider to 5 s, watch the delayed view | The view jumps *back* — recent past replays once; no freeze | FR-3, FR-4 |
 | MT-3 | Drag the delay down to 1 s | The view jumps *forward*; nothing shows twice | FR-4 |
-| MT-4 | Right after a fresh start: set delay 60 s | "warming up" badge in the status panel; delayed view shows the oldest frame and crawls forward | FR-10 |
+| MT-4 | Right after a fresh start: set delay 60 s | Card and status panel read "Ready in Ns", counting down as the buffer fills and clearing when it is deep enough; the slider's track shows how much of its range is buffered; delayed view shows the oldest frame. The picture is a **still image** for the whole window — that is the requirement, and the countdown is what makes it legible rather than alarming | FR-10 |
 | MT-5 | Click "Download last 60 s" (mp4) | Download appears in the browser within ~1 s and keeps growing while the encode runs (the clip streams); the finished file plays (QuickTime/browser/phone), duration = what was buffered, content matches what the delayed view showed | FR-5 |
 | MT-6 | `curl -i "…/api/v1/clip?seconds=0"` (the UI no longer offers a length) | 422 problem+json with the limits | FR-11 |
 | MT-7 | Start a full-buffer download; while it runs, watch "dropped frames" in the status panel | Stays 0 during the export | FR-6 |
@@ -78,7 +84,16 @@ still come from spike S-1 on real hardware.
 Notes:
 - **Mirror flip (FR-2)** is applied by the SDL display renderer, *not* by the
   preview stream — observe it in the `TV=1` display window (or on the real
-  HDMI output), not in the browser preview.
+  HDMI output), not in the browser preview. It is **per unit**: the switch on
+  a card flips the mirror that card belongs to, and the one on the settings
+  page flips whichever unit served that page. With more than one unit on the
+  network, a flip that "does nothing" is almost always the wrong card — check
+  the name on it before suspecting the renderer (UI-15).
+- **Settings survive a restart (FR-18)** only where `state_file` is set, which
+  is the appliance's config and not the defaults: `make run-tv` and
+  `make run-synth` deliberately keep nothing, so a dev run always starts from
+  a known state. To exercise the real path, run with a config carrying a
+  `state_file` and pull the process out from under itself with `kill -9`.
 - Clean shutdown: Ctrl-C in the script terminal — the binary must exit by
   itself (no kill -9), which the e2e suite also checks.
 
@@ -92,6 +107,18 @@ then run the same checklist against `http://zeitspiegel.local`
   configured delay + `min_latency_ms` ± 1 frame (TESTPLAN M3).
 - MT-9: pull the plug mid-operation; power on → mirror back ≤ 25 s (FR-12,
   NFR-9).
+- MT-12: boot a unit with **no HDMI cable attached**. It must come up
+  reachable anyway: `zeitspiegel.local` (or the host's card list) answers, the
+  unit takes its place on the network, and `/debug/vars`
+  `zeitspiegel_display` shows `open:false` with the SDL error and a climbing
+  attempt count. Plug the cable in with the unit running → the mirror starts
+  within a few seconds, no restart, no power cycle (FR-17). Then unplug it
+  again: the unit keeps serving.
+- MT-13: with the unit warmed up and mirroring, move the delay slider from
+  5 s to 30 s. The on-screen badge must follow **immediately**, even while the
+  picture holds on the oldest frame, and the `ready in Ns` line under it must
+  count down to when the buffer catches up (FR-13, FR-10). A badge that stays
+  on the old number is the bug UT-44 covers.
 - MT-10: unplug the camera USB mid-run → status degraded, /healthz 503;
   replug → picture returns without restart (NFR-5).
 

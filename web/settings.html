@@ -22,6 +22,11 @@
     <h2>Status</h2>
     <div id="status">
       <dl>
+        <!-- Which unit this page is about, first. Everything below is one
+             mirror's, and on a network with three of them a page that never
+             says whose numbers these are is a page you can act on by
+             mistake. -->
+        <dt>Mirror</dt>        <dd id="st-name">&ndash;</dd>
         <dt>Delay</dt>         <dd id="st-delay">&ndash;</dd>
         <dt>Frame rate</dt>    <dd id="st-fps">&ndash;</dd>
         <dt>Resolution</dt>    <dd id="st-resolution">&ndash;</dd>
@@ -41,9 +46,11 @@
       <span>Mirror flip</span>
       <button type="button" id="mirror-toggle" aria-pressed="false">Off</button>
     </div>
-    <p class="hint">The flip applies to the mirror display (and the
-    &ldquo;delayed mirror&rdquo; on the TV), not to saved clips or the live
-    preview.</p>
+    <p class="hint">This is <strong>this</strong> mirror&rsquo;s flip &mdash;
+    the unit serving this page. Every mirror has its own on its card on the
+    <a href="/">control page</a>. It applies to the picture on the TV, not to
+    saved clips or the live preview. The setting is kept, so it is still there
+    after the power has been off.</p>
   </section>
 </main>
 
@@ -99,7 +106,15 @@
   function applyStatus(st) {
     offBadge.hidden = true;
     warmBadge.hidden = !st.warming_up;
+    // Same countdown the cards carry: while the buffer is shorter than the
+    // delay the mirror holds a still frame (FR-10), and this page is where
+    // somebody looks when that reads as a crash.
+    var warmLeft = Math.ceil((st.delay_s || 0) - ((st.buffer && st.buffer.filled_s) || 0));
+    warmBadge.textContent = warmLeft > 0 ? "Ready in " + warmLeft + " s" : "Warming up";
 
+    // A unit that has not named itself is still "this one" — the page is
+    // served by it either way.
+    $("st-name").textContent       = st.name || "this mirror";
     $("st-delay").textContent      = fmtSecs(st.delay_s) + " s";
     // fps is the camera's real rate now, not a round profile nominal — a
     // 30000/1001 device reports 29.97002997…, so trim it to one decimal.
@@ -117,47 +132,65 @@
       : "0%";
   }
 
-  function pollStatus() {
-    fetch("/api/v1/status").then(function (res) {
-      if (!res.ok) throw new Error("status " + res.status);
-      return res.json();
-    }).then(applyStatus).catch(function () {
-      offBadge.hidden = false;
-    });
-  }
-
-  pollStatus();
-  setInterval(pollStatus, 1000);
-
   // ---------- mirror flip ----------
+  // The flip is the unit's setting, not this page's: the wall tablet, the
+  // dancer's phone and the TV all have to agree about it. So it is read on
+  // every poll rather than once at load — a page that read it once shows a
+  // stale toggle for as long as it stays open, and computes its next click
+  // from that stale value, turning the flip back on with the click meant to
+  // turn it off (UI-14).
+  //
+  // It arrives inside /status rather than from a second poll of /config: the
+  // settings a unit is running under are part of its status, and one request
+  // per second beats two over a phone's link to the appliance's own AP.
+  // Writes still go to PATCH /api/v1/config.
   var mirrorFlip = false;
+
+  // writes counts the writes this page has started. A read carries the count
+  // it was made at, and its config is dropped if a write has happened since:
+  // that answer describes the unit from before the write, and applying it
+  // would bounce the toggle back for a whole poll interval. This is the
+  // toggle's version of the slider's hold-off (UI-4) — a click has no drag
+  // to be recognised by, so the ordering is tracked instead of the finger.
+  // Only the config is dropped; the rest of the status is not a thing this
+  // page writes, so a stale read of it is merely one poll old.
+  var writes = 0;
+
   function renderMirror() {
     mirrToggle.textContent = mirrorFlip ? "On" : "Off";
     mirrToggle.setAttribute("aria-pressed", String(mirrorFlip));
   }
-  function loadConfig() {
-    fetch("/api/v1/config").then(function (res) {
-      if (!res.ok) throw new Error("config " + res.status);
+  function applyConfig(cfg) {
+    mirrorFlip = !!cfg.mirror_flip;
+    renderMirror();
+  }
+
+  function pollStatus() {
+    var at = writes;
+    fetch("/api/v1/status").then(function (res) {
+      if (!res.ok) throw new Error("status " + res.status);
       return res.json();
-    }).then(function (cfg) {
-      mirrorFlip = !!cfg.mirror_flip;
-      renderMirror();
+    }).then(function (st) {
+      applyStatus(st);
+      if (at === writes && st.config) applyConfig(st.config);
     }).catch(function () {
-      // Offline badge from the status poll covers unreachable server.
+      offBadge.hidden = false;
     });
   }
+
   mirrToggle.addEventListener("click", function () {
-    var want = !mirrorFlip;
+    writes++;
     fetch("/api/v1/config", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mirror_flip: want })
+      body: JSON.stringify({ mirror_flip: !mirrorFlip })
     }).then(function (res) {
-      if (res.ok) {
-        mirrorFlip = want;
-        renderMirror();
-        return;
-      }
+      // The answer is the whole config as the unit now holds it, so the
+      // toggle shows what was actually applied rather than what was asked.
+      if (res.ok) return res.json().then(function (cfg) {
+        writes++;
+        applyConfig(cfg);
+      });
       return res.json().catch(function () { return null; }).then(function (body) {
         showToast(problemDetail(body, "Could not change mirror setting"));
       });
@@ -165,7 +198,9 @@
       showToast("Could not reach server");
     });
   });
-  loadConfig();
+
+  pollStatus();
+  setInterval(pollStatus, 1000);
 })();
 </script>
 </body>

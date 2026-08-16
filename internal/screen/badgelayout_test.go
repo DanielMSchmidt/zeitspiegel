@@ -120,3 +120,47 @@ func TestBadgeLayoutTextWrapsMeasuredText(t *testing.T) {
 		t.Errorf("oversized text pushed the box off-screen: %+v", wide)
 	}
 }
+
+// UT-45: the warm-up line sits directly under the delay badge, right-aligned
+// to the same edge. Two boxes drawn independently in the same corner would
+// overlap, and a mirror that is already showing a still frame is the worst
+// place to stack unreadable text.
+func TestBadgeStackUnderKeepsTheLinesApart(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		w, h int
+	}{
+		{"720p", 1280, 720},
+		{"1080p", 1920, 1080},
+		{"4K", 3840, 2160},
+		{"degenerate", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := badgeLayout(tc.w, tc.h, 8)   // "25s delay"
+			second := badgeLayout(tc.w, tc.h, 12) // "ready in 12s" — wider
+			stacked := stackUnder(first, second)
+
+			if stacked.Y < first.Y+first.H {
+				t.Errorf("second line at y=%d overlaps the badge ending at y=%d", stacked.Y, first.Y+first.H)
+			}
+			// Right-aligned to the badge's own edge, so the two read as one
+			// block rather than as two things that happen to be near each
+			// other. A line too wide to sit there is pushed flush left rather
+			// than off the screen — the degenerate case, where the renderer
+			// reported a size nothing fits in.
+			if stacked.X < 0 {
+				t.Errorf("second line starts off-screen at x=%d", stacked.X)
+			}
+			if got, want := stacked.X+stacked.W, first.X+first.W; got != want && stacked.X != 0 {
+				t.Errorf("second line right edge %d, badge right edge %d", got, want)
+			}
+			// Everything else about the line is untouched.
+			if stacked.W != second.W || stacked.H != second.H || stacked.GlyphW != second.GlyphW {
+				t.Errorf("stackUnder resized the line: %+v, want the size of %+v", stacked, second)
+			}
+			if tc.w > 0 && tc.h > 0 && (stacked.X < 0 || stacked.Y+stacked.H > tc.h) {
+				t.Errorf("second line %+v escapes a %dx%d screen", stacked, tc.w, tc.h)
+			}
+		})
+	}
+}

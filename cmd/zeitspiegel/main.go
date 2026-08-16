@@ -103,6 +103,30 @@ func run() error {
 	logger.Info("zeitspiegel starting", "version", buildVersion(), "log_level", lvl.Level())
 	expvar.NewString("zeitspiegel_version").Set(buildVersion())
 
+	// Settings a guest changed on this unit before it was last unplugged
+	// (FR-18). They are laid over the config file and folded back into it, so
+	// everything downstream — the ring buffer's budget, the camera open, the
+	// display's flip — starts from what the unit was actually left set to.
+	//
+	// A file that cannot be read or does not validate costs the unit its
+	// stored settings and nothing else: booting the defaults is a mirror
+	// somebody has to re-adjust, refusing to boot is a dark unit in a venue.
+	overrides, err := config.LoadOverrides(cfg.StateFile)
+	if err != nil {
+		logger.Error("stored settings unreadable, booting on the config file", "path", cfg.StateFile, "err", err)
+		overrides = config.Patch{}
+	}
+	if (overrides != config.Patch{}) {
+		rt, err := cfg.Runtime().WithPatch(overrides)
+		if err != nil {
+			logger.Error("stored settings invalid, booting on the config file", "path", cfg.StateFile, "err", err)
+			overrides = config.Patch{}
+		} else {
+			cfg = cfg.WithRuntime(rt)
+			logger.Info("stored settings applied", "path", cfg.StateFile, "mirror", cfg.MirrorFlip, "profile", cfg.Profile)
+		}
+	}
+
 	// Who this unit is and, when there is a fleet, how it finds its place on
 	// the network (FR-15, E-8). Resolved before anything else so the id is
 	// in the log from the first line.
@@ -121,7 +145,7 @@ func run() error {
 	eng.SetDelay(time.Duration(cfg.DefaultDelayS * float64(time.Second)))
 
 	restart := &atomic.Bool{}
-	var store *runtimeStore // assigned below, after the display exists
+	var store *runtimeStore // assigned below; the clipper closes over it
 
 	// One export slot, niced: x264 ultrafast is multi-threaded and the Pi 5
 	// has no hardware encoder (§D4) — a second concurrent export competes
@@ -145,34 +169,42 @@ func run() error {
 		ttfb:  expvar.NewFloat("zeitspiegel_export_ttfb_seconds"),
 	}
 
-	displayStart := time.Now()
-	display, closeDisplay, err := openDisplay(cfg, *windowed)
-	if err != nil {
-		return err
+	// The display is acquired by the main loop below, not here. A unit whose
+	// HDMI cable is out has no connected DRM connector and SDL/KMSDRM refuses
+	// to start; opening it before the HTTP listener made that fatal, and a
+	// field unit whose TV was on the other mirror spent the session invisible
+	// — no control page, no radio, nothing to ask (FR-17). Everything that
+	// does not need pixels starts first; the screen is picked up whenever it
+	// turns up.
+	acq := &displayAcquirer{
+		open:   func() (engine.Display, func() error, error) { return openDisplay(cfg, *windowed) },
+		every:  displayRetryEvery,
+		logger: logger,
 	}
-	logger.Info("display opened", "took", time.Since(displayStart).Round(time.Millisecond))
-	if diag := displayDiagFunc(display); diag != nil {
-		d := diag()
-		// software=true or refresh_hz≠60 each explain judder on their own.
-		logger.Info("renderer", "name", d["renderer"], "software", d["software"], "refresh_hz", d["refresh_hz"])
-		expvar.Publish("zeitspiegel_display", expvar.Func(func() any { return diag() }))
-	}
-	if *windowed && display == nil {
-		return errors.New("--windowed needs a display build (go build -tags sdl, see make build-tv)")
-	}
-	if closeDisplay != nil {
-		defer closeDisplay()
-	}
-	// Paint the splash immediately so HDMI shows something while the
-	// camera is enumerating — the render loop will keep repainting it
-	// every tick until the first real frame arrives.
-	if splash := displaySplashFunc(display); splash != nil {
-		if err := splash(); err != nil {
-			logger.Error("initial splash", "err", err)
+	var displayDiag atomic.Pointer[func() map[string]any]
+	expvar.Publish("zeitspiegel_display", expvar.Func(func() any {
+		out := acq.status()
+		if diag := displayDiag.Load(); diag != nil {
+			for k, v := range (*diag)() {
+				out[k] = v
+			}
+		}
+		return out
+	}))
+
+	store = &runtimeStore{rt: cfg.Runtime(), buf: buf, restart: restart, overrides: overrides}
+	if cfg.StateFile != "" {
+		// A failed write is logged, not returned: the setting is already in
+		// force on this unit, and refusing the guest's change because a card
+		// is write-protected would be the wrong half to undo. The line names
+		// the file, which is what makes "it forgot again" diagnosable from a
+		// journal.
+		store.save = func(p config.Patch) {
+			if err := config.SaveOverrides(cfg.StateFile, p); err != nil {
+				logger.Error("settings not persisted", "path", cfg.StateFile, "err", err)
+			}
 		}
 	}
-
-	store = &runtimeStore{rt: cfg.Runtime(), buf: buf, restart: restart, setMirror: displayMirrorFunc(display)}
 
 	var lastGapLog atomic.Int64 // unix ns of the last gap log line
 	sup := capture.New(capture.Options{
@@ -337,55 +369,72 @@ func run() error {
 	}()
 
 	// Render loop on the main goroutine (SDL needs the main thread; the
-	// sdl-tagged file locks it in init). Headless builds idle here.
+	// sdl-tagged file locks it in init). Until a display exists the same loop
+	// keeps trying to open one; a headless build stops the ticker and idles.
 	var runErr error
-	if display != nil {
-		logger.Info("display loop starting", "tick_fps", displayTickFPS, "mirror", cfg.MirrorFlip, "windowed", *windowed)
-		rl := &renderLoop{
-			eng:      eng,
-			display:  display,
-			logger:   logger,
-			metrics:  loopM,
-			now:      time.Now,
-			budget:   time.Second / displayTickFPS,
-			start:    start,
-			pump:     displayEvents(display),
-			setDelay: displayDelayFunc(display),
-			splash:   displaySplashFunc(display),
+	var closeDisplay func() error
+	defer func() {
+		if closeDisplay != nil {
+			closeDisplay()
 		}
-		// Tick at the highest nominal profile rate regardless of the boot
-		// profile: a runtime profile change (PATCH /config) can raise the
-		// capture rate to 60 fps and this ticker is created once. Extra
-		// ticks are nearly free — the engine renders only when the selected
-		// frame changed.
-		tick := time.NewTicker(time.Second / displayTickFPS)
-		defer tick.Stop()
-	loop:
-		for {
-			select {
-			case <-ctx.Done():
-				break loop
-			case err := <-errCh:
-				runErr = err
-				stop()
-				break loop
-			case t := <-tick.C:
-				// The tick's fire time drives frame selection: a tick that
-				// starts late (previous render overran) must not also shift
-				// which frame is chosen.
-				if rl.step(t) {
-					stop()
-					break loop
-				}
-			}
-		}
-	} else {
-		logger.Info("headless (no sdl build tag): preview via web UI", "addr", cfg.Bind)
+	}()
+	rl := &renderLoop{
+		eng:     eng,
+		logger:  logger,
+		metrics: loopM,
+		now:     time.Now,
+		budget:  time.Second / displayTickFPS,
+		start:   start,
+	}
+	// Tick at the highest nominal profile rate regardless of the boot
+	// profile: a runtime profile change (PATCH /config) can raise the
+	// capture rate to 60 fps and this ticker is created once. Extra
+	// ticks are nearly free — the engine renders only when the selected
+	// frame changed.
+	tick := time.NewTicker(time.Second / displayTickFPS)
+	defer tick.Stop()
+	// Stop() does not drain a tick already in the channel, so the headless
+	// branch below can be entered twice; it must not say so twice.
+	headlessNoted := false
+loop:
+	for {
 		select {
 		case <-ctx.Done():
+			break loop
 		case err := <-errCh:
 			runErr = err
 			stop()
+			break loop
+		case t := <-tick.C:
+			if rl.display == nil {
+				display, closeFn := acq.try(t)
+				if display == nil {
+					if acq.status()["headless"] == true && !headlessNoted {
+						if *windowed {
+							runErr = errors.New("--windowed needs a display build (go build -tags sdl, see make build-tv)")
+							stop()
+							break loop
+						}
+						// Nothing to wait for on this build: stop ticking and
+						// idle until shutdown.
+						headlessNoted = true
+						logger.Info("headless (no sdl build tag): preview via web UI", "addr", cfg.Bind)
+						tick.Stop()
+					}
+					continue
+				}
+				closeDisplay = closeFn
+				attachDisplay(rl, display, store, logger, &displayDiag)
+				logger.Info("display loop starting", "tick_fps", displayTickFPS,
+					"mirror", store.Current().MirrorFlip, "windowed", *windowed)
+			}
+			// The tick's fire time drives frame selection: a tick that
+			// starts late (previous render overran) must not also shift
+			// which frame is chosen.
+			if rl.step(t) {
+				stop()
+				break loop
+			}
 		}
 	}
 

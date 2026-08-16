@@ -22,14 +22,54 @@ type renderLoop struct {
 	start   time.Time        // process start, for the first-frame log
 
 	// optional display capabilities (nil on headless builds)
-	pump     func() bool
-	setDelay func(time.Duration)
-	splash   func() error
+	pump      func() bool
+	setDelay  func(time.Duration)
+	setWarmup func(time.Duration)
+	splash    func() error
+	// repaint re-presents the frame already on screen with the current
+	// overlay, without decoding anything. Held ticks use it; see overlay.
+	repaint func() error
 
 	prevTick       time.Time
 	firstFrameDone bool
 	lastSelErr     string
 	lastSlowLog    time.Time
+	lastOverlay    overlay
+}
+
+// overlay is everything drawn on top of the frame: the delay badge and the
+// warm-up countdown, both in whole seconds because that is the resolution
+// they are shown at.
+//
+// It exists because the render loop's skip rule is about the *frame* — an
+// unchanged selection is not redrawn (that is what keeps the tick budget) —
+// while the badge and the countdown change on their own schedule. Warm-up is
+// the case where the two diverge for a long stretch: the selected frame is
+// pinned to the oldest one for the whole warm-up window, so without this the
+// badge froze with the picture and a mirror counting down was
+// indistinguishable from a crashed one.
+type overlay struct {
+	delayS  int
+	warmupS int
+}
+
+// warmupRemaining is how much longer the buffer has to fill before it reaches
+// back as far as the delay asks (FR-10). Zero once it does, and zero when
+// there is no frame to measure from — an empty buffer is the splash's stretch,
+// not a countdown.
+//
+// Derived from the tick's own fire time rather than the wall clock, for the
+// same reason frame selection is: a late tick must not also skew the number
+// on screen.
+func warmupRemaining(sel engine.Selection, tickT time.Time, delay time.Duration) time.Duration {
+	if sel.Miss != engine.MissTooEarly || sel.Frame.CaptureTS.IsZero() {
+		return 0
+	}
+	// sel.Frame is the oldest frame buffered; the target sits before it.
+	if d := sel.Frame.CaptureTS.Sub(tickT.Add(-delay)); d > 0 {
+		return d
+	}
+	return 0
 }
 
 // step runs one tick; it reports true when the user closed the window.
@@ -46,11 +86,23 @@ func (l *renderLoop) step(tickT time.Time) (quit bool) {
 	if l.pump != nil && l.pump() { // window closed (dev mode)
 		return true
 	}
+	delay := l.eng.Delay()
 	if l.setDelay != nil {
-		l.setDelay(l.eng.Delay())
+		l.setDelay(delay)
 	}
 
 	sel := l.eng.Tick(tickT)
+	warm := warmupRemaining(sel, tickT, delay)
+	if l.setWarmup != nil {
+		l.setWarmup(warm)
+	}
+	// Whole seconds, matching what the badge and the countdown actually
+	// print: a repaint is only worth a tick when the pixels would differ.
+	// The countdown rounds up the same way screen.formatWarmup does.
+	curOverlay := overlay{
+		delayS:  int(delay / time.Second),
+		warmupS: int((warm + time.Second - 1) / time.Second),
+	}
 	switch sel.Miss {
 	case engine.MissTooEarly:
 		m.missTooEarly.Add(1)
@@ -89,6 +141,7 @@ func (l *renderLoop) step(tickT time.Time) (quit bool) {
 		}
 		m.presented.Add(1)
 		m.heldStreak.Store(0)
+		l.lastOverlay = curOverlay
 		if !l.firstFrameDone {
 			l.firstFrameDone = true
 			l.logger.Info("first frame presented",
@@ -102,6 +155,17 @@ func (l *renderLoop) step(tickT time.Time) (quit bool) {
 			// is judder.
 			m.held.Add(1)
 			maxUint64(&m.heldStreakMax, m.heldStreak.Add(1))
+			// The frame is the same, but the badge or the countdown over it
+			// may not be. Repaint costs a texture copy and a present — no
+			// decode — and only when the text would actually differ.
+			if curOverlay != l.lastOverlay && l.repaint != nil {
+				if err := l.repaint(); err != nil {
+					l.logger.Error("repaint", "err", err)
+					break
+				}
+				m.repaints.Add(1)
+				l.lastOverlay = curOverlay
+			}
 		}
 		if !l.firstFrameDone && l.splash != nil {
 			// Camera is still enumerating / buffer is empty. Repaint the

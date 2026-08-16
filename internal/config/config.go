@@ -17,7 +17,7 @@ type Config struct {
 	Profile        string  `toml:"profile"` // "auto" | "720p60" | "1080p30" (E-2)
 	BufferMaxS     float64 `toml:"buffer_max_s"`
 	BufferMaxBytes int64   `toml:"buffer_max_bytes"`
-	MirrorFlip     bool    `toml:"mirror_flip"`     // FR-2, default on
+	MirrorFlip     bool    `toml:"mirror_flip"`     // FR-2, default off
 	DefaultDelayS  float64 `toml:"default_delay_s"` // FR-3 boot delay; runtime override via API
 
 	// Network keys (FR-15, E-8). Identical on every card — the unit's role
@@ -27,6 +27,13 @@ type Config struct {
 	// by TOML decoding, so already-flashed cards keep booting.)
 	NetworkManage bool   `toml:"network_manage"` // let the binary drive the radio (true only on the appliance)
 	NameFile      string `toml:"name_file"`      // display-name file on the boot partition; empty = identity default
+
+	// StateFile is where runtime settings changed through the API are kept so
+	// they survive a restart (FR-18). It belongs on the boot partition beside
+	// the name file: the appliance's root is a read-only overlay, so anywhere
+	// else is tmpfs and gone at the next power cut. Empty = persistence off,
+	// which is the development default — a laptop has no /boot/firmware.
+	StateFile string `toml:"state_file"`
 
 	// Development aids, off by default. A field unit is sealed and silent;
 	// a bench card can afford to say more, and `make sd-dev` turns these on.
@@ -59,13 +66,19 @@ type Config struct {
 // Default returns the boot defaults (deploy/config.toml overrides for the Pi).
 func Default() Config {
 	return Config{
-		Bind:            ":8080",
-		Source:          "camera",
-		Device:          "auto", // first device that actually streams (UVC cameras also enumerate a metadata-only node)
-		Profile:         "auto", // highest MJPEG resolution the camera offers, capped at 1080p (E-2 rev)
-		BufferMaxS:      120,
-		BufferMaxBytes:  1536 << 20, // 1.5 GiB
-		MirrorFlip:      true,
+		Bind:           ":8080",
+		Source:         "camera",
+		Device:         "auto", // first device that actually streams (UVC cameras also enumerate a metadata-only node)
+		Profile:        "auto", // highest MJPEG resolution the camera offers, capped at 1080p (E-2 rev)
+		BufferMaxS:     120,
+		BufferMaxBytes: 1536 << 20, // 1.5 GiB
+		// Off (FR-2, changed 2026-08-16): the owner watched it on the real
+		// installation and the flipped picture had left and right the wrong
+		// way round for a dancer standing in front of it. Which way is right
+		// depends on how the camera is mounted, so this is a default rather
+		// than a rule — each unit's card can flip its own, and that choice now
+		// survives a restart (FR-18).
+		MirrorFlip:      false,
 		DefaultDelayS:   25, // boot the mirror with a 25 s shift (FR-3 default)
 		ExposureAuto:    true,
 		LogLevel:        "info",

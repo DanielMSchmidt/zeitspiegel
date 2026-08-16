@@ -20,7 +20,7 @@
        the page reads as it always has; with company, every mirror gets the
        same controls (FR-14). -->
   <p class="hint" id="fleet-hint" hidden>Every mirror is its own: the delay,
-  preview and clip in a card only ever change that one.</p>
+  flip, preview and clip in a card only ever change that one.</p>
 
   <div id="units"></div>
 
@@ -46,6 +46,15 @@
     <div class="delay-row">
       <input type="range" class="unit-delay" min="0" max="60" step="0.1" value="0">
       <span class="delay-readout"><span class="unit-delay-value">0.0</span><span class="delay-unit"> s</span></span>
+    </div>
+
+    <!-- The flip belongs on the card, not on the settings page: it changes
+         what one mirror's TV shows, and a page controlling three of them must
+         not have a control that silently means "whichever unit served me"
+         (FR-2, FR-14). -->
+    <div class="switch-row unit-mirror-row">
+      <span>Mirror flip</span>
+      <button type="button" class="unit-mirror" aria-pressed="false">Off</button>
     </div>
 
     <div class="row unit-controls">
@@ -203,10 +212,77 @@
         if (cap > 0 && parseFloat(sliderEl.max) !== cap) {
           sliderEl.max = cap;
         }
+        // How much of the range this mirror can actually serve right now.
+        // The API accepts any delay up to capacity and warms into it, so the
+        // rest of the track is reachable — just not yet, and the track says
+        // so rather than leaving it to be discovered by staring at a frozen
+        // picture.
+        if (cap > 0) {
+          var filled = (st.buffer && st.buffer.filled_s) || 0;
+          var pct = Math.max(0, Math.min(100, Math.round((filled / cap) * 100)));
+          sliderEl.style.setProperty("--buffered", pct + "%");
+        }
         if (draggedSlider !== sliderEl && !debounceTimer && Date.now() > holdOff) {
           sliderEl.value = st.delay_s;
           valueEl.textContent = fmtSecs(st.delay_s);
         }
+      }
+    };
+  }
+
+  // ---------- mirror flip ----------
+  // One mirror's horizontal flip (FR-2). Like the delay, it is that unit's own
+  // setting and is written to that unit's own address.
+  //
+  // It is shared state, not this page's: the wall tablet, the dancer's phone
+  // and the settings page all show the same switch, so it is read on every
+  // poll rather than once at load, and the next click is computed from what
+  // the unit says rather than from what this page loaded with (UI-14).
+  //
+  // `writes` is that guard's other half. A read carries the count it was made
+  // at and is dropped if a write has happened since: that answer describes the
+  // unit from before the click, and applying it would bounce the switch back
+  // for a whole poll interval. It is UI-4's hold-off on a control with no drag
+  // to recognise.
+  function makeMirrorControl(btn, base, note) {
+    var flip = false;
+    var writes = 0;
+
+    function render() {
+      btn.textContent = flip ? "On" : "Off";
+      btn.setAttribute("aria-pressed", String(flip));
+    }
+
+    btn.addEventListener("click", function () {
+      writes++;
+      fetch(base + "/api/v1/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mirror_flip: !flip })
+      }).then(function (res) {
+        // The answer is the config as the unit now holds it, so the switch
+        // shows what was applied rather than what was asked for.
+        if (res.ok) return res.json().then(function (cfg) {
+          writes++;
+          flip = !!cfg.mirror_flip;
+          render();
+        });
+        return res.json().catch(function () { return null; }).then(function (body) {
+          showToast(note(problemDetail(body, "Could not change the mirror flip")));
+        });
+      }).catch(function () {
+        showToast(note("Could not reach mirror"));
+      });
+    });
+
+    return {
+      // at is taken before a status request goes out; apply drops the answer
+      // if a click happened while it was in flight.
+      at: function () { return writes; },
+      apply: function (cfg, at) {
+        if (!cfg || at !== writes) return;
+        flip = !!cfg.mirror_flip;
+        render();
       }
     };
   }
@@ -305,12 +381,14 @@
       prevView:   el.querySelector(".unit-preview-view"),
       preview:    el.querySelector(".unit-preview"),
       format:     el.querySelector(".unit-format"),
-      dlBtn:      el.querySelector(".unit-download")
+      dlBtn:      el.querySelector(".unit-download"),
+      mirrorBtn:  el.querySelector(".unit-mirror")
     };
     if (spec.local) el.setAttribute("data-local", "1");
     if (spec.id) el.setAttribute("data-unit-id", spec.id);
 
     card.delay = makeDelayControl(card.slider, card.value, card.base, note(card));
+    card.mirror = makeMirrorControl(card.mirrorBtn, card.base, note(card));
     card.dlBtn.dataset.label = "Save last 60 s";
     card.dlBtn.textContent = card.dlBtn.dataset.label;
     card.dlBtn.addEventListener("click", function () {
@@ -347,6 +425,7 @@
     card.prevToggle.setAttribute("aria-label",
       (card.previewOn ? "Stop preview of " : "Start preview of ") + card.name);
     card.dlBtn.setAttribute("aria-label", card.dlBtn.dataset.label + " from " + card.name);
+    card.mirrorBtn.setAttribute("aria-label", "Mirror flip for " + card.name);
   }
 
   function previewSrc(card) {
@@ -365,11 +444,30 @@
     relabel(card);
   }
 
-  // applyStatus draws one mirror's own status onto its card.
-  function applyStatus(card, st) {
+  // warmupLabel says how long a warming mirror still has to wait, from the
+  // two numbers /status already carries: the delay asked for and how much
+  // history the buffer actually holds.
+  //
+  // It matters because of what warm-up looks like on the mirror itself. Until
+  // the buffer reaches back as far as the delay, the mirror shows the oldest
+  // frame it has (FR-10) — and that frame does not change while the buffer is
+  // still filling, so the picture is a still image for up to `delay` seconds
+  // and moving this slider appears to do nothing. Without a number on it,
+  // that is indistinguishable from a crash, which is exactly how a field test
+  // read it.
+  function warmupLabel(st) {
+    var filled = (st.buffer && st.buffer.filled_s) || 0;
+    var left = Math.ceil((st.delay_s || 0) - filled);
+    return left > 0 ? "Ready in " + left + " s" : "Warming up";
+  }
+
+  // applyStatus draws one mirror's own status onto its card. `at` is the
+  // card's write count from before the request went out — the settings the
+  // body carries are dropped if the card has written since (UI-14/UI-15).
+  function applyStatus(card, st, at) {
     card.el.classList.remove("offline");
     card.badge.hidden = !st.warming_up;
-    card.badge.textContent = "Warming up";
+    card.badge.textContent = warmupLabel(st);
 
     var cap = (st.buffer && st.buffer.capacity_s) || 0;
     // The download button always grabs the full buffer; keep its label and
@@ -381,6 +479,9 @@
       relabel(card);
     }
     card.delay.apply(st);
+    // The settings a unit runs under ride along with its status, so a card is
+    // one request per second rather than two (REQUIREMENTS §3).
+    card.mirror.apply(st.config, at);
   }
 
   // A mirror that stopped answering stays on screen but obviously inert,
@@ -396,11 +497,12 @@
   unitsBox.appendChild(local.el);
 
   function pollStatus() {
+    var at = local.mirror.at(); // taken before the read, not after it
     fetchJSON("/api/v1/status").then(function (st) {
       if (st.name && st.name !== local.name) setName(local, st.name);
       if (st.unit_id) local.el.setAttribute("data-unit-id", st.unit_id);
       localRole = st.role || "";
-      applyStatus(local, st);
+      applyStatus(local, st, at);
       applyTags();
     }).catch(function () {
       markOffline(local);
@@ -413,8 +515,9 @@
     // A mirror that moved to a new address gets a rebuilt card, since the
     // slider, preview and download all close over the old one.
     if (card.base !== peer.base_url) return false;
+    var at = card.mirror.at();
     fetchJSON(peer.base_url + "/api/v1/status")
-      .then(function (st) { applyStatus(card, st); })
+      .then(function (st) { applyStatus(card, st, at); })
       .catch(function () { markOffline(card); });
     return true;
   }

@@ -110,7 +110,7 @@ say() {
 
     say "zeitspiegel app milestones (the timing line-up)" \
         sh -c 'journalctl -u zeitspiegel.service -b --no-pager --output=short-monotonic 2>&1 |
-               grep -E "display opened|source opened|display loop starting|http listening|first frame presented" |
+               grep -E "display opened|display open failed|source opened|display loop starting|http listening|first frame presented" |
                head -20 || echo "(none of the startup milestones were logged this boot)"'
 
     # --- why the card may carry no journal ----------------------------------

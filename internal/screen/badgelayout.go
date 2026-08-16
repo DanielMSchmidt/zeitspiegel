@@ -2,7 +2,10 @@ package screen
 
 // Atlas geometry — must match internal/screen/fontgen/main.go.
 const (
-	atlasOrder = "0123456789s delay"
+	// Appended to, never reordered: a cell's index is its position here, so
+	// moving one would silently repaint every badge with the wrong glyphs.
+	// UT-45 asserts the badge never emits a rune this string lacks.
+	atlasOrder = "0123456789s delayrin"
 	glyphW     = 14
 	glyphH     = 24
 
@@ -65,6 +68,22 @@ func badgeLayoutText(screenW, screenH, textW, textH int) badgeRect {
 		b.Y = 0
 	}
 	return b
+}
+
+// stackUnder moves line directly below above, right-aligned to the same edge,
+// leaving one inner padding between them. Both boxes are laid out for the
+// top-right corner on their own, so without this the warm-up line would be
+// drawn on top of the delay badge.
+//
+// The gap comes from the badge's own padding, so the block breathes the same
+// amount at 720p as at 4K.
+func stackUnder(above, line badgeRect) badgeRect {
+	line.Y = above.Y + above.H + above.PadInner
+	line.X = above.X + above.W - line.W
+	if line.X < 0 {
+		line.X = 0
+	}
+	return line
 }
 
 // badgeRect is where the delay badge goes and how big its type is, in pixels.

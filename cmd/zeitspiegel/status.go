@@ -60,6 +60,9 @@ func (s *sysStatus) Status() httpapi.Status {
 		MinLatencyMS:  minLatencyMS,
 		WarmingUp:     warming,
 		UptimeS:       time.Since(s.start).Seconds(),
+		// The same snapshot the capacity and the profile above came from, so
+		// the body describes one moment rather than two reads of the config.
+		Config: rt,
 	}
 	// Identity is what labels this unit's card on the combined page, and
 	// role is what marks which unit is currently hosting the network.
@@ -86,11 +89,37 @@ func profileResolution(profile string) (int, int) {
 // runtimeStore owns the runtime config (single-writer semantics,
 // REQUIREMENTS §3): HTTP PATCHes are serialized here; readers get snapshots.
 type runtimeStore struct {
-	mu        sync.Mutex
-	rt        config.Runtime
-	buf       *ringbuf.Buffer
-	restart   *atomic.Bool
-	setMirror func(bool) // nil when headless
+	mu      sync.Mutex
+	rt      config.Runtime
+	buf     *ringbuf.Buffer
+	restart *atomic.Bool
+	// setMirror is nil until a display exists — headless, or a unit still
+	// waiting for its HDMI cable (FR-17). Set through attachMirror.
+	setMirror func(bool)
+
+	// overrides is everything ever set on this unit through the API, and save
+	// writes it down so the next boot starts from it (FR-18). save is nil when
+	// nothing is configured to persist to — a development run on a laptop. It
+	// is called under the lock, which is what keeps the file's last write and
+	// the store's current value the same decision; the writes are rare (only
+	// an actual change) and go to a card, so a failure is the closure's to log
+	// rather than the guest's to see: the setting has already taken effect.
+	overrides config.Patch
+	save      func(config.Patch)
+}
+
+// attachMirror wires a newly opened display's mirror toggle in, and hands it
+// the flip that is in force rather than the one the config file booted with.
+// The control page answers from boot now, so a guest can turn the mirroring
+// off on a unit that has no screen yet; the screen must come up agreeing with
+// what /api/v1/config already reports.
+func (s *runtimeStore) attachMirror(setMirror func(bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setMirror = setMirror
+	if setMirror != nil {
+		setMirror(s.rt.MirrorFlip)
+	}
 }
 
 func (s *runtimeStore) Current() config.Runtime {
@@ -111,7 +140,17 @@ func (s *runtimeStore) Apply(p config.Patch) (config.Runtime, error) {
 	if err != nil {
 		return config.Runtime{}, err
 	}
+	if rt == old {
+		return rt, nil // nothing moved: no side effects, and nothing to write
+	}
 	s.rt = rt
+
+	// Written down before the side effects, because this is the value the unit
+	// is now running under and the next boot has to agree with it.
+	if s.save != nil {
+		s.overrides = s.overrides.Merge(p)
+		s.save(s.overrides)
+	}
 
 	if rt.MirrorFlip != old.MirrorFlip && s.setMirror != nil {
 		s.setMirror(rt.MirrorFlip)

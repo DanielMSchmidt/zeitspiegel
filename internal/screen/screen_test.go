@@ -172,3 +172,64 @@ func TestFrameTextureReuseAndInfo(t *testing.T) {
 		t.Error("Info().Renderer is empty, want the SDL renderer name")
 	}
 }
+
+// UT-45 (sdl side): Repaint puts the frame already on screen back up with a
+// current overlay and without touching the decoder — this is what a held
+// tick calls when only the badge or the countdown changed.
+func TestRepaintReusesTheFrameAlreadyOnScreen(t *testing.T) {
+	s := openDummy(t)
+	src := synth.NewSource(30, time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC))
+	if err := s.Render(src.Next()); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	before := s.TextureRecreates()
+
+	s.SetDelay(25 * time.Second)
+	s.SetWarmup(12 * time.Second)
+	if err := s.Repaint(); err != nil {
+		t.Fatalf("repaint: %v", err)
+	}
+	s.SetWarmup(0) // countdown finished: the line comes off
+	if err := s.Repaint(); err != nil {
+		t.Fatalf("repaint without countdown: %v", err)
+	}
+	if got := s.TextureRecreates(); got != before {
+		t.Errorf("TextureRecreates() = %d after repaints, want %d — a repaint must not re-upload the frame", got, before)
+	}
+	// And the real render path still works afterwards.
+	if err := s.Render(src.Next()); err != nil {
+		t.Fatalf("render after repaint: %v", err)
+	}
+}
+
+// UT-45 (sdl side): a screen with nothing on it yet is left alone rather than
+// blanked. Repaint is called from the held branch of the render loop, and
+// wiping a live mirror to draw a caption would be a worse bug than the stale
+// caption it fixes.
+func TestRepaintBeforeAnyFrameIsANoop(t *testing.T) {
+	s := openDummy(t)
+	s.SetWarmup(5 * time.Second)
+	if err := s.Repaint(); err != nil {
+		t.Fatalf("repaint on a fresh display: %v", err)
+	}
+}
+
+// UT-45 (sdl side): the warm-up countdown draws through both text paths —
+// the installed typeface and, when there is none, the bitmap atlas, which
+// errors on any rune it does not have a cell for.
+func TestWarmupLineDraws(t *testing.T) {
+	s := openDummy(t)
+	src := synth.NewSource(30, time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC))
+	s.SetDelay(25 * time.Second)
+	for _, warm := range []time.Duration{
+		30 * time.Second, 9 * time.Second, 500 * time.Millisecond, 0, 4 * time.Hour,
+	} {
+		s.SetWarmup(warm)
+		if err := s.Render(src.Next()); err != nil {
+			t.Fatalf("render with %v of warm-up left: %v", warm, err)
+		}
+		if err := s.Splash(); err != nil {
+			t.Fatalf("splash with %v of warm-up left: %v", warm, err)
+		}
+	}
+}

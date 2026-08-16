@@ -91,10 +91,17 @@ input[type="range"] {
   margin: 0;
   min-width: 0;
 }
+/* The lit part of the track is the history this mirror actually holds; the
+   rest is delay it would have to warm up into (FR-10). --buffered is set per
+   slider from that unit's own buffer.filled_s, and defaults to the whole
+   track so a page that has not polled yet does not imply an empty buffer. */
+input[type="range"] { --buffered: 100%; }
 input[type="range"]::-webkit-slider-runnable-track {
   height: 8px;
   border-radius: 4px;
-  background: var(--panel-edge);
+  background: linear-gradient(to right,
+    var(--accent-track, #3a4a6b) 0 var(--buffered),
+    var(--panel-edge) var(--buffered) 100%);
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -109,7 +116,9 @@ input[type="range"]::-webkit-slider-thumb {
 input[type="range"]::-moz-range-track {
   height: 8px;
   border-radius: 4px;
-  background: var(--panel-edge);
+  background: linear-gradient(to right,
+    var(--accent-track, #3a4a6b) 0 var(--buffered),
+    var(--panel-edge) var(--buffered) 100%);
 }
 input[type="range"]::-moz-range-thumb {
   width: 32px;

@@ -204,6 +204,16 @@ back.
   ship with it; venue cards do not, because the persistent journal is meant to
   be the one write path (NFR-9). `make sd-logs` reports which mode the card
   was in.
+- **Settings a guest changed** (the mirror flip, the profile, the buffer
+  length) are kept in `/boot/firmware/zeitspiegel-settings.json` and applied
+  over `/etc/zeitspiegel/config.toml` at the next boot (FR-18) — the plug is
+  the off switch, so a setting that did not survive it would not survive
+  anything. Only the keys somebody actually changed are in the file, so
+  everything else still comes from the config file. To put a unit back to its
+  defaults, delete that file with the card in a reader (or from the unit, if
+  you can reach it); to see what a unit was left set to, read it — it is plain
+  JSON on the FAT partition, no ext4 reader needed. `make sd-logs` picks it up
+  with the rest of the boot partition.
 - A unit you are actively debugging belongs on a **development card**:
   `make sd-dev NAME="Bench"` bakes and flashes the same image with the
   first-boot seal left off. The root stays writable, so `/var/log/journal`

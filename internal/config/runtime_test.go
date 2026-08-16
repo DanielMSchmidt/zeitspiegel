@@ -12,15 +12,15 @@ func ptr[T any](v T) *T { return &v }
 // Runtime config + PATCH semantics (REQUIREMENTS §3, FR-9).
 func TestRuntimeWithPatch(t *testing.T) {
 	r := config.Default().Runtime()
-	if r.Profile != "auto" || !r.MirrorFlip {
+	if r.Profile != "auto" || r.MirrorFlip {
 		t.Fatalf("runtime from defaults = %+v", r)
 	}
 
-	r2, err := r.WithPatch(config.Patch{Profile: ptr("1080p30"), MirrorFlip: ptr(false)})
+	r2, err := r.WithPatch(config.Patch{Profile: ptr("1080p30"), MirrorFlip: ptr(true)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r2.Profile != "1080p30" || r2.MirrorFlip {
+	if r2.Profile != "1080p30" || !r2.MirrorFlip {
 		t.Errorf("patched = %+v", r2)
 	}
 	if r2.BufferMaxS != r.BufferMaxS {

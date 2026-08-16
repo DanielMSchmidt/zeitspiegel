@@ -50,6 +50,13 @@ type Status struct {
 	UnitID string `json:"unit_id"`
 	Name   string `json:"name"`
 	Role   string `json:"role"`
+
+	// Config is what GET /api/v1/config answers with, embedded so a page
+	// watching a unit polls once instead of twice — the settings the unit is
+	// running under are part of its status, and the two were always read
+	// from the same snapshot anyway. Writes still go to PATCH
+	// /api/v1/config; this is the read side only (UT-46, UI-14).
+	Config config.Runtime `json:"config"`
 }
 
 // StatusProvider supplies the composed system status (wired in cmd).

@@ -335,3 +335,238 @@ test("UI-10 a rejected delay surfaces the problem+json detail", async (t) => {
   );
   assert.equal(await ui.page.locator("#toast").isVisible(), true);
 });
+
+// UI-13: a warming mirror shows a still frame — that is FR-10 working — but
+// the field report was "I changed the delay, nothing happened, the picture
+// froze, it looked like a crash". The card says how long the wait is, so a
+// frozen picture reads as a countdown.
+test("UI-13 a warming card counts down to when the delay is reachable", async (t) => {
+  const ui = await openUI({
+    local: {
+      unit_id: "unit-a",
+      name: "Corner",
+      delay_s: 25,
+      warming_up: true,
+      buffer: { capacity_s: 60, filled_s: 13, bytes: 1 },
+    },
+  });
+  t.after(() => ui.close());
+
+  await until(async () => (await ui.cards().count()) === 1, "one card");
+  const badge = ui.localCard().locator(".unit-badge");
+  await until(async () => (await badge.textContent()) === "Ready in 12 s", "the countdown");
+  assert.equal(await badge.isVisible(), true);
+
+  // The buffer fills; the wait shrinks with it.
+  ui.fleet.unit("unit-a").status.buffer.filled_s = 21.4;
+  await until(async () => (await badge.textContent()) === "Ready in 4 s", "the shorter countdown");
+
+  // Once the buffer reaches back far enough the badge goes away entirely.
+  const st = ui.fleet.unit("unit-a").status;
+  st.buffer.filled_s = 60;
+  st.warming_up = false;
+  await until(async () => (await badge.isHidden()), "the badge cleared");
+});
+
+// UI-13: raising the delay past what is buffered is allowed — the mirror
+// warms into it — but the slider says which part of its range is not there
+// yet, so nobody has to discover it by watching a still picture.
+test("UI-13 the slider marks the range the buffer cannot serve yet", async (t) => {
+  const ui = await openUI({
+    local: {
+      unit_id: "unit-a",
+      name: "Corner",
+      delay_s: 5,
+      buffer: { capacity_s: 60, filled_s: 15, bytes: 1 },
+    },
+  });
+  t.after(() => ui.close());
+
+  await until(async () => (await ui.cards().count()) === 1, "one card");
+  const slider = ui.localCard().locator(".unit-delay");
+  const buffered = () => slider.evaluate((el) => el.style.getPropertyValue("--buffered"));
+
+  await until(async () => (await buffered()) === "25%", "15 s of a 60 s range");
+
+  ui.fleet.unit("unit-a").status.buffer.filled_s = 60;
+  await until(async () => (await buffered()) === "100%", "a full buffer");
+});
+
+// UI-13: a mirror that stopped answering is Offline first and foremost — a
+// countdown on a card nobody can reach would be a guess presented as fact.
+test("UI-13 offline beats the countdown on the same badge", async (t) => {
+  const ui = await openUI({
+    local: { unit_id: "unit-a", name: "Corner" },
+    peers: [
+      {
+        id: "unit-b",
+        name: "Barre",
+        status: { delay_s: 30, warming_up: true, buffer: { capacity_s: 60, filled_s: 0, bytes: 0 } },
+      },
+    ],
+  });
+  t.after(() => ui.close());
+
+  await until(async () => (await ui.cards().count()) === 2, "two cards");
+  const badge = ui.card("unit-b").locator(".unit-badge");
+  await until(async () => (await badge.textContent()) === "Ready in 30 s", "the countdown");
+
+  ui.fleet.unit("unit-b").down = true;
+  await until(async () => (await badge.textContent()) === "Offline", "the offline marker");
+});
+
+// UI-14: the settings page is a second control plane onto the same unit, and
+// the mirror flip is one shared setting, not a per-phone one. Read once at
+// load, a page open on the wall tablet shows a stale toggle for as long as it
+// stays open — and, worse, computes its next click from that stale value, so
+// the click that should turn the flip off turns it on again.
+test("UI-14 the mirror toggle follows a change made from another phone", async (t) => {
+  const ui = await openUI({ path: "/settings.html", local: { config: { mirror_flip: false } } });
+  t.after(() => ui.close());
+
+  const toggle = ui.page.locator("#mirror-toggle");
+  await until(async () => (await toggle.textContent()) === "Off", "the toggle to load");
+
+  // Somebody else, on their own phone, turns the flip on.
+  ui.fleet.local.config.mirror_flip = true;
+  await until(async () => (await toggle.textContent()) === "On", "the toggle to follow the unit");
+  assert.equal(await toggle.getAttribute("aria-pressed"), "true");
+
+  // And this page's next click is computed from the unit's value rather than
+  // the one it loaded with: it turns the flip off, instead of asking for the
+  // "on" it is already at.
+  await toggle.click();
+  const patch = await ui.fleet.waitFor(
+    (c) => c.method === "PATCH" && c.path === "/api/v1/config",
+    "the mirror-flip PATCH",
+  );
+  assert.deepEqual(JSON.parse(patch.body), { mirror_flip: false });
+
+  // The setting rides on the status poll, so watching a unit is one request
+  // per second and not two (REQUIREMENTS §3).
+  assert.equal(
+    ui.fleet.calls.filter((c) => c.method === "GET" && c.path === "/api/v1/config").length,
+    0,
+    "the page polled /config as well as /status",
+  );
+});
+
+// UI-14: polling a setting you can also write is a lost-update race. A read
+// made before the click can be delivered after it, carrying the value from
+// before — and applying that bounces the toggle back under the finger for a
+// whole poll interval. It is the reading UI-4 keeps off the slider, on a
+// control with no drag to recognise it by.
+test("UI-14 a read made before the click cannot undo it when it lands after", async (t) => {
+  const ui = await openUI({ path: "/settings.html", local: { config: { mirror_flip: false } } });
+  t.after(() => ui.close());
+
+  const toggle = ui.page.locator("#mirror-toggle");
+  await until(async () => (await toggle.textContent()) === "Off", "the toggle to load");
+
+  // Every read now takes 2.5 s, so reads taken before the click keep
+  // arriving — reporting "off" — for 2.5 s after it.
+  ui.fleet.local.slowRead = 2500;
+  await sleep(1200); // at least one such read is in flight
+  await toggle.click();
+  await until(async () => (await toggle.textContent()) === "On", "the toggle to show the click");
+
+  await sleep(3000);
+  assert.equal(await toggle.textContent(), "On", "a stale read undid the click");
+  assert.equal(await toggle.getAttribute("aria-pressed"), "true");
+});
+
+// UI-15: the mirror flip is per mirror, on the mirror's own card (FR-2, FR-14).
+//
+// It used to live only on the settings page, which is a page about *this*
+// unit: a guest standing in front of one mirror, with the host's control page
+// open on their phone, flipped a different unit's TV and read the one in front
+// of them as broken. Every other control in this page obeys the rule — a card
+// only ever changes its own mirror — and this is the one that did not.
+test("UI-15 each card's mirror flip patches its own mirror and no other", async (t) => {
+  const ui = await openUI({
+    local: { unit_id: "unit-a", name: "Corner", config: { mirror_flip: false } },
+    peers: [
+      { id: "unit-b", name: "Barre", config: { mirror_flip: false } },
+      { id: "unit-c", name: "Window", config: { mirror_flip: false } },
+    ],
+  });
+  t.after(() => ui.close());
+
+  await until(async () => (await ui.cards().count()) === 3, "three cards");
+  for (const id of ["unit-a", "unit-b", "unit-c"]) {
+    assert.equal(await ui.card(id).locator(".unit-mirror").count(), 1, `${id} has no mirror flip`);
+  }
+
+  const barre = ui.card("unit-b").locator(".unit-mirror");
+  await until(async () => (await barre.textContent()) === "Off", "the toggle to load Barre's value");
+  await barre.click();
+
+  const patch = await ui.fleet.waitFor(
+    (c) => c.method === "PATCH" && c.path === "/api/v1/config" && c.unit === "unit-b",
+    "a config PATCH to unit-b",
+  );
+  assert.deepEqual(JSON.parse(patch.body), { mirror_flip: true });
+  assert.equal(patch.origin, ui.fleet.unit("unit-b").base, "the mirror is addressed directly, not proxied");
+
+  const strays = ui.fleet.calls.filter((c) => c.method === "PATCH" && c.unit !== "unit-b");
+  assert.deepEqual(strays, [], "flipping one mirror must not touch another");
+
+  // The card shows what that unit came back with, and the other cards are
+  // left exactly as they were.
+  await until(async () => (await barre.textContent()) === "On", "Barre's toggle to show the flip");
+  assert.equal(await ui.card("unit-a").locator(".unit-mirror").textContent(), "Off");
+  assert.equal(await ui.card("unit-c").locator(".unit-mirror").textContent(), "Off");
+
+  // And this mirror's own card posts to the page's origin.
+  await ui.localCard().locator(".unit-mirror").click();
+  const own = await ui.fleet.waitFor(
+    (c) => c.method === "PATCH" && c.path === "/api/v1/config" && c.unit === "unit-a",
+    "a config PATCH to this mirror",
+  );
+  assert.equal(own.origin, ui.origin);
+});
+
+// UI-15: the flip is the unit's state, not the card's. Two phones and the
+// settings page all look at the same setting, so a card follows a change made
+// somewhere else — and computes its next click from the unit's value, not from
+// the one the page loaded with (the reasoning is UI-14's, per card).
+test("UI-15 a card's mirror flip follows that mirror and survives a stale read", async (t) => {
+  const ui = await openUI({
+    local: { unit_id: "unit-a", name: "Corner", config: { mirror_flip: false } },
+    peers: [{ id: "unit-b", name: "Barre", config: { mirror_flip: false } }],
+  });
+  t.after(() => ui.close());
+
+  await until(async () => (await ui.cards().count()) === 2, "two cards");
+  const barre = ui.card("unit-b").locator(".unit-mirror");
+  await until(async () => (await barre.textContent()) === "Off", "the toggle to load");
+
+  // Somebody at the other mirror turns its flip on.
+  ui.fleet.unit("unit-b").config.mirror_flip = true;
+  await until(async () => (await barre.textContent()) === "On", "the card to follow the mirror");
+  assert.equal(await barre.getAttribute("aria-pressed"), "true");
+
+  // A read taken before the next click must not undo it when it lands after.
+  ui.fleet.unit("unit-b").slowRead = 2500;
+  await sleep(1200);
+  await barre.click();
+  await until(async () => (await barre.textContent()) === "Off", "the toggle to show the click");
+  await sleep(3000);
+  assert.equal(await barre.textContent(), "Off", "a stale read undid the click");
+
+  // One card's stale-read guard is its own: this mirror's card keeps polling
+  // and stays right.
+  assert.equal(await ui.localCard().locator(".unit-mirror").textContent(), "Off");
+});
+
+// UI-15: the settings page has to say which mirror it is about. It only ever
+// controls the unit that served it, and a page that names no unit is one a
+// guest can act on by mistake with three mirrors in the room.
+test("UI-15 the settings page names the mirror it is about", async (t) => {
+  const ui = await openUI({ path: "/settings.html", local: { name: "Long Side" } });
+  t.after(() => ui.close());
+
+  await until(async () => (await ui.page.locator("#st-name").textContent()) === "Long Side", "the unit's name");
+  const hint = await ui.page.locator("main .hint").first().textContent();
+  assert.match(hint, /this\s+mirror/i, "the page does not say the flip is this unit's");
+});

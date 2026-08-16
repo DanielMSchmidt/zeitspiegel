@@ -38,6 +38,17 @@ SDL2 via KMSDRM renders directly to HDMI without X11. A browser display would
 add network jitter and uncontrolled latency; the web UI is control-only
 (plus an optional throttled MJPEG preview).
 
+The display is **acquired, not required** (FR-17). KMSDRM needs a *connected*
+DRM connector, so SDL refuses to initialise on a unit whose TV is off or whose
+cable is in the other mirror — and opening it before the HTTP listener made
+that a fatal error, which cost a field session a unit that spent it
+crash-looping with no control page and no radio. The screen is now opened by
+the render loop on a bounded retry, so everything that does not need pixels
+runs regardless and the mirror starts whenever the cable turns up. The cost is
+that anything wired to the display — the mirror-flip toggle, the badge, the
+splash — has to be attachable at an arbitrary point rather than at startup,
+and has to take the runtime value in force rather than the boot config's.
+
 ### D4 — Export via ffmpeg subprocess, streamed as fragmented MP4
 JPEG frames of the requested window are piped to ffmpeg. Default output is
 H.264 (`libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p
@@ -167,6 +178,33 @@ lets a member ship with nothing about the network configured. The combined page
 then calls each unit directly rather than being proxied through the host, which
 keeps a clip download off a second wireless hop.
 
+### D9 — Runtime settings live on the boot partition, as a patch
+A guest changes something on a unit and somebody pulls the plug at the end of
+the evening; the setting has to still be there in the morning (FR-18). Two
+things follow from the appliance model (D7) and neither is obvious.
+
+The root filesystem is a read-only overlay, so the ordinary place for state —
+`/var/lib/…` — is tmpfs on this machine: a file written there survives every
+restart except the one that actually happens. The FAT32 boot partition is the
+only writable storage a sealed unit has, which is why the unit's name already
+lives there and why its settings now do too (`state_file`, beside
+`zeitspiegel-name.txt`). It is also the one an operator can read, edit or
+delete with the card in a laptop, and no running unit to ask.
+
+What is stored is the accumulated **patch**, not a snapshot of the config. A
+snapshot would freeze every default at the moment of the first PATCH: edit
+`buffer_max_s` on the card afterwards and the unit would keep booting the old
+value with nothing to explain why. Storing only what somebody set keeps
+`/etc/zeitspiegel/config.toml` meaningful, keeps the file small enough to read
+at a glance, and makes deleting it a clean reset.
+
+FAT has no journal and the plug is the off switch (NFR-9), so the write is a
+scratch file fsynced and renamed into place, and it happens only when a value
+actually changes — never on a timer, and not for a page re-sending a value it
+just read. A write that fails is logged and nothing more: the setting is
+already in force in the running process, and refusing the guest's change
+because a card is write-protected undoes the wrong half.
+
 ## 3. Components
 
 ```
@@ -191,7 +229,12 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
 - **Engine** (`internal/engine`): pure frame-selection logic — which frame
   belongs to tick t; delay-change semantics (hard cut: increase replays the
   past once, decrease jumps forward); warm-up (delay > buffered ⇒ show oldest,
-  report `warming_up`).
+  report `warming_up`). Note what warm-up looks like: the ring evicts only at
+  its duration or byte budget, so while the buffer is still *filling* the
+  oldest frame is the same frame every tick and the mirror holds a still
+  image for the whole window. That is FR-10 working as designed, and it is
+  also what a field test reported as a crash — which is why the window is now
+  announced rather than merely correct.
 - **Display renderer** (`internal/screen`): per tick `buf.At(t − delay)`
   where t is the ticker's fire time; if the selected frame is unchanged
   (identity = seq + capture timestamp; seq alone restarts at 0 on a source
@@ -202,7 +245,13 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   `RenderCopyEx(..., FLIP_HORIZONTAL)` into an aspect-preserving destination
   rect — the frame is fitted and centred, not stretched to fill, and the
   remainder is cleared to black (FR-16); a mirror used to judge body line must
-  not distort proportion. The negotiated renderer (name,
+  not distort proportion. The overlay — delay badge, and the warm-up countdown
+  under it — is drawn on top, after the flip so neither is mirrored, each line
+  caching its rasterised type in its own slot. The skip rule is about the
+  *frame*: a held tick whose overlay text changed still re-presents
+  (`Repaint`, no decode), because the badge and the countdown move on their
+  own schedule and warm-up is precisely where the two diverge for seconds at a
+  time. The negotiated renderer (name,
   software fallback, display refresh rate) is logged at startup and
   published via expvar. Budget @60 fps = 16.7 ms; expected on Pi 5: 720p
   decode 4–8 ms + present 2–4 ms (validate in spike S-1). Fallbacks:
@@ -230,8 +279,13 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
 
 ## 4. Concurrency model
 
-- main goroutine: SDL render loop (`runtime.LockOSThread` — SDL needs the
-  main thread); everything else started alongside under an errgroup + ctx.
+- main goroutine: acquire the display, then the SDL render loop
+  (`runtime.LockOSThread` — SDL needs the main thread, so the retry has to run
+  on it too); everything else started alongside under an errgroup + ctx, and
+  started *first* — the API, capture and the election do not wait on a screen
+  (D3, FR-17). Until one opens, each tick is a rate-limited open attempt
+  instead of a render; a build with no display support stops the ticker and
+  idles rather than retrying what cannot succeed.
 - capture goroutine → `Buffer.Push` (single writer).
 - delay value: `atomic.Int64` nanoseconds; written by HTTP handler, read by
   render loop each tick → "effective ≤ 1 tick" by construction (FR-3).
@@ -251,7 +305,7 @@ Camera ──MJPEG/V4L2──► capture worker ──► ring buffer (RAM)
   fire time (the value delivered on the ticker channel), not the wall
   clock at processing time, so a render that overruns does not also skew
   which frame the next tick picks; tick overruns, over-budget renders,
-  selection misses, and held-frame streaks are counted into
+  selection misses, held-frame streaks and overlay repaints are counted into
   `zeitspiegel_render` (expvar), capture-timeline holes into
   `zeitspiegel_capture` (a hole replays on screen `delay` seconds later).
 - shutdown: `signal.NotifyContext`; clean close matters for dev/tests (in

@@ -32,6 +32,8 @@ silently pick one.
 ## Commands
 
 ```
+mise run deps          # install the C libraries the tagged lanes need (macOS)
+mise run deps:check    # can this machine run them? reports, installs nothing
 make test              # pure unit tests, -race, runs anywhere   (every change)
 make test-ui           # control page in headless Chromium, API stubbed (needs Node)
 make test-integration  # adds -tags integration (needs ffmpeg + ffprobe)
@@ -53,6 +55,13 @@ make manual-test       # hands-on E2E: see docs/MANUAL_TESTING.md (TV=1, SOURCE=
 `gofmt`, `go vet` and `-race` are all part of `make test`; all three must be
 clean. The formatting gate covers files behind build tags too (`gofmt` reads
 them regardless), which is where drift otherwise hides.
+
+The Go and Node versions come from `mise.toml` (Go's from `go.mod`, which
+stays the one place it is written down). The SDL2 libraries cannot: Homebrew
+is not a mise backend and these are headers and `.pc` files rather than
+binaries, so `mise run deps` wraps `brew` and `mise run deps:check` asks
+pkg-config the question that actually matters — the same check on macOS, Linux
+and CI.
 
 ## Code conventions
 
@@ -83,6 +92,31 @@ numbers recorded in docs/ARCHITECTURE.md §7.
   (~30× larger); we decode exactly one frame per tick by design.
 - Re-decoding when `Seq` hasn't changed between ticks — wasted work; the
   renderer must skip.
+- Drawing the delay badge only when the frame is re-rendered ("same pixels,
+  same badge") — the badge and the warm-up countdown change on their own
+  schedule, and during warm-up the frame is held for the whole window. That
+  coupling is what made a moved slider look like it did nothing on a unit that
+  was working perfectly (FR-13, UT-44). A held tick whose overlay text changed
+  repaints; one whose text did not is still skipped.
+- Opening the display before the HTTP listener, or treating a failed open as
+  fatal — KMSDRM needs a connected connector, so that turns a switched-off TV
+  into a unit that crash-loops in silence with no API and no radio (FR-17).
+- Clamping the delay slider to `filled_s` "so it can't ask for what isn't
+  there" — asking for more than is buffered is legitimate; the mirror warms
+  into it. The range is capacity, and the part that is not buffered yet is
+  marked, not removed (UI-13).
+- Keeping runtime settings anywhere but the boot partition — `/var/lib`, the
+  working directory, `/etc` — the root is a read-only overlay, so the file
+  lands in tmpfs and is gone at the one restart that actually happens: the
+  plug (FR-18, D9). Storing a whole config snapshot instead of the patch is
+  the other half of the same trap: it freezes every default at the first
+  PATCH and makes editing `config.toml` on the card do nothing.
+- Putting a per-unit control on the settings page. That page is about the unit
+  serving it, and with three mirrors on one network a control there silently
+  means "whichever one answered". That is how a working mirror got reported as
+  broken: the flip was toggled on the host's page while its owner watched
+  another unit's TV (FR-14, UI-15). Anything that changes what one mirror does
+  belongs on that mirror's card.
 - Adding a router/web framework — stdlib `ServeMux` patterns are sufficient.
 - Copying frame slices out of the buffer "for safety" — see hard rule 4.
 - Putting an `apt-get install` back into `bake.sh` or `pi-binary` "just for

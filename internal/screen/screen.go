@@ -19,23 +19,35 @@ import (
 
 // Screen implements engine.Display. All methods must run on the main OS
 // thread (cmd locks it; SDL requirement).
+// Badge lines, in draw order. Each keeps its own cached text texture.
+const (
+	badgeSlotDelay = iota
+	badgeSlotWarmup
+	badgeSlots
+)
+
+// badgeCacheEntry is one rasterised badge line, kept until its text changes.
+type badgeCacheEntry struct {
+	tex  *sdl.Texture
+	str  string
+	w, h int32
+}
+
 type Screen struct {
 	win      *sdl.Window
 	ren      *sdl.Renderer
 	mirror   atomic.Bool
 	delayNS  atomic.Int64
+	warmupNS atomic.Int64
 	glyphTex *sdl.Texture
 	info     Info
 
 	// The badge's typeface, when one was found, and the rendered text cached
 	// at the current size. Nil font means the bitmap atlas is drawing it.
-	font     *ttf.Font
-	fontPath string
-	fontPx   int
-	badgeTex *sdl.Texture
-	badgeStr string
-	badgeW   int32
-	badgeH   int32
+	font       *ttf.Font
+	fontPath   string
+	fontPx     int
+	badgeCache [badgeSlots]badgeCacheEntry
 
 	// frameTex is the persistent streaming texture frames decode into.
 	// Creating and destroying a GPU texture per frame causes driver-side
@@ -47,6 +59,12 @@ type Screen struct {
 	texW, texH   int32
 	texFmt       uint32
 	texRecreates atomic.Uint64
+
+	// Geometry of the frame currently on screen, so Repaint can put the same
+	// pixels back without decoding anything again.
+	lastSrcW, lastSrcH int
+	lastFlip           sdl.RendererFlip
+	hasFrame           bool
 }
 
 // Info describes what Open actually negotiated with SDL. The render loop
@@ -70,6 +88,10 @@ func (s *Screen) TextureRecreates() uint64 { return s.texRecreates.Load() }
 // render loop each tick; no locking needed (single writer in practice).
 func (s *Screen) SetDelay(d time.Duration) { s.delayNS.Store(int64(d)) }
 
+// SetWarmup stores how much longer the buffer needs before it reaches back as
+// far as the delay asks (FR-10). Zero takes the countdown off the screen.
+func (s *Screen) SetWarmup(d time.Duration) { s.warmupNS.Store(int64(d)) }
+
 // Options configures the display.
 type Options struct {
 	Mirror bool // horizontal flip (FR-2, default on in config)
@@ -84,6 +106,11 @@ type Options struct {
 // borderless full-screen one.
 func Open(o Options) (*Screen, error) {
 	if err := sdl.Init(sdl.INIT_VIDEO); err != nil {
+		// SDL_Init can leave subsystems half-initialised on the way out, and
+		// this is no longer a one-shot: a unit with no HDMI connected retries
+		// every few seconds for as long as it is powered (FR-17), so failure
+		// number two hundred has to start from the same state as the first.
+		sdl.Quit()
 		return nil, fmt.Errorf("screen: sdl init: %w", err)
 	}
 	if err := img.Init(img.INIT_JPG | img.INIT_PNG); err != nil {
@@ -187,6 +214,39 @@ func (s *Screen) Render(f frame.Frame) error {
 		tex = oneShot
 	}
 
+	if err := s.present(tex, int(surf.W), int(surf.H)); err != nil {
+		return err
+	}
+	// Only the persistent texture survives this call — the one-shot fallback
+	// above is destroyed on return — so only that path can be repainted.
+	s.hasFrame = tex == s.frameTex
+	return nil
+}
+
+// Repaint puts the frame already on screen back up with a current overlay,
+// without decoding anything. The render loop calls it on a held tick whose
+// badge or warm-up countdown changed (UT-44).
+//
+// It exists because the loop's skip rule is about the frame: an unchanged
+// selection is not re-rendered, which is what keeps the tick budget — but
+// during warm-up the selection is pinned to the oldest buffered frame for the
+// whole warm-up window. Without a repaint the delay badge froze along with
+// the picture, so moving the slider had no visible effect anywhere and a
+// mirror waiting out its buffer was indistinguishable from a crashed one.
+//
+// A screen with nothing on it yet, or one whose last frame went up through
+// the one-shot fallback, is left exactly as it is: a stale badge over a live
+// picture beats blanking the mirror to repaint a caption.
+func (s *Screen) Repaint() error {
+	if !s.hasFrame || s.frameTex == nil {
+		return nil
+	}
+	return s.present(s.frameTex, s.lastSrcW, s.lastSrcH)
+}
+
+// present draws an already-uploaded frame texture, letterboxed and flipped,
+// with the overlay on top.
+func (s *Screen) present(tex *sdl.Texture, srcW, srcH int) error {
 	flip := sdl.FLIP_NONE
 	if s.mirror.Load() {
 		flip = sdl.FLIP_HORIZONTAL
@@ -198,7 +258,7 @@ func (s *Screen) Render(f frame.Frame) error {
 	if err != nil {
 		return fmt.Errorf("screen: output size: %w", err)
 	}
-	x, y, w, h := fitRect(int(surf.W), int(surf.H), int(outW), int(outH))
+	x, y, w, h := fitRect(srcW, srcH, int(outW), int(outH))
 	dst := &sdl.Rect{X: int32(x), Y: int32(y), W: int32(w), H: int32(h)}
 
 	// Paint the bars black explicitly: Splash leaves its own backdrop colour
@@ -212,10 +272,11 @@ func (s *Screen) Render(f frame.Frame) error {
 	if err := s.ren.CopyEx(tex, nil, dst, 0, nil, flip); err != nil {
 		return fmt.Errorf("screen: copy: %w", err)
 	}
-	if err := s.drawBadge(time.Duration(s.delayNS.Load())); err != nil {
+	if err := s.drawOverlay(); err != nil {
 		return err
 	}
 	s.ren.Present()
+	s.lastSrcW, s.lastSrcH, s.lastFlip = srcW, srcH, flip
 	return nil
 }
 
@@ -233,7 +294,7 @@ func (s *Screen) Splash() error {
 	if err := s.ren.Clear(); err != nil {
 		return fmt.Errorf("screen: splash clear: %w", err)
 	}
-	if err := s.drawBadge(time.Duration(s.delayNS.Load())); err != nil {
+	if err := s.drawOverlay(); err != nil {
 		return err
 	}
 	s.ren.Present()
@@ -270,6 +331,7 @@ func (s *Screen) Close() error {
 		s.glyphTex.Destroy()
 	}
 	s.dropBadgeCache()
+	s.hasFrame = false
 	if s.font != nil {
 		s.font.Close()
 		s.font = nil

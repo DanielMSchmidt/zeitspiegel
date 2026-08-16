@@ -54,6 +54,24 @@ func displayDelayFunc(d engine.Display) func(time.Duration) {
 	return nil
 }
 
+// displayWarmupFunc exposes the warm-up countdown setter the render loop
+// feeds each tick (FR-10).
+func displayWarmupFunc(d engine.Display) func(time.Duration) {
+	if s, ok := d.(*screen.Screen); ok {
+		return s.SetWarmup
+	}
+	return nil
+}
+
+// displayRepaintFunc exposes the re-present-without-decoding path the render
+// loop uses on a held tick whose badge or countdown changed.
+func displayRepaintFunc(d engine.Display) func() error {
+	if s, ok := d.(*screen.Screen); ok {
+		return s.Repaint
+	}
+	return nil
+}
+
 // displaySplashFunc returns the paint-the-splash closure (nil headless).
 // The render loop calls it while warming up so the screen isn't black
 // between SDL open and the first camera frame.
