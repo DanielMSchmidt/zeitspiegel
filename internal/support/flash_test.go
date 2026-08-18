@@ -110,3 +110,74 @@ func TestFlashSizeCheckNeedsAnImage(t *testing.T) {
 		t.Errorf("the error does not name the missing image: %s", stderr)
 	}
 }
+
+// mediaCheck runs the flashing script's write-protect verdict against captured
+// `diskutil info` output, so the decision can be exercised without a locked
+// card in the reader.
+func mediaCheck(t *testing.T, diskutilInfo string) (stdout, stderr string, code int) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "diskutil-info.txt")
+	if err := os.WriteFile(path, []byte(diskutilInfo), 0o644); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	return collectFrom(t, "scripts/flash-sd.sh", "--media-check", path)
+}
+
+// UT-33: a write-protected card cannot be written to by anyone, root included
+// — the kernel refuses the raw write with EPERM, which surfaces as
+// "dd: /dev/rdiskN: Permission denied" and reads like a sudo problem. Catch it
+// at the prompt, where the card still has its contents and the operator can
+// reach the lock switch.
+func TestFlashMediaCheckRefusesWriteProtectedMedia(t *testing.T) {
+	const locked = `   Device Identifier:        disk4
+   Device / Media Name:      Built In SDXC Reader
+   Media Read-Only:          Yes
+   Volume Read-Only:         Not applicable (no file system)
+`
+	// Older macOS spells the same fact the other way round.
+	const lockedOldSpelling = `   Device Identifier:        disk4
+   Read-Only Media:          Yes
+`
+	// A read-only *volume* is a different condition — a mount option, not the
+	// media — and is no reason to refuse a write that erases the volume anyway.
+	const readOnlyVolume = `   Device Identifier:        disk4
+   Media Read-Only:          No
+   Volume Read-Only:         Yes
+`
+	const writable = `   Device Identifier:        disk4
+   Media Read-Only:          No
+   Volume Read-Only:         No
+`
+	for _, tc := range []struct {
+		name       string
+		info       string
+		wantRefuse bool
+	}{
+		{"locked card", locked, true},
+		{"locked card, older field name", lockedOldSpelling, true},
+		{"read-only volume on writable media", readOnlyVolume, false},
+		{"ordinary card", writable, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, code := mediaCheck(t, tc.info)
+			out := stdout + stderr
+			if refused := code != 0; refused != tc.wantRefuse {
+				t.Fatalf("refused=%v, want %v (exit %d)\n%s", refused, tc.wantRefuse, code, out)
+			}
+			if !tc.wantRefuse {
+				return
+			}
+			if !strings.Contains(strings.ToLower(out), "write-protect") {
+				t.Errorf("the refusal does not name the condition:\n%s", out)
+			}
+			// The operator has to be told where to look; "write-protected"
+			// alone leaves them checking sudo and Full Disk Access instead.
+			if !strings.Contains(strings.ToLower(out), "lock switch") {
+				t.Errorf("the refusal does not point at the lock switch:\n%s", out)
+			}
+			if !strings.Contains(out, "disk4") {
+				t.Errorf("the refusal does not name the disk:\n%s", out)
+			}
+		})
+	}
+}
