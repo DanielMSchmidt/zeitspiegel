@@ -8,7 +8,7 @@ device = "auto"                   # first node that streams (UVC cameras also ex
 profile = "auto"                  # largest MJPEG mode clearing a 25 fps floor, capped at 1080p (E-2); or pin "720p60"/"1080p30"
 buffer_max_s = 60.0               # ring buffer length; delay in practice ≤ 30 s — a longer buffer only inflates heap + GC pauses
 buffer_max_bytes = 1073741824     # 1 GiB hard cap; bright-scene 1080p30 MJPEG can spike to ~15 MB/s ⇒ 60 s ≈ 900 MB worst case (§7)
-mirror_flip = false               # horizontal flip, off by default — which way is right depends on how the camera is mounted, so each unit's card flips its own (FR-2)
+mirror_flip = true                # horizontal flip, on by default — the thing is a mirror and should behave like one; which way is right depends on how the camera is mounted, so each unit's card flips its own (FR-2)
 default_delay_s = 25.0            # FR-3 boot delay; runtime slider overrides via PUT /api/v1/delay
 
 # Network (FR-15, E-8). Identical on every card — the role is elected at boot

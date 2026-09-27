@@ -33,8 +33,11 @@ func TestDefaults(t *testing.T) {
 	if w, h := c.Resolution(); w != 1920 || h != 1080 {
 		t.Errorf("auto nominal resolution = %dx%d, want 1920x1080 (cap)", w, h)
 	}
-	if c.MirrorFlip { // FR-2: default off (changed 2026-08-16 on the owner's call)
-		t.Error("mirror_flip default must be false")
+	// FR-2: default on (changed back 2026-09-27 on the owner's call — a unit
+	// running on defaults was showing the camera's own view, which reads
+	// wrong-handed to whoever is standing in front of it).
+	if !c.MirrorFlip {
+		t.Error("mirror_flip default must be true")
 	}
 	if c.BufferMaxS <= 0 || c.BufferMaxBytes <= 0 {
 		t.Errorf("buffer budgets must default > 0, got %v s / %v B", c.BufferMaxS, c.BufferMaxBytes)
