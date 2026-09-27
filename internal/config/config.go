@@ -17,7 +17,7 @@ type Config struct {
 	Profile        string  `toml:"profile"` // "auto" | "720p60" | "1080p30" (E-2)
 	BufferMaxS     float64 `toml:"buffer_max_s"`
 	BufferMaxBytes int64   `toml:"buffer_max_bytes"`
-	MirrorFlip     bool    `toml:"mirror_flip"`     // FR-2, default off
+	MirrorFlip     bool    `toml:"mirror_flip"`     // FR-2, default on
 	DefaultDelayS  float64 `toml:"default_delay_s"` // FR-3 boot delay; runtime override via API
 
 	// Network keys (FR-15, E-8). Identical on every card — the unit's role
@@ -72,13 +72,15 @@ func Default() Config {
 		Profile:        "auto", // highest MJPEG resolution the camera offers, capped at 1080p (E-2 rev)
 		BufferMaxS:     120,
 		BufferMaxBytes: 1536 << 20, // 1.5 GiB
-		// Off (FR-2, changed 2026-08-16): the owner watched it on the real
-		// installation and the flipped picture had left and right the wrong
-		// way round for a dancer standing in front of it. Which way is right
-		// depends on how the camera is mounted, so this is a default rather
-		// than a rule — each unit's card can flip its own, and that choice now
+		// On (FR-2, changed back 2026-09-27): a unit running on defaults
+		// presents the camera's own view, and that reads wrong-handed to
+		// whoever is standing in front of it — the thing is a mirror, so it
+		// should behave like one. The 2026-08-16 call was the opposite, from
+		// the same installation; which way is right depends on how that
+		// unit's camera is mounted, which is why this stays a default rather
+		// than a rule — each unit's card can flip its own, and that choice
 		// survives a restart (FR-18).
-		MirrorFlip:      false,
+		MirrorFlip:      true,
 		DefaultDelayS:   25, // boot the mirror with a 25 s shift (FR-3 default)
 		ExposureAuto:    true,
 		LogLevel:        "info",

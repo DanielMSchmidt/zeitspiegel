@@ -94,7 +94,7 @@ func (s *Screen) SetWarmup(d time.Duration) { s.warmupNS.Store(int64(d)) }
 
 // Options configures the display.
 type Options struct {
-	Mirror bool // horizontal flip (FR-2, default on in config)
+	Mirror bool // horizontal flip (FR-2); the boot value, movable at runtime
 	// Windowed renders into a desktop window instead of taking the whole
 	// display — the dev "what would the TV show" mode. The appliance runs
 	// fullscreen (KMSDRM has nothing else to show anyway).
