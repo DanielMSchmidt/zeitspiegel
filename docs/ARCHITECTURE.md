@@ -205,6 +205,34 @@ just read. A write that fails is logged and nothing more: the setting is
 already in force in the running process, and refusing the guest's change
 because a card is write-protected undoes the wrong half.
 
+### D10 — The quick download rides the export path that already exists
+FR-19's whole point is that a guest's interaction can be "scan, wait a
+second, check the phone": the poster's download QR opens `/clip`, a static
+page embedded beside the control page (D5, no build tooling), which starts
+`GET /api/v1/clip` for the serving unit's full buffer and keeps a
+download-again button. Nothing new was built on the server for it, and that
+is the decision: the clip endpoint already streams fragmented MP4 while the
+encode runs (D4), so the first bytes reach the phone within ~1 s, clips
+never touch storage, and the export child is reniced below the render loop
+(FR-6) — a guest download cannot stutter the mirror by design that predates
+this feature.
+
+What the QR flow adds is *contention*: after a dance, several phones scan
+within seconds, and production runs one export slot precisely so x264 cannot
+starve the render loop's tick budget. Widening the slot count would trade
+the mirror's smoothness for download parallelism — the wrong trade for a
+room whose primary artifact is the picture on the glass — so fairness moved
+to the client instead: the page reads a 503 as "wait your turn" and retries
+bounded with jitter, converging a crowd one download at a time. Download
+*speed* is then dominated by bytes over one wireless hop, and the levers are
+the recorded ones: downloads go straight to the owning unit, never proxied
+through the host (D8); the encode caps the long edge at 720p (D4); and the
+AP band is the operator's knob (`AP_BAND=a`, docs/DEPLOYMENT.md). Trading
+encoder settings (preset/CRF) against file size is deliberately **not**
+guessed at here — ultrafast emits notably larger files than slower presets
+at equal CRF, but whether the Pi's cores can spare the difference next to a
+live render loop is a measurement, and §7 carries the row for it.
+
 ## 3. Components
 
 ```
@@ -344,3 +372,5 @@ Exposure + USB + decode + render + vsync ≈ 60–120 ms. `delay = 0` means
 | x264 ultrafast export speed, 30 s clip (Pi 5) — encode wall time (`zeitspiegel_export_seconds` to a fast client) + time to first byte (`zeitspiegel_export_ttfb_seconds`) | M3 | _tbd_ |
 | Bright-scene MJPEG bitrate @1080p30 (`zeitspiegel_buffer.bytes_per_s` peak) | prod | _tbd_ |
 | Render over-budget tick ratio under bright-scene stress (`zeitspiegel_render`) | prod | _tbd_ |
+| x264 `superfast`/`veryfast` vs `ultrafast` at CRF 23, 30 s clip (Pi 5): output bytes and encode wall time, with `zeitspiegel_render` watched alongside — decides whether the QR download (D10) gets smaller files for CPU the render budget can spare | M3 | _tbd_ |
+| QR download end to end on a phone over the AP (scan → file saved), 60 s clip, 2.4 GHz vs `AP_BAND=a`, with and without a second phone retrying for the slot | M4 | _tbd_ |

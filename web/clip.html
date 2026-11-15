@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14161a">
+<title>Your video · Zeitspiegel</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Zeitspiegel<small>your video</small></h1>
+</header>
+
+<main>
+  <!-- The page a guest lands on from the poster's download QR (FR-19): the
+       video starts downloading by itself, and the one button repeats it.
+       Served by the unit the QR's address resolves to, so the download never
+       makes a second hop through anything. -->
+  <section id="download-card">
+    <div class="unit-head">
+      <h2 class="unit-name" id="mirror-name">This mirror</h2>
+      <span class="unit-tag">your video</span>
+    </div>
+    <p id="dl-status" role="status" aria-live="polite">Preparing your video&hellip;</p>
+    <button type="button" id="download-again">Download again</button>
+    <p class="hint">The video is everything this mirror currently remembers.
+    It is saved to your phone and nowhere else &mdash; the mirror keeps
+    nothing once you unplug it.</p>
+  </section>
+
+  <!-- With several mirrors in the room, the one serving zeitspiegel.local is
+       not necessarily the one you danced in front of. Each button asks that
+       mirror directly, at its own address (FR-14 — nothing here changes what
+       any mirror does, but a download still belongs to one named unit). -->
+  <section id="other-mirrors" hidden>
+    <h2>Other mirrors in this room</h2>
+    <p class="hint" id="other-hint">Danced in front of a different mirror?
+    Its video downloads straight from it:</p>
+    <div id="peer-buttons" class="row"></div>
+  </section>
+
+  <p class="hint"><a href="/">Set the delay, watch a preview &mdash; all
+  controls</a></p>
+</main>
+
+<div id="toast" role="alert"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  function $(id) { return document.getElementById(id); }
+
+  var statusLine = $("dl-status");
+  var againBtn = $("download-again");
+  var mirrorName = $("mirror-name");
+
+  // ---------- messages ----------
+  function say(msg) { statusLine.textContent = msg; }
+
+  var toast = $("toast");
+  var toastTimer = null;
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add("show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 4000);
+  }
+
+  function problemDetail(body, fallback) {
+    if (body && typeof body === "object") {
+      return body.detail || body.title || fallback;
+    }
+    return fallback;
+  }
+
+  function fetchJSON(url, ms) {
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, ms || 2500) : null;
+    var opts = ctl ? { signal: ctl.signal } : {};
+    return fetch(url, opts).then(function (res) {
+      if (timer) clearTimeout(timer);
+      if (!res.ok) throw new Error("status " + res.status);
+      return res.json();
+    }, function (err) {
+      if (timer) clearTimeout(timer);
+      throw err;
+    });
+  }
+
+  // ---------- the download ----------
+  // Downloaded via a hidden iframe so the browser's download manager streams
+  // the clip straight to disk (a fetch()+Blob would buffer hundreds of MB in
+  // a phone's RAM — same reasoning as the control page). A successful
+  // attachment never fires "load"; an error response renders into the frame
+  // and does.
+  var dlFrame = document.createElement("iframe");
+  dlFrame.hidden = true;
+  dlFrame.setAttribute("aria-hidden", "true");
+  document.body.appendChild(dlFrame);
+
+  var capS = 60;          // the serving mirror's buffer length, from /status
+  var current = null;     // the request in flight: {base, name, seconds}
+  var retriesLeft = 0;    // bounded — a busy room must converge, not hammer
+  var retryTimer = null;
+  var graceTimer = null;
+
+  // One export slot serves the whole room (the encoder must never starve the
+  // mirror's render loop), so "busy" is an ordinary answer, not a fault. The
+  // server's Retry-After is 2 s; the jitter spreads a crowd of phones that
+  // all scanned the poster after the same dance.
+  var RETRIES = 5;
+  function retryDelay() { return 2000 + Math.floor(Math.random() * 800); }
+
+  function start(base, name, seconds) {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    current = { base: base, name: name, seconds: seconds };
+    retriesLeft = RETRIES;
+    attempt();
+  }
+
+  function attempt() {
+    againBtn.disabled = true;
+    say("Preparing your video from " + current.name + "…");
+    dlFrame.src = current.base + "/api/v1/clip?seconds=" +
+      encodeURIComponent(current.seconds) + "&format=mp4";
+    // The browser gives no signal when an attachment download starts; no
+    // error within the grace period means it did.
+    if (graceTimer) clearTimeout(graceTimer);
+    graceTimer = setTimeout(function () {
+      graceTimer = null;
+      say("Your download has started — check your phone's downloads. " +
+          "Tap the button for another copy.");
+      againBtn.disabled = false;
+    }, 2000);
+  }
+
+  dlFrame.addEventListener("load", function () {
+    if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+    var body = null;
+    try {
+      body = JSON.parse(dlFrame.contentDocument.body.textContent);
+    } catch (e) { /* cross-origin or not JSON — keep the generic message */ }
+
+    // 503 means the room's one export slot is taken (another phone's
+    // download, or the buffer is still filling). That resolves by itself, so
+    // the page waits its turn rather than reporting a failure.
+    if (body && body.status === 503 && retriesLeft > 0) {
+      retriesLeft--;
+      say("The mirror is busy with another download — yours starts in a moment…");
+      retryTimer = setTimeout(function () { retryTimer = null; attempt(); }, retryDelay());
+      return;
+    }
+    againBtn.disabled = false;
+    say("Could not download the video — try the button in a moment.");
+    showToast(problemDetail(body, "Could not download the video"));
+  });
+
+  againBtn.addEventListener("click", function () {
+    if (current) start(current.base, current.name, current.seconds);
+  });
+
+  // ---------- other mirrors ----------
+  function addPeerButton(peer) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "peer-download";
+    btn.textContent = "Save video from " + (peer.name || peer.id);
+    btn.addEventListener("click", function () {
+      // That mirror's own capacity, read when asked for: its buffer length
+      // need not match this one's.
+      fetchJSON(peer.base_url + "/api/v1/status").then(function (st) {
+        var cap = (st.buffer && st.buffer.capacity_s) || 60;
+        start(peer.base_url, st.name || peer.name || peer.id, cap);
+      }).catch(function () {
+        showToast("Could not reach " + (peer.name || peer.id));
+      });
+    });
+    $("peer-buttons").appendChild(btn);
+  }
+
+  // ---------- boot: read the room, then download ----------
+  // The length asked for is the serving mirror's whole buffer; the server
+  // clamps to what is actually there, so a mirror still warming up answers
+  // with what it has rather than refusing.
+  fetchJSON("/api/v1/status").then(function (st) {
+    if (st.buffer && st.buffer.capacity_s > 0) capS = st.buffer.capacity_s;
+    if (st.name) mirrorName.textContent = st.name;
+    start("", st.name || "this mirror", capS);
+  }).catch(function () {
+    // The mirror served this page, so it is there; begin with the default
+    // length rather than making the guest debug a status call.
+    start("", "this mirror", capS);
+  });
+
+  fetchJSON("/api/v1/peers").then(function (body) {
+    var peers = (body && body.peers) || [];
+    if (!peers.length) return;
+    peers.forEach(addPeerButton);
+    $("other-mirrors").hidden = false;
+  }).catch(function () { /* no fleet view — the page still does its one job */ });
+})();
+</script>
+</body>
+</html>

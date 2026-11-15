@@ -80,7 +80,7 @@ class Layout(unittest.TestCase):
                     self.assertGreater(t["y"], poster.MARGIN / 2)
                     self.assertLess(t["y"], poster.H - poster.MARGIN / 4)
 
-    # UT-30: the three-column rows (the step strip, the two QR captions) put
+    # UT-30: the three-column rows (the step strip, the three QR captions) put
     # a German and an English label on one baseline. The German one is the
     # longer one, and nothing stops it growing into its neighbour but this.
     def test_columns_on_one_baseline_do_not_collide(self):
@@ -125,21 +125,36 @@ class Layout(unittest.TestCase):
 
 
 class QRCodes(unittest.TestCase):
-    """The two codes are the whole point of the poster: one joins the open
-    Wi-Fi, the other opens the page with the delay slider."""
+    """The codes are the whole point of the poster: one joins the open
+    Wi-Fi, one downloads the guest's video (FR-19), one opens the page with
+    the delay slider."""
 
     def setUp(self):
         self.doc = build(ssid="zeitspiegel", url="http://zeitspiegel.local")
 
-    # UT-30: the poster offers exactly the two codes, in order.
-    def test_two_codes_join_then_controls(self):
-        self.assertEqual(len(self.doc.qrs), 2)
-        wifi, controls = self.doc.qrs
+    # UT-30: the poster offers exactly the three codes, in order — Wi-Fi
+    # first (the others are unreachable without it), then the video, then
+    # the controls.
+    def test_three_codes_join_video_then_controls(self):
+        self.assertEqual(len(self.doc.qrs), 3)
+        wifi, video, controls = self.doc.qrs
         self.assertEqual(wifi["payload"], "WIFI:S:zeitspiegel;T:nopass;;")
+        self.assertEqual(video["payload"], "http://zeitspiegel.local/clip")
         self.assertEqual(controls["payload"], "http://zeitspiegel.local")
-        self.assertLess(wifi["x"], controls["x"])
+        self.assertLess(wifi["x"], video["x"])
+        self.assertLess(video["x"], controls["x"])
+        self.assertEqual(wifi["size"], video["size"])
         self.assertEqual(wifi["size"], controls["size"])
+        self.assertEqual(wifi["y"], video["y"])
         self.assertEqual(wifi["y"], controls["y"])
+
+    # UT-30: the download code is on every variant — "all versions of the
+    # poster carry the feature" is the requirement, and a single-language
+    # room must not lose it.
+    def test_every_variant_carries_all_three_codes(self):
+        for langs in VARIANTS:
+            with self.subTest(langs=langs):
+                self.assertEqual(len(build(langs).qrs), 3)
 
     # UT-30: read the emitted rects back as a module matrix and compare it
     # with what segno says the payload encodes. This is what proves the

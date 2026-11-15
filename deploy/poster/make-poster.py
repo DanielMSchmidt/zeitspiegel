@@ -6,9 +6,11 @@ Dependency: segno (pure-Python QR generator).
     .venv/bin/python deploy/poster/make-poster.py
 
 The poster reads top to bottom in the order a guest needs it: what the thing
-in front of them is for, then — only then — the two QR codes that get their
-phone to the delay slider. The Wi-Fi is an open network (no password, E-7),
-so code 1 joins it on scan and code 2 opens the controls once connected.
+in front of them is for, then — only then — the three QR codes. The Wi-Fi is
+an open network (no password, E-7), so code 1 joins it on scan; once
+connected, code 2 downloads the guest's video straight to their phone
+(the /clip quick-download page, FR-19) and code 3 opens the controls with
+the delay slider.
 
 Three variants are written on every run: a bilingual one (German lead,
 English underneath) plus a German-only and an English-only poster for rooms
@@ -51,13 +53,14 @@ STRINGS = {
         "step_dance": "Tanzen, ohne hinzuschauen",
         "step_wait": "{delay} Sekunden warten",
         "step_watch": "Dir selbst zusehen",
-        "qr_heading": "Verzögerung selbst einstellen",
+        "qr_heading": "Dein Video, deine Verzögerung",
         "cap_wifi": "WLAN verbinden",
+        "cap_download": "Video speichern",
         "cap_controls": "Steuerung öffnen",
         "label_network": "Netzwerk",
         "label_browser": "oder im Browser eingeben",
-        "controls_note": "Schieberegler = Sekunden. Download = der letzte Clip "
-                         "aufs Handy.",
+        "controls_note": "Code 2 lädt deinen Clip aufs Handy. "
+                         "Code 3: Schieberegler = Sekunden.",
         "warn": "„Kein Internet“ ist normal — tippe auf „Verbunden bleiben“.",
         "footer": "Kein Internet, keine Aufnahme — außer du lädst selbst einen "
                   "Clip herunter.",
@@ -69,12 +72,14 @@ STRINGS = {
         "step_dance": "Dance without watching",
         "step_wait": "wait {delay} seconds",
         "step_watch": "Watch it back",
-        "qr_heading": "Set the delay yourself",
+        "qr_heading": "Your video, your delay",
         "cap_wifi": "Join the Wi-Fi",
+        "cap_download": "Save your video",
         "cap_controls": "Open the controls",
         "label_network": "Network",
         "label_browser": "or type in any browser",
-        "controls_note": "Slider = seconds. Download = the last clip on your phone.",
+        "controls_note": "Code 2 saves your clip to your phone. "
+                         "Code 3: slider = seconds.",
         "warn": "“No internet” is normal — tap “Stay connected”.",
         "footer": "No internet, no recording — unless you download a clip yourself.",
     },
@@ -133,6 +138,17 @@ def text_width(s, size, weight=400, spacing=0):
     em = sum(_W.get(c, _DEFAULT_W) for c in s) / 1000.0
     bold = 1.06 if weight >= 600 else (1.03 if weight >= 500 else 1.0)
     return em * size * bold * 1.02 + spacing * len(s)  # 2 % safety margin
+
+
+def fit_size(s, size, weight, max_w):
+    """Largest size ≤ `size` at which `s` still fits `max_w` (floor 9).
+
+    Used for the typed values under the QR codes: with three columns a long
+    network name no longer has half the page to itself, so the type gives
+    rather than the margin."""
+    while size > 9 and text_width(s, size, weight) > max_w:
+        size -= 0.5
+    return size
 
 
 def wrap(s, size, weight, max_w):
@@ -289,7 +305,9 @@ def build(langs=("de", "en"), url=URL, ip=IP, ssid=SSID, delay=DELAY):
     # A second language doubles every line of copy, so the air between the
     # sections — not the type — is what gives. One knob, tuned per variant.
     air = 1.0 if len(langs) > 1 else 1.95
-    qr_size = 168 if len(langs) > 1 else 248
+    # Three codes share the row now, so the single-language size gives: at
+    # 248 three of them would not fit the column at all.
+    qr_size = 168 if len(langs) > 1 else 184
 
     def s(i, key):
         return S[i][key]
@@ -346,7 +364,7 @@ def build(langs=("de", "en"), url=URL, ip=IP, ssid=SSID, delay=DELAY):
                    anchor="middle", lang=lang)
         y += size + 6
 
-    # --- and how to change it: the two codes
+    # --- and how to use it from a phone: the three codes
     y += 16 * air
     rule(d, y)
     y += 22 + 10 * air
@@ -355,46 +373,64 @@ def build(langs=("de", "en"), url=URL, ip=IP, ssid=SSID, delay=DELAY):
         size = 25 if i == 0 else 19
         y = d.para(W / 2, y, s(i, "qr_heading"), size=size, weight=700,
                    fill=fill, lang=lang) + size + 5
-    # Two equal codes side by side, each under its numbered badge: join the
-    # network, then open the page with the slider on it.
+    # Three equal codes side by side, each under its numbered badge: join
+    # the network, then save the video, then open the page with the slider
+    # on it. Wi-Fi comes first because without it the other two codes land
+    # nowhere; the video comes before the controls because it is the one
+    # thing most guests came to the poster for (FR-19).
     y += 14 + 12 * air
-    gap = 64
-    left_x = (W - (qr_size * 2 + gap)) / 2
-    right_x = left_x + qr_size + gap
-    left_cx, right_cx = left_x + qr_size / 2, right_x + qr_size / 2
+    gap = 64 if len(langs) > 1 else 52
+    pitch = qr_size + gap
+    left_x = (W - (qr_size * 3 + gap * 2)) / 2
+    xs = [left_x + i * pitch for i in range(3)]
+    cxs_qr = [x + qr_size / 2 for x in xs]
 
-    badge(d, "1", left_cx, y)
-    badge(d, "2", right_cx, y)
-    arrow(d, left_cx + 46, y, right_cx - 46)
+    for n, cx in enumerate(cxs_qr, start=1):
+        badge(d, str(n), cx, y)
+    for a, b in zip(cxs_qr, cxs_qr[1:]):
+        arrow(d, a + 46, y, b - 46)
     y += 44
 
     for i, lang in enumerate(langs):
         fill, weight = (INK, 700) if i == 0 else (MUTE, 500)
         size = 19 if i == 0 else 16
-        d.text(left_cx, y, s(i, "cap_wifi"), size=size, weight=weight,
-               fill=fill, anchor="middle", lang=lang)
-        d.text(right_cx, y, s(i, "cap_controls"), size=size, weight=weight,
-               fill=fill, anchor="middle", lang=lang)
+        for cx, key in zip(cxs_qr, ("cap_wifi", "cap_download", "cap_controls")):
+            d.text(cx, y, s(i, key), size=size, weight=weight,
+                   fill=fill, anchor="middle", lang=lang)
         y += size + 5
 
     y += 6
     esc = ssid.translate(str.maketrans({c: "\\" + c for c in r'\;,:"'}))
-    d.qr(f"WIFI:S:{esc};T:nopass;;", left_x, y, qr_size)
-    d.qr(url, right_x, y, qr_size)
+    d.qr(f"WIFI:S:{esc};T:nopass;;", xs[0], y, qr_size)
+    d.qr(f"{url}/clip", xs[1], y, qr_size)
+    d.qr(url, xs[2], y, qr_size)
     y += qr_size + 22
 
     # What each code lands you on: the network name, and the typed fallback
-    # for the phone whose camera refuses the second code.
+    # for the phone whose camera refuses a code — the download page and the
+    # controls each have one.
     for i, lang in enumerate(langs):
         size = 14 if i == 0 else 12.5
-        d.text(left_cx, y, s(i, "label_network"), size=size, fill=MUTE,
+        d.text(cxs_qr[0], y, s(i, "label_network"), size=size, fill=MUTE,
                anchor="middle", lang=lang)
-        d.text(right_cx, y, s(i, "label_browser"), size=size, fill=MUTE,
+        d.text(cxs_qr[1], y, s(i, "label_browser"), size=size, fill=MUTE,
+               anchor="middle", lang=lang)
+        d.text(cxs_qr[2], y, s(i, "label_browser"), size=size, fill=MUTE,
                anchor="middle", lang=lang)
         y += size + 4
     y += 16
-    d.text(left_cx, y, ssid, size=21, weight=700, anchor="middle")
-    d.text(right_cx, y, ip, size=21, weight=700, fill=ACCENT, anchor="middle")
+
+    # A long network name used to have half the page; over three columns the
+    # type shrinks to its column instead of running into the margin.
+    def col_w(cx):
+        half = min(cx - MARGIN, W - MARGIN - cx, pitch / 2 - 6)
+        return 2 * half
+
+    for cx, value, fill in ((cxs_qr[0], ssid, INK),
+                            (cxs_qr[1], f"{ip}/clip", ACCENT),
+                            (cxs_qr[2], ip, ACCENT)):
+        d.text(cx, y, value, size=fit_size(value, 21, 700, col_w(cx)),
+               weight=700, fill=fill, anchor="middle")
 
     y += 24 + 12 * air
     for i, lang in enumerate(langs):
