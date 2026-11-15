@@ -80,6 +80,8 @@ still come from spike S-1 on real hardware.
 | MT-6 | `curl -i "…/api/v1/clip?seconds=0"` (the UI no longer offers a length) | 422 problem+json with the limits | FR-11 |
 | MT-7 | Start a full-buffer download; while it runs, watch "dropped frames" in the status panel | Stays 0 during the export | FR-6 |
 | MT-11 | Click Download; immediately try to click again | Button reads "Preparing…" and is unclickable for a ~2 s grace period (the browser gives no signal when the download starts streaming, and streamed bytes arrive within ~1 s). A 503 (buffer empty / busy) surfaces as a toast and re-enables the button immediately | FR-5 |
+| MT-12 | Open `…/clip` (the poster QR's page) with nothing else running | The MP4 download starts without a tap; the page names the mirror, reports the download started, and "Download again" repeats it. On a phone, scan the printed code end to end | FR-19 |
+| MT-13 | Start a full-buffer download on the control page, then open `…/clip` while it runs | The page says the mirror is busy and keeps retrying by itself; once the first download finishes, the quick download starts with no further interaction | FR-19, FR-6 |
 
 Notes:
 - **Mirror flip (FR-2)** is applied by the SDL display renderer, *not* by the

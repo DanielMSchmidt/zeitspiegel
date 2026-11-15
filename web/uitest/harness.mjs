@@ -90,6 +90,9 @@ async function serveWeb() {
   const server = http.createServer(async (req, res) => {
     let name = new URL(req.url, "http://localhost").pathname;
     if (name === "/") name = "/index.html";
+    // The guest download page answers on the short path the poster's QR
+    // carries, mirroring the Go handler (web.Handler, UT-50).
+    if (name === "/clip") name = "/clip.html";
     const file = path.join(WEB_DIR, path.normalize(name).replace(/^(\.\.[/\\])+/, ""));
     if (!file.startsWith(WEB_DIR)) {
       res.writeHead(403).end("forbidden");
@@ -113,15 +116,19 @@ class Fleet {
   constructor(localOrigin, opts) {
     this.calls = [];
     this.units = new Map(); // origin -> unit
+    // `clip` is pulled out before the rest becomes the status body: a test
+    // declares the unit's export slot busy alongside its status, but it is
+    // the stub's own state, not part of the /status answer.
+    const { clip = null, ...localOpts } = opts.local || {};
     this.local = {
-      id: opts.local?.unit_id || "unit-a",
+      id: localOpts.unit_id || "unit-a",
       base: "", // same origin as the page
       origin: localOrigin,
-      status: status(opts.local || {}),
-      config: config(opts.local?.config || {}),
+      status: status(localOpts),
+      config: config(localOpts.config || {}),
       down: false,
       reject: null,
-      clip: null,
+      clip,
       // slowRead holds every GET /status open for this many ms, which is how
       // a test lands a read that was made before a write but arrives after
       // it.

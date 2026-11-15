@@ -10,7 +10,8 @@ movement training (dance, strength training, technique work).
 - Full-screen delayed mirror display on an HDMI screen (horizontally flipped,
   like a real mirror)
 - Delay adjustable at runtime from any phone/laptop via a web UI
-- Download the last *n* seconds as an MP4 from the web UI
+- Download the last *n* seconds as an MP4 from the web UI — or scan the
+  poster's QR code and the video downloads itself (`zeitspiegel.local/clip`)
 - Two or three mirrors share one Wi-Fi network and one page, each keeping its
   own delay. Every card carries the identical image: whichever unit is on
   first hosts the network, the rest join it, and if you unplug that one
